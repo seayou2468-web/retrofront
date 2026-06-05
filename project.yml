@@ -10,7 +10,7 @@ settings:
 packages: {}
 targets:
   CLibretroHost:
-    type: library.static
+    type: framework
     platform: iOS
     sources:
       - path: Sources/CLibretroHost
