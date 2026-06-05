@@ -1,0 +1,3 @@
+[submodule "Externals/retroarch-apple-deps"]
+	path = Externals/retroarch-apple-deps
+	url = https://github.com/warmenhoven/retroarch-apple-deps
