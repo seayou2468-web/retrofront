@@ -33,7 +33,7 @@ struct PlayerView: View {
             VStack { HStack { Button { showMenu = true } label: { Image(systemName: "line.3.horizontal.circle.fill").font(.largeTitle).symbolRenderingMode(.hierarchical) }.padding(); Spacer(); if session.fastForward { Label("FF", systemImage: "forward.fill").padding(8).background(.thinMaterial).clipShape(Capsule()) } }; Spacer() }
         }
         .navigationBarBackButtonHidden(true)
-        .task { await session.start(game: game, core: core, settings: model.settings) }
+        .task { await session.start(game: game, core: core, settings: model.settings, directories: await model.store?.directories) }
         .onDisappear { Task { await session.stop() } }
         .sheet(isPresented: $showMenu) { PauseMenu(session: session, game: game, core: core) }
     }
@@ -49,12 +49,14 @@ final class PlayerSession: ObservableObject {
     private let runtime = LibretroRuntime()
     private var task: Task<Void, Never>?
 
-    func start(game: Game, core: LibretroCore, settings: FrontendSettings) async {
+    func start(game: Game, core: LibretroCore, settings: FrontendSettings, directories: FrontendDirectories?) async {
         guard !isRunning else { return }
         do {
             runtime.onVideoFrame = { [weak self] frame in Task { @MainActor in self?.currentFrame = frame } }
             runtime.inputState = { [weak input] port, device, index, id in input?.state(port: port, device: device, index: index, id: id) ?? 0 }
-            try runtime.open(coreAt: core.path); try runtime.initialize(); try runtime.load(gameAt: game.fileURL, needsFullPath: core.requiresFullPath)
+            try runtime.open(coreAt: core.path)
+            if let directories { runtime.configureDirectories(system: directories.system, save: directories.saves, content: game.fileURL.deletingLastPathComponent()) }
+            try runtime.initialize(); try runtime.load(gameAt: game.fileURL, needsFullPath: core.requiresFullPath)
             isRunning = true
             task = Task.detached(priority: .userInitiated) { [runtime] in
                 while !Task.isCancelled { runtime.runFrame(); try? await Task.sleep(nanoseconds: 16_666_667) }

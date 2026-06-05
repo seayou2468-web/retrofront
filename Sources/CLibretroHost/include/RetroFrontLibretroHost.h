@@ -38,6 +38,13 @@ typedef struct RFFrameBuffer {
     unsigned pixel_format;
 } RFFrameBuffer;
 
+typedef struct RFCoreVariable {
+    const char *key;
+    const char *description;
+    const char *values;
+    const char *value;
+} RFCoreVariable;
+
 typedef void (*RFVideoFrameCallback)(const RFFrameBuffer *frame, void *context);
 typedef void (*RFAudioBatchCallback)(const int16_t *data, size_t frames, void *context);
 typedef int16_t (*RFInputStateCallback)(unsigned port, unsigned device, unsigned index, unsigned id, void *context);
@@ -48,6 +55,13 @@ void rf_core_close(RFCoreHandle *handle);
 bool rf_core_is_open(RFCoreHandle *handle);
 bool rf_core_init(RFCoreHandle *handle);
 void rf_core_deinit(RFCoreHandle *handle);
+void rf_core_set_directories(RFCoreHandle *handle,
+                             const char *system_directory,
+                             const char *save_directory,
+                             const char *content_directory);
+void rf_core_set_variable(RFCoreHandle *handle, const char *key, const char *value);
+size_t rf_core_variable_count(RFCoreHandle *handle);
+RFCoreVariable rf_core_get_variable(RFCoreHandle *handle, size_t index);
 RFSystemInfo rf_core_get_system_info(RFCoreHandle *handle);
 RFAVInfo rf_core_get_av_info(RFCoreHandle *handle);
 bool rf_core_load_game(RFCoreHandle *handle, const char *path, const void *data, size_t size);

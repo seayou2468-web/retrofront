@@ -32,3 +32,21 @@ final class RetroFrontCoreTests: XCTestCase {
         XCTAssertEqual(games.first?.systemID, "nes")
     }
 }
+
+extension RetroFrontCoreTests {
+    func testDynamicCoreManagerPlansUnsignedImport() async throws {
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        let core = temp.appendingPathComponent("example_libretro_ios.dylib")
+        try Data("not a signed mach-o".utf8).write(to: core)
+        let plan = DynamicCoreManager().installPlan(for: core, directories: FrontendDirectories(root: temp))
+        XCTAssertEqual(plan.status, .importedUnsigned)
+        XCTAssertEqual(plan.destination.lastPathComponent, "example_libretro_ios.dylib")
+    }
+
+    func testFeatureMatrixDocumentsDynamicCoresAndMenuEngines() {
+        let ids = Set(FrontendFeatureMatrix.capabilities.map(\.id))
+        XCTAssertTrue(ids.contains("dynamic-cores"))
+        XCTAssertTrue(ids.contains("menu-engines"))
+    }
+}

@@ -34,6 +34,11 @@ public struct LibraryScanner: Sendable {
         var cores: [LibretroCore] = []
         let coreExtensions = ["dylib", "framework", "so"]
         for case let file as URL in enumerator where coreExtensions.contains(file.pathExtension.lowercased()) {
+            let infoURL = file.deletingPathExtension().appendingPathExtension("info")
+            if let infoData = try? Data(contentsOf: infoURL), let infoText = String(data: infoData, encoding: .utf8) {
+                cores.append(CoreInfoParser().parseInfo(infoText, coreURL: file))
+                continue
+            }
             let name = file.deletingPathExtension().lastPathComponent
             let inferred = inferSystems(fromCoreName: name)
             cores.append(LibretroCore(displayName: prettifyCoreName(name), bundleIdentifier: name, systemIDs: inferred.map(\.id), path: file, supportedExtensions: Array(Set(inferred.flatMap(\.fileExtensions))).sorted()))
@@ -47,7 +52,11 @@ public struct LibraryScanner: Sendable {
         for file in files {
             let ext = file.pathExtension.lowercased()
             let destinationRoot: URL
-            if ["dylib", "framework", "so"].contains(ext) { destinationRoot = directories.cores }
+            if ["dylib", "framework", "so"].contains(ext) {
+                _ = try DynamicCoreManager().installCore(from: file, directories: directories)
+                imported.append(directories.cores.appendingPathComponent(file.lastPathComponent))
+                continue
+            }
             else if ["png", "jpg", "jpeg", "webp"].contains(ext) { destinationRoot = directories.artwork }
             else { destinationRoot = directories.roms }
             let destination = destinationRoot.appendingPathComponent(file.lastPathComponent)

@@ -8,6 +8,13 @@
 #include <dlfcn.h>
 #endif
 
+typedef struct RFVariableEntry {
+    char *key;
+    char *description;
+    char *values;
+    char *value;
+} RFVariableEntry;
+
 struct RFCoreHandle {
 #if defined(_WIN32)
     HMODULE dylib;
@@ -37,10 +44,103 @@ struct RFCoreHandle {
     RFInputStateCallback input;
     RFLogCallback log;
     void *context;
+    char *system_directory;
+    char *save_directory;
+    char *content_directory;
+    RFVariableEntry variables[256];
+    size_t variable_count;
     char last_error[512];
 };
 
 static RFCoreHandle *active_handle;
+
+static char *rf_strdup(const char *value) {
+    if (!value) return NULL;
+    size_t length = strlen(value) + 1;
+    char *copy = (char *)malloc(length);
+    if (copy) memcpy(copy, value, length);
+    return copy;
+}
+
+static RFVariableEntry *rf_find_variable(RFCoreHandle *h, const char *key) {
+    if (!h || !key) return NULL;
+    for (size_t i = 0; i < h->variable_count; i++) {
+        if (h->variables[i].key && strcmp(h->variables[i].key, key) == 0) return &h->variables[i];
+    }
+    return NULL;
+}
+
+static RFVariableEntry *rf_get_or_create_variable(RFCoreHandle *h, const char *key) {
+    RFVariableEntry *existing = rf_find_variable(h, key);
+    if (existing) return existing;
+    if (!h || !key || h->variable_count >= (sizeof(h->variables) / sizeof(h->variables[0]))) return NULL;
+    RFVariableEntry *entry = &h->variables[h->variable_count++];
+    memset(entry, 0, sizeof(*entry));
+    entry->key = rf_strdup(key);
+    return entry;
+}
+
+static void rf_replace_string(char **slot, const char *value) {
+    if (*slot) free(*slot);
+    *slot = rf_strdup(value);
+}
+
+static void rf_register_legacy_variable(RFCoreHandle *h, const struct retro_variable *variable) {
+    if (!h || !variable || !variable->key || !variable->value) return;
+    RFVariableEntry *entry = rf_get_or_create_variable(h, variable->key);
+    if (!entry) return;
+    const char *separator = strstr(variable->value, ";");
+    if (separator) {
+        size_t description_length = (size_t)(separator - variable->value);
+        char *description = (char *)calloc(description_length + 1, 1);
+        if (description) {
+            memcpy(description, variable->value, description_length);
+            rf_replace_string(&entry->description, description);
+            free(description);
+        }
+        const char *values = separator + 1;
+        while (*values == ' ') values++;
+        rf_replace_string(&entry->values, values);
+        if (!entry->value || !entry->value[0]) {
+            char *first = rf_strdup(values);
+            if (first) {
+                char *pipe = strchr(first, '|');
+                if (pipe) *pipe = '\0';
+                rf_replace_string(&entry->value, first);
+                free(first);
+            }
+        }
+    } else {
+        rf_replace_string(&entry->description, variable->value);
+    }
+}
+
+static void rf_register_core_options_v1(RFCoreHandle *h, const struct retro_core_option_definition *option) {
+    if (!h || !option || !option->key) return;
+    RFVariableEntry *entry = rf_get_or_create_variable(h, option->key);
+    if (!entry) return;
+    rf_replace_string(&entry->description, option->desc ? option->desc : option->key);
+    size_t total = 1;
+    for (size_t i = 0; i < 128 && option->values[i].value; i++) total += strlen(option->values[i].value) + 1;
+    char *values = (char *)calloc(total, 1);
+    if (values) {
+        for (size_t i = 0; i < 128 && option->values[i].value; i++) {
+            if (i > 0) strcat(values, "|");
+            strcat(values, option->values[i].value);
+        }
+        rf_replace_string(&entry->values, values);
+        free(values);
+    }
+    rf_replace_string(&entry->value, option->default_value ? option->default_value : (option->values[0].value ? option->values[0].value : ""));
+}
+
+static bool rf_get_variable_value(RFCoreHandle *h, struct retro_variable *variable) {
+    if (!h || !variable || !variable->key) return false;
+    RFVariableEntry *entry = rf_find_variable(h, variable->key);
+    if (!entry || !entry->value) return false;
+    variable->value = entry->value;
+    return true;
+}
 
 static void rf_set_error(RFCoreHandle *h, const char *message) {
     if (!h) return;
@@ -63,18 +163,43 @@ static void *rf_symbol(RFCoreHandle *h, const char *name) {
 }
 
 static bool rf_environment(unsigned cmd, void *data) {
+    RFCoreHandle *h = active_handle;
     switch (cmd) {
         case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT:
         case RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS:
         case RETRO_ENVIRONMENT_SET_CONTROLLER_INFO:
         case RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME:
-        case RETRO_ENVIRONMENT_SET_VARIABLES:
-        case RETRO_ENVIRONMENT_SET_CORE_OPTIONS:
+            return true;
+        case RETRO_ENVIRONMENT_SET_VARIABLES: {
+            const struct retro_variable *variables = (const struct retro_variable *)data;
+            if (!variables) return true;
+            for (size_t i = 0; variables[i].key; i++) rf_register_legacy_variable(h, &variables[i]);
+            return true;
+        }
+        case RETRO_ENVIRONMENT_SET_CORE_OPTIONS: {
+            const struct retro_core_option_definition *options = (const struct retro_core_option_definition *)data;
+            if (!options) return true;
+            for (size_t i = 0; options[i].key; i++) rf_register_core_options_v1(h, &options[i]);
+            return true;
+        }
+        case RETRO_ENVIRONMENT_GET_VARIABLE:
+            return rf_get_variable_value(h, (struct retro_variable *)data);
+        case RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE:
+            *(bool *)data = false;
+            return true;
+        case RETRO_ENVIRONMENT_SET_MESSAGE: {
+            const struct retro_message *message = (const struct retro_message *)data;
+            if (h && h->log && message && message->msg) h->log(message->msg, h->context);
+            return true;
+        }
+        case RETRO_ENVIRONMENT_SET_MESSAGE_EXT: {
+            const struct retro_message_ext *message = (const struct retro_message_ext *)data;
+            if (h && h->log && message && message->msg) h->log(message->msg, h->context);
+            return true;
+        }
         case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_INTL:
         case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2:
         case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2_INTL:
-        case RETRO_ENVIRONMENT_SET_MESSAGE:
-        case RETRO_ENVIRONMENT_SET_MESSAGE_EXT:
             return true;
         case RETRO_ENVIRONMENT_GET_CAN_DUPE:
             *(bool *)data = true;
@@ -82,9 +207,13 @@ static bool rf_environment(unsigned cmd, void *data) {
         case RETRO_ENVIRONMENT_GET_LOG_INTERFACE:
             return false;
         case RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY:
+            *(const char **)data = h ? h->save_directory : NULL;
+            return true;
         case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
+            *(const char **)data = h ? h->system_directory : NULL;
+            return true;
         case RETRO_ENVIRONMENT_GET_CONTENT_DIRECTORY:
-            *(const char **)data = NULL;
+            *(const char **)data = h ? h->content_directory : NULL;
             return true;
         default:
             return false;
@@ -144,6 +273,15 @@ RFCoreHandle *rf_core_open(const char *path, RFLogCallback log, void *context) {
 
 void rf_core_close(RFCoreHandle *h) {
     if (!h) return;
+    for (size_t i = 0; i < h->variable_count; i++) {
+        free(h->variables[i].key);
+        free(h->variables[i].description);
+        free(h->variables[i].values);
+        free(h->variables[i].value);
+    }
+    free(h->system_directory);
+    free(h->save_directory);
+    free(h->content_directory);
     if (h->dylib) {
 #if defined(_WIN32)
         FreeLibrary(h->dylib);
@@ -174,6 +312,31 @@ bool rf_core_init(RFCoreHandle *h) {
 }
 
 void rf_core_deinit(RFCoreHandle *h) { if (rf_core_is_open(h)) h->retro_deinit(); }
+
+void rf_core_set_directories(RFCoreHandle *h, const char *system_directory, const char *save_directory, const char *content_directory) {
+    if (!h) return;
+    rf_replace_string(&h->system_directory, system_directory);
+    rf_replace_string(&h->save_directory, save_directory);
+    rf_replace_string(&h->content_directory, content_directory);
+}
+
+void rf_core_set_variable(RFCoreHandle *h, const char *key, const char *value) {
+    RFVariableEntry *entry = rf_get_or_create_variable(h, key);
+    if (entry) rf_replace_string(&entry->value, value);
+}
+
+size_t rf_core_variable_count(RFCoreHandle *h) { return h ? h->variable_count : 0; }
+
+RFCoreVariable rf_core_get_variable(RFCoreHandle *h, size_t index) {
+    RFCoreVariable out = {0};
+    if (!h || index >= h->variable_count) return out;
+    RFVariableEntry *entry = &h->variables[index];
+    out.key = entry->key;
+    out.description = entry->description;
+    out.values = entry->values;
+    out.value = entry->value;
+    return out;
+}
 
 RFSystemInfo rf_core_get_system_info(RFCoreHandle *h) {
     RFSystemInfo out = {0};

@@ -1,33 +1,22 @@
 # RetroFront
 
-RetroFront is an iOS-first SwiftUI frontend for bundled libretro cores. It provides the application shell expected from a modern multi-emulator frontend: library import/scanning, system-aware game organization, core management, save states, cheats, touch/controller play UI, video/latency settings, BIOS/artwork directories, and a C bridge that hosts libretro-compatible dynamic cores.
+RetroFront is an iOS-first SwiftUI frontend for libretro/RetroArch-style emulation. It provides a native library UI, ROM/core import, local metadata, save-state plumbing, and a C libretro host that loads signed dynamic cores through `dlopen`/`dlsym`.
 
-## Features
+## iOS dynamic core policy
 
-- **Game library**: ROM import, recursive scanning, CRC32 identification, favorites, search, system shelves, artwork matching, playlists, and per-system filtering.
-- **Core management**: scans bundled/imported `.dylib`, `.framework`, and `.so` libretro cores; parses `.info` metadata; maps cores to supported systems and extensions.
-- **iOS play screen**: SwiftUI player shell with pause menu, touch overlay, controller-state abstraction, fast-forward toggle, reset, shader/aspect-ratio menu entries, netplay and RetroAchievements entry points.
-- **Persistence**: JSON-backed library, cores, settings, cheats, and save-state metadata under the app Documents directory.
-- **libretro bridge**: `CLibretroHost` loads a core, checks the libretro API version, wires video/audio/input/environment callbacks, runs frames, and serializes save states using the bundled `libretro.h` API.
-- **Frontend services**: ROM/core scanner, BIOS audit, local artwork attachment, RetroArch playlist parser, core info parser, and test coverage for core utilities.
+On iOS, runtime executable loading is controlled by code signing and distribution policy. Developer or sideloaded builds can import cores that are already signed for the host app. App Store builds must ship executable cores in the app bundle or through an Apple-approved signed update; the app cannot download and execute arbitrary new code after review.
 
-## Project layout
+## Build options
 
-```text
-Sources/CLibretroHost       C libretro host bridge using Externals/libretro-common/include/libretro.h
-Sources/RetroFrontCore      Models, catalog, scanning, persistence, parsers, libretro runtime wrapper
-Sources/RetroFrontiOS       SwiftUI iOS app shell and player/frontend UI
-Tests/RetroFrontCoreTests   Unit tests for catalog, CRC32, playlist parsing, and core info parsing
-```
+- `swift test` validates the Swift Package targets on platforms where SwiftPM is convenient.
+- `xcodegen generate` creates the Xcode project from `project.yml` for native iOS signing, capabilities, and archive workflows.
 
-## Build and test
+## Documents layout
 
-```sh
-swift test
-```
-
-On macOS, open the Swift package in Xcode and run the `RetroFrontiOS` app target on an iOS 17+ device/simulator. Add ROMs to `Documents/ROMs`, BIOS files to `Documents/System`, artwork to `Documents/Artwork`, and bundled libretro cores to `Documents/Cores` or import them via the app.
-
-## Legal note
-
-RetroFront does not include commercial games or BIOS files. Users must provide legally obtained content and firmware. RetroFront is not affiliated with console manufacturers, RetroArch, or Libretro.
+- `ROMs/` content files
+- `Cores/` signed `.dylib`, `.framework`, or `.so` libretro cores
+- `System/` BIOS and firmware files
+- `Saves/` SRAM/memory-card files
+- `States/` save states
+- `Artwork/` local covers and screenshots
+- `Shaders/`, `Overlays/`, `Playlists/` frontend assets

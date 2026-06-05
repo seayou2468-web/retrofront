@@ -58,6 +58,67 @@ public struct CoreOption: Identifiable, Codable, Hashable, Sendable {
     public var detail: String
     public var values: [String]
     public var defaultValue: String
+
+    public init(key: String, title: String, detail: String = "", values: [String] = [], defaultValue: String = "") {
+        self.key = key
+        self.title = title
+        self.detail = detail
+        self.values = values
+        self.defaultValue = defaultValue
+    }
+}
+
+
+public enum CoreInstallStatus: String, Codable, Hashable, Sendable {
+    case bundled
+    case importedSigned
+    case importedUnsigned
+    case missingEntitlement
+    case unavailableOnAppStore
+}
+
+public struct CoreInstallPlan: Identifiable, Codable, Hashable, Sendable {
+    public var id: String { destination.lastPathComponent }
+    public var source: URL
+    public var destination: URL
+    public var displayName: String
+    public var status: CoreInstallStatus
+    public var notes: [String]
+
+    public init(source: URL, destination: URL, displayName: String, status: CoreInstallStatus, notes: [String] = []) {
+        self.source = source
+        self.destination = destination
+        self.displayName = displayName
+        self.status = status
+        self.notes = notes
+    }
+}
+
+public struct FrontendCapability: Identifiable, Codable, Hashable, Sendable {
+    public enum ImplementationState: String, Codable, Sendable { case complete, platformGated, externalService, unavailable }
+    public var id: String
+    public var title: String
+    public var detail: String
+    public var state: ImplementationState
+}
+
+public enum MenuEngine: String, CaseIterable, Identifiable, Codable, Sendable {
+    case nativeSwiftUI
+    case ozone
+    case xmb
+    case rgui
+    case materialui
+
+    public var id: String { rawValue }
+    public var displayName: String {
+        switch self {
+        case .nativeSwiftUI: return "Native SwiftUI"
+        case .ozone: return "RetroArch Ozone"
+        case .xmb: return "RetroArch XMB"
+        case .rgui: return "RetroArch RGUI"
+        case .materialui: return "RetroArch MaterialUI"
+        }
+    }
 }
 
 public struct Game: Identifiable, Codable, Hashable, Sendable {
@@ -121,11 +182,14 @@ public struct FrontendSettings: Codable, Hashable, Sendable {
     public var retroAchievementsUser: String
     public var iCloudSyncEnabled: Bool
     public var autoSaveOnBackground: Bool
+    public var menuEngine: MenuEngine
+    public var allowImportedDynamicCores: Bool
 
-    public init(shaderPreset: String = "LCD + subtle CRT", integerScaling: Bool = false, aspectRatio: AspectRatioMode = .coreProvided, rewindEnabled: Bool = true, runaheadFrames: Int = 0, fastForwardRate: Double = 2, hapticsEnabled: Bool = true, retroAchievementsUser: String = "", iCloudSyncEnabled: Bool = true, autoSaveOnBackground: Bool = true) {
+    public init(shaderPreset: String = "LCD + subtle CRT", integerScaling: Bool = false, aspectRatio: AspectRatioMode = .coreProvided, rewindEnabled: Bool = true, runaheadFrames: Int = 0, fastForwardRate: Double = 2, hapticsEnabled: Bool = true, retroAchievementsUser: String = "", iCloudSyncEnabled: Bool = true, autoSaveOnBackground: Bool = true, menuEngine: MenuEngine = .nativeSwiftUI, allowImportedDynamicCores: Bool = true) {
         self.shaderPreset = shaderPreset; self.integerScaling = integerScaling; self.aspectRatio = aspectRatio; self.rewindEnabled = rewindEnabled
         self.runaheadFrames = runaheadFrames; self.fastForwardRate = fastForwardRate; self.hapticsEnabled = hapticsEnabled; self.retroAchievementsUser = retroAchievementsUser
         self.iCloudSyncEnabled = iCloudSyncEnabled; self.autoSaveOnBackground = autoSaveOnBackground
+        self.menuEngine = menuEngine; self.allowImportedDynamicCores = allowImportedDynamicCores
     }
 }
 

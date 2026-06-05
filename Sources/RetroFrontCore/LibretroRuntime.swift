@@ -61,7 +61,29 @@ public final class LibretroRuntime: @unchecked Sendable {
         }, retainedSelf?.toOpaque())
     }
 
+    public func configureDirectories(system: URL?, save: URL?, content: URL?) {
+        rf_core_set_directories(handle, system?.path, save?.path, content?.path)
+    }
+
+    public func setCoreOption(key: String, value: String) {
+        rf_core_set_variable(handle, key, value)
+    }
+
     public func initialize() throws { guard rf_core_init(handle) else { throw RuntimeError.initializationFailed(lastError) } }
+
+    public func discoveredOptions() -> [CoreOption] {
+        let count = rf_core_variable_count(handle)
+        guard count > 0 else { return [] }
+        return (0..<count).compactMap { index in
+            let variable = rf_core_get_variable(handle, index)
+            guard let keyPointer = variable.key else { return nil }
+            let key = String(cString: keyPointer)
+            let title = variable.description.map(String.init(cString:)) ?? key
+            let values = (variable.values.map(String.init(cString:)) ?? "").split(separator: "|").map(String.init)
+            let defaultValue = variable.value.map(String.init(cString:)) ?? values.first ?? ""
+            return CoreOption(key: key, title: title, values: values, defaultValue: defaultValue)
+        }
+    }
     public func systemInfo() -> CoreSystemInfo {
         let info = rf_core_get_system_info(handle)
         return CoreSystemInfo(name: info.library_name.map(String.init(cString:)) ?? "Unknown", version: info.library_version.map(String.init(cString:)) ?? "", validExtensions: (info.valid_extensions.map(String.init(cString:)) ?? "").split(separator: "|").map(String.init), needsFullPath: info.need_fullpath)
