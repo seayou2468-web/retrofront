@@ -50,6 +50,7 @@ struct RFCoreHandle {
     RFVariableEntry variables[256];
     size_t variable_count;
     char last_error[512];
+    unsigned pixel_format;
 };
 
 static RFCoreHandle *active_handle;
@@ -166,6 +167,8 @@ static bool rf_environment(unsigned cmd, void *data) {
     RFCoreHandle *h = active_handle;
     switch (cmd) {
         case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT:
+            if (h && data) h->pixel_format = *(const unsigned *)data;
+            return true;
         case RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS:
         case RETRO_ENVIRONMENT_SET_CONTROLLER_INFO:
         case RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME:
@@ -222,7 +225,7 @@ static bool rf_environment(unsigned cmd, void *data) {
 
 static void rf_video(const void *data, unsigned width, unsigned height, size_t pitch) {
     if (!active_handle || !active_handle->video) return;
-    RFFrameBuffer frame = { data, width, height, pitch, 0 };
+    RFFrameBuffer frame = { data, width, height, pitch, active_handle->pixel_format };
     active_handle->video(&frame, active_handle->context);
 }
 

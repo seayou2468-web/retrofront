@@ -62,8 +62,10 @@ public enum FrontendFeatureMatrix {
         FrontendCapability(id: "library", title: "ROM library, playlists, artwork, CRC scanning", detail: "Local scanner imports ROMs, LPL playlists and side-loaded artwork.", state: .complete),
         FrontendCapability(id: "dynamic-cores", title: "Signed libretro dynamic core loading", detail: "The C host uses dlopen/dlsym for libretro cores and the Swift manager imports user-supplied signed modules into Documents/Cores.", state: .complete),
         FrontendCapability(id: "menu-engines", title: "Native and RetroArch menu engine selection", detail: "SwiftUI exposes a native frontend and records Ozone/XMB/RGUI/MaterialUI preferences for builds that link the full RetroArch renderer.", state: .platformGated),
-        FrontendCapability(id: "states", title: "Save states", detail: "Serialization and unserialization are available for cores that implement libretro state support.", state: .complete),
+        FrontendCapability(id: "states", title: "Save states, auto-save and rewind", detail: "Serialization, quick slots, auto-save files and a bounded rewind buffer are available for cores that implement libretro state support.", state: .complete),
+        FrontendCapability(id: "input", title: "Touch, MFi and controller input", detail: "The player maps touch controls and GameController hardware pads to standard libretro joypad IDs.", state: .complete),
+        FrontendCapability(id: "patches-cheats", title: "Soft patches and cheats", detail: "IPS patches with matching ROM base names are applied before launch, and per-game cheat records are persisted in the library store.", state: .complete),
         FrontendCapability(id: "ios-jit", title: "JIT/dynarec cores", detail: "JIT availability is controlled by iOS signing and external enablers; the frontend detects and reports this platform gate rather than bypassing iOS security.", state: .platformGated),
-        FrontendCapability(id: "netplay-achievements", title: "Netplay and RetroAchievements", detail: "Account and room models are present; real service integration requires network credentials and service-specific APIs.", state: .externalService)
+        FrontendCapability(id: "netplay-achievements", title: "Netplay and RetroAchievements", detail: "Settings persist host/account information; real service sessions require network credentials and service-specific APIs.", state: .externalService)
     ]
 }

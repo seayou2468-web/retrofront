@@ -22,7 +22,16 @@ public struct VideoFrame: Sendable {
     public var width: Int
     public var height: Int
     public var pitch: Int
+    public var pixelFormat: UInt32
     public var bytes: Data
+
+    public init(width: Int, height: Int, pitch: Int, pixelFormat: UInt32, bytes: Data) {
+        self.width = width
+        self.height = height
+        self.pitch = pitch
+        self.pixelFormat = pixelFormat
+        self.bytes = bytes
+    }
 }
 
 public final class LibretroRuntime: @unchecked Sendable {
@@ -49,7 +58,7 @@ public final class LibretroRuntime: @unchecked Sendable {
             guard let frame, let context, let data = frame.pointee.data else { return }
             let runtime = Unmanaged<LibretroRuntime>.fromOpaque(context).takeUnretainedValue()
             let byteCount = Int(frame.pointee.pitch) * Int(frame.pointee.height)
-            runtime.onVideoFrame?(VideoFrame(width: Int(frame.pointee.width), height: Int(frame.pointee.height), pitch: Int(frame.pointee.pitch), bytes: Data(bytes: data, count: byteCount)))
+            runtime.onVideoFrame?(VideoFrame(width: Int(frame.pointee.width), height: Int(frame.pointee.height), pitch: Int(frame.pointee.pitch), pixelFormat: UInt32(frame.pointee.pixel_format), bytes: Data(bytes: data, count: byteCount)))
         }, { samples, frames, context in
             guard let samples, let context else { return }
             let runtime = Unmanaged<LibretroRuntime>.fromOpaque(context).takeUnretainedValue()

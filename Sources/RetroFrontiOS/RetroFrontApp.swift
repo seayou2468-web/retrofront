@@ -16,6 +16,7 @@ public final class FrontendViewModel: ObservableObject {
     @Published public var games: [Game] = []
     @Published public var cores: [LibretroCore] = []
     @Published public var saveStates: [SaveState] = []
+    @Published public var cheats: [CheatCode] = []
     @Published public var settings = FrontendSettings()
     @Published public var searchText = ""
     @Published public var selectedSystemID: String?
@@ -37,7 +38,7 @@ public final class FrontendViewModel: ObservableObject {
 
     public func refresh() async {
         guard let store else { return }
-        games = await store.games; cores = await store.cores; saveStates = await store.saveStates; settings = await store.settings
+        games = await store.games; cores = await store.cores; saveStates = await store.saveStates; cheats = await store.cheats; settings = await store.settings
     }
 
     public func scanAll() async {
@@ -63,6 +64,16 @@ public final class FrontendViewModel: ObservableObject {
     public func update(settings: FrontendSettings) async {
         guard let store else { return }
         do { try await store.update(settings: settings); await refresh() } catch { alertMessage = error.localizedDescription }
+    }
+
+    public func upsert(cheat: CheatCode) async {
+        guard let store else { return }
+        do { try await store.update(cheat: cheat); await refresh() } catch { alertMessage = error.localizedDescription }
+    }
+
+    public func delete(cheatID: UUID) async {
+        guard let store else { return }
+        do { try await store.delete(cheatID: cheatID); await refresh() } catch { alertMessage = error.localizedDescription }
     }
 }
 

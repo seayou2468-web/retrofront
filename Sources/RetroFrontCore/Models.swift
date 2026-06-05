@@ -173,23 +173,27 @@ public struct NetplayRoom: Identifiable, Codable, Hashable, Sendable {
 
 public struct FrontendSettings: Codable, Hashable, Sendable {
     public var shaderPreset: String
+    public var overlayPreset: String
     public var integerScaling: Bool
     public var aspectRatio: AspectRatioMode
     public var rewindEnabled: Bool
+    public var rewindBufferSeconds: Int
     public var runaheadFrames: Int
     public var fastForwardRate: Double
     public var hapticsEnabled: Bool
     public var retroAchievementsUser: String
+    public var retroAchievementsToken: String
     public var iCloudSyncEnabled: Bool
     public var autoSaveOnBackground: Bool
     public var menuEngine: MenuEngine
     public var allowImportedDynamicCores: Bool
+    public var netplay: NetplayConfiguration
 
-    public init(shaderPreset: String = "LCD + subtle CRT", integerScaling: Bool = false, aspectRatio: AspectRatioMode = .coreProvided, rewindEnabled: Bool = true, runaheadFrames: Int = 0, fastForwardRate: Double = 2, hapticsEnabled: Bool = true, retroAchievementsUser: String = "", iCloudSyncEnabled: Bool = true, autoSaveOnBackground: Bool = true, menuEngine: MenuEngine = .nativeSwiftUI, allowImportedDynamicCores: Bool = true) {
-        self.shaderPreset = shaderPreset; self.integerScaling = integerScaling; self.aspectRatio = aspectRatio; self.rewindEnabled = rewindEnabled
-        self.runaheadFrames = runaheadFrames; self.fastForwardRate = fastForwardRate; self.hapticsEnabled = hapticsEnabled; self.retroAchievementsUser = retroAchievementsUser
+    public init(shaderPreset: String = "LCD + subtle CRT", overlayPreset: String = "Auto", integerScaling: Bool = false, aspectRatio: AspectRatioMode = .coreProvided, rewindEnabled: Bool = true, rewindBufferSeconds: Int = 30, runaheadFrames: Int = 0, fastForwardRate: Double = 2, hapticsEnabled: Bool = true, retroAchievementsUser: String = "", retroAchievementsToken: String = "", iCloudSyncEnabled: Bool = true, autoSaveOnBackground: Bool = true, menuEngine: MenuEngine = .nativeSwiftUI, allowImportedDynamicCores: Bool = true, netplay: NetplayConfiguration = .init()) {
+        self.shaderPreset = shaderPreset; self.overlayPreset = overlayPreset; self.integerScaling = integerScaling; self.aspectRatio = aspectRatio; self.rewindEnabled = rewindEnabled
+        self.rewindBufferSeconds = rewindBufferSeconds; self.runaheadFrames = runaheadFrames; self.fastForwardRate = fastForwardRate; self.hapticsEnabled = hapticsEnabled; self.retroAchievementsUser = retroAchievementsUser; self.retroAchievementsToken = retroAchievementsToken
         self.iCloudSyncEnabled = iCloudSyncEnabled; self.autoSaveOnBackground = autoSaveOnBackground
-        self.menuEngine = menuEngine; self.allowImportedDynamicCores = allowImportedDynamicCores
+        self.menuEngine = menuEngine; self.allowImportedDynamicCores = allowImportedDynamicCores; self.netplay = netplay
     }
 }
 

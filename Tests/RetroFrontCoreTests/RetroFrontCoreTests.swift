@@ -50,3 +50,21 @@ extension RetroFrontCoreTests {
         XCTAssertTrue(ids.contains("menu-engines"))
     }
 }
+
+extension RetroFrontCoreTests {
+    func testIPSSoftPatchAppliesNormalAndRLERecords() throws {
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        let patch = temp.appendingPathComponent("game.ips")
+        var patchData = Data("PATCH".utf8)
+        patchData.append(contentsOf: [0x00, 0x00, 0x01, 0x00, 0x02, 0xAA, 0xBB])
+        patchData.append(contentsOf: [0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x03, 0xCC])
+        patchData.append(contentsOf: [0x45, 0x4F, 0x46])
+        try patchData.write(to: patch)
+        var rom = Data([0, 0, 0, 0, 0, 0, 0])
+
+        try SoftPatchManager().applyIPS(patchURL: patch, to: &rom)
+
+        XCTAssertEqual(Array(rom), [0, 0xAA, 0xBB, 0, 0xCC, 0xCC, 0xCC])
+    }
+}

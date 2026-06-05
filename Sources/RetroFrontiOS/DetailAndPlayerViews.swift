@@ -1,6 +1,7 @@
 #if canImport(SwiftUI)
 import SwiftUI
 import GameController
+import CoreGraphics
 import RetroFrontCore
 
 struct GameDetailView: View {
@@ -15,7 +16,7 @@ struct GameDetailView: View {
                 if compatibleCores.isEmpty { ContentUnavailableView("No compatible core", systemImage: "cpu", description: Text("Import a bundled libretro core that supports .\(game.fileURL.pathExtension).")) }
             }
             Section("Metadata") { LabeledContent("Path", value: game.fileURL.lastPathComponent); LabeledContent("CRC32", value: game.crc32 ?? "Unknown"); LabeledContent("Play time", value: game.playTime.formatted()) }
-            Section("Cheats & patches") { NavigationLink("Cheat codes") { CheatsView(game: game) }; NavigationLink("Soft patches") { Text("Place IPS/BPS/UPS patches next to the ROM with the same base name.") } }
+            Section("Cheats & patches") { NavigationLink("Cheat codes") { CheatsView(game: game) }; NavigationLink("Soft patches") { SoftPatchInfoView(game: game) } }
         }.navigationTitle(game.title).navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -28,14 +29,14 @@ struct PlayerView: View {
     @State private var showMenu = false
     var body: some View {
         ZStack {
-            FrameView(frame: session.currentFrame).ignoresSafeArea().background(.black)
-            TouchOverlay(input: session.input).ignoresSafeArea()
+            FrameView(frame: session.currentFrame, settings: model.settings).ignoresSafeArea().background(.black)
+            TouchOverlay(input: session.input, preset: model.settings.overlayPreset).ignoresSafeArea()
             VStack { HStack { Button { showMenu = true } label: { Image(systemName: "line.3.horizontal.circle.fill").font(.largeTitle).symbolRenderingMode(.hierarchical) }.padding(); Spacer(); if session.fastForward { Label("FF", systemImage: "forward.fill").padding(8).background(.thinMaterial).clipShape(Capsule()) } }; Spacer() }
         }
         .navigationBarBackButtonHidden(true)
-        .task { await session.start(game: game, core: core, settings: model.settings, directories: await model.store?.directories) }
-        .onDisappear { Task { await session.stop() } }
-        .sheet(isPresented: $showMenu) { PauseMenu(session: session, game: game, core: core) }
+        .task { await session.start(game: game, core: core, settings: model.settings, store: model.store) }
+        .onDisappear { Task { await session.stop(store: model.store, gameID: game.id) } }
+        .sheet(isPresented: $showMenu) { PauseMenu(session: session, game: game, core: core, store: model.store) }
     }
 }
 
@@ -45,28 +46,88 @@ final class PlayerSession: ObservableObject {
     @Published var isRunning = false
     @Published var fastForward = false
     @Published var log: [String] = []
+    @Published var stateSlot = 0
     let input = ControllerInputState()
     private let runtime = LibretroRuntime()
     private var task: Task<Void, Never>?
+    private var controllerTask: Task<Void, Never>?
+    private var rewindTask: Task<Void, Never>?
+    private var rewindBuffer: [Data] = []
+    private var startDate = Date()
+    private var settings = FrontendSettings()
+    private var directories: FrontendDirectories?
 
-    func start(game: Game, core: LibretroCore, settings: FrontendSettings, directories: FrontendDirectories?) async {
+    func start(game: Game, core: LibretroCore, settings: FrontendSettings, store: LibraryStore?) async {
         guard !isRunning else { return }
+        self.settings = settings
+        self.directories = await store?.directories
         do {
             runtime.onVideoFrame = { [weak self] frame in Task { @MainActor in self?.currentFrame = frame } }
+            runtime.onAudio = { _, _ in }
             runtime.inputState = { [weak input] port, device, index, id in input?.state(port: port, device: device, index: index, id: id) ?? 0 }
             try runtime.open(coreAt: core.path)
             if let directories { runtime.configureDirectories(system: directories.system, save: directories.saves, content: game.fileURL.deletingLastPathComponent()) }
-            try runtime.initialize(); try runtime.load(gameAt: game.fileURL, needsFullPath: core.requiresFullPath)
-            isRunning = true
-            task = Task.detached(priority: .userInitiated) { [runtime] in
-                while !Task.isCancelled { runtime.runFrame(); try? await Task.sleep(nanoseconds: 16_666_667) }
+            try runtime.initialize()
+            let patchResult = try directories.map { try SoftPatchManager().preparedContentURL(for: game, workDirectory: $0.imports) }
+            patchResult?.messages.forEach { log.append($0) }
+            try runtime.load(gameAt: patchResult?.patchedURL ?? game.fileURL, needsFullPath: core.requiresFullPath)
+            isRunning = true; startDate = Date(); startControllerPolling(); startRewindCapture()
+            let frameInterval = max(1_000_000, UInt64(1_000_000_000 / max(runtime.avInfo().fps, 30)))
+            task = Task.detached(priority: .userInitiated) { [weak self, runtime] in
+                while !Task.isCancelled {
+                    runtime.runFrame()
+                    let speed = await MainActor.run { self?.fastForward == true ? max(self?.settings.fastForwardRate ?? 2, 1) : 1 }
+                    try? await Task.sleep(nanoseconds: UInt64(Double(frameInterval) / speed))
+                }
             }
         } catch { log.append(error.localizedDescription) }
     }
-    func stop() async { task?.cancel(); runtime.unloadGame(); runtime.close(); isRunning = false }
+
+    func stop(store: LibraryStore?, gameID: UUID) async {
+        task?.cancel(); controllerTask?.cancel(); rewindTask?.cancel()
+        if settings.autoSaveOnBackground, let directories { try? quickSave(gameID: gameID, coreID: UUID(), directories: directories, slot: 99) }
+        runtime.unloadGame(); runtime.close(); isRunning = false
+        try? await store?.markPlayed(gameID: gameID, additionalPlayTime: Date().timeIntervalSince(startDate))
+    }
     func reset() { runtime.reset() }
     func saveState(to url: URL) throws { try runtime.serialize().write(to: url, options: .atomic) }
     func loadState(from url: URL) throws { try runtime.unserialize(Data(contentsOf: url)) }
+    func quickSave(gameID: UUID, coreID: UUID, directories: FrontendDirectories, slot: Int? = nil) throws -> SaveState {
+        let targetSlot = slot ?? stateSlot
+        let url = directories.states.appendingPathComponent("\(gameID.uuidString)-\(targetSlot).state")
+        try saveState(to: url)
+        return SaveState(id: UUID(), gameID: gameID, coreID: coreID, slot: targetSlot, createdAt: Date(), stateURL: url, thumbnailURL: nil, note: "Slot \(targetSlot)")
+    }
+    func rewind() { guard let state = rewindBuffer.popLast() else { log.append("No rewind state captured yet."); return }; do { try runtime.unserialize(state) } catch { log.append(error.localizedDescription) } }
+
+    private func startRewindCapture() {
+        guard settings.rewindEnabled else { return }
+        rewindTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                await MainActor.run {
+                    guard let self, self.isRunning, let state = try? self.runtime.serialize() else { return }
+                    self.rewindBuffer.append(state)
+                    let maxCount = max(1, self.settings.rewindBufferSeconds)
+                    if self.rewindBuffer.count > maxCount { self.rewindBuffer.removeFirst(self.rewindBuffer.count - maxCount) }
+                }
+            }
+        }
+    }
+
+    private func startControllerPolling() {
+        GCController.startWirelessControllerDiscovery(completionHandler: nil)
+        controllerTask = Task { [weak input] in
+            while !Task.isCancelled {
+                if let pad = GCController.controllers().first?.extendedGamepad {
+                    input?.set(4, pressed: pad.dpad.up.isPressed); input?.set(5, pressed: pad.dpad.down.isPressed); input?.set(6, pressed: pad.dpad.left.isPressed); input?.set(7, pressed: pad.dpad.right.isPressed)
+                    input?.set(0, pressed: pad.buttonA.isPressed); input?.set(1, pressed: pad.buttonB.isPressed); input?.set(9, pressed: pad.buttonY.isPressed); input?.set(10, pressed: pad.buttonX.isPressed)
+                    input?.set(8, pressed: pad.buttonMenu.isPressed); input?.set(11, pressed: pad.leftShoulder.isPressed); input?.set(12, pressed: pad.rightShoulder.isPressed)
+                }
+                try? await Task.sleep(nanoseconds: 8_000_000)
+            }
+        }
+    }
 }
 
 final class ControllerInputState: ObservableObject {
@@ -77,101 +138,104 @@ final class ControllerInputState: ObservableObject {
 
 struct FrameView: View {
     let frame: VideoFrame?
+    let settings: FrontendSettings
     var body: some View {
         GeometryReader { proxy in
-            if let frame {
-                Canvas { ctx, size in
-                    let rect = CGRect(origin: .zero, size: size)
-                    ctx.fill(Path(rect), with: .color(.black))
-                    let text = Text("Running \(frame.width)x\(frame.height)").foregroundColor(.white)
-                    ctx.draw(text, at: CGPoint(x: size.width / 2, y: size.height / 2))
-                }
+            if let frame, let image = frame.cgImage {
+                Image(decorative: image, scale: 1).resizable().modifier(AspectModifier(settings: settings)).frame(width: proxy.size.width, height: proxy.size.height).background(.black)
             } else { ProgressView("Loading core…").frame(width: proxy.size.width, height: proxy.size.height).tint(.white) }
         }
     }
 }
 
+struct AspectModifier: ViewModifier {
+    let settings: FrontendSettings
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        switch settings.aspectRatio {
+        case .stretch, .fullscreen: content.scaledToFill()
+        default: content.scaledToFit()
+        }
+    }
+}
+
+extension VideoFrame {
+    var cgImage: CGImage? {
+        let converted = rgba8888
+        let provider = CGDataProvider(data: converted as CFData)
+        return provider.flatMap { CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue), provider: $0, decode: nil, shouldInterpolate: false, intent: .defaultIntent) }
+    }
+    private var rgba8888: Data {
+        var output = Data(count: width * height * 4)
+        output.withUnsafeMutableBytes { dstRaw in
+            guard let dst = dstRaw.bindMemory(to: UInt8.self).baseAddress else { return }
+            bytes.withUnsafeBytes { srcRaw in
+                guard let src = srcRaw.bindMemory(to: UInt8.self).baseAddress else { return }
+                for y in 0..<height {
+                    let row = src + y * pitch
+                    for x in 0..<width {
+                        let out = dst + (y * width + x) * 4
+                        if pixelFormat == 1 {
+                            let value = UInt16(row[x * 2]) | (UInt16(row[x * 2 + 1]) << 8)
+                            out[0] = UInt8(((value >> 10) & 0x1F) * 255 / 31); out[1] = UInt8(((value >> 5) & 0x1F) * 255 / 31); out[2] = UInt8((value & 0x1F) * 255 / 31); out[3] = 255
+                        } else if pixelFormat == 2 {
+                            out[0] = row[x * 4 + 2]; out[1] = row[x * 4 + 1]; out[2] = row[x * 4]; out[3] = 255
+                        } else {
+                            let value = UInt16(row[x * 2]) | (UInt16(row[x * 2 + 1]) << 8)
+                            out[0] = UInt8(((value >> 11) & 0x1F) * 255 / 31); out[1] = UInt8(((value >> 5) & 0x3F) * 255 / 63); out[2] = UInt8((value & 0x1F) * 255 / 31); out[3] = 255
+                        }
+                    }
+                }
+            }
+        }
+        return output
+    }
+}
+
 struct TouchOverlay: View {
     @ObservedObject var input: ControllerInputState
-    var body: some View {
-        VStack { Spacer(); HStack(alignment: .bottom) { DPad(input: input); Spacer(); FaceButtons(input: input) }.padding(28) }
-    }
+    let preset: String
+    var body: some View { VStack { Spacer(); HStack(alignment: .bottom) { DPad(input: input); Spacer(); FaceButtons(input: input) }.padding(28).opacity(preset == "Minimal" ? 0.55 : 0.82) } }
 }
 
-struct DPad: View {
-    @ObservedObject var input: ControllerInputState
-    var body: some View {
-        VStack {
-            PadButton("▲", id: 4, input: input)
-            HStack {
-                PadButton("◀", id: 6, input: input)
-                PadButton("●", id: 8, input: input)
-                PadButton("▶", id: 7, input: input)
-            }
-            PadButton("▼", id: 5, input: input)
-        }
-    }
-}
-
-struct FaceButtons: View {
-    @ObservedObject var input: ControllerInputState
-    var body: some View {
-        VStack {
-            PadButton("Y", id: 9, input: input)
-            HStack {
-                PadButton("X", id: 10, input: input)
-                PadButton("A", id: 0, input: input)
-            }
-            PadButton("B", id: 1, input: input)
-        }
-    }
-}
+struct DPad: View { @ObservedObject var input: ControllerInputState; var body: some View { VStack { PadButton("▲", id: 4, input: input); HStack { PadButton("◀", id: 6, input: input); PadButton("●", id: 8, input: input); PadButton("▶", id: 7, input: input) }; PadButton("▼", id: 5, input: input) } } }
+struct FaceButtons: View { @ObservedObject var input: ControllerInputState; var body: some View { VStack { PadButton("Y", id: 9, input: input); HStack { PadButton("X", id: 10, input: input); PadButton("A", id: 0, input: input) }; PadButton("B", id: 1, input: input); HStack { PadButton("L", id: 11, input: input); PadButton("R", id: 12, input: input) } } } }
 
 struct PadButton: View {
-    let title: String
-    let id: Int
-    @ObservedObject var input: ControllerInputState
-    init(_ title: String, id: Int, input: ControllerInputState) {
-        self.title = title; self.id = id; self.input = input
-    }
-    var body: some View {
-        Text(title)
-            .font(.headline)
-            .frame(width: 58, height: 58)
-            .background(.ultraThinMaterial)
-            .clipShape(Circle())
-            .gesture(DragGesture(minimumDistance: 0).onChanged { _ in input.set(id, pressed: true) }.onEnded { _ in input.set(id, pressed: false) })
-    }
+    let title: String; let id: Int; @ObservedObject var input: ControllerInputState
+    init(_ title: String, id: Int, input: ControllerInputState) { self.title = title; self.id = id; self.input = input }
+    var body: some View { Text(title).font(.headline).frame(width: 58, height: 58).background(.ultraThinMaterial).clipShape(Circle()).gesture(DragGesture(minimumDistance: 0).onChanged { _ in input.set(id, pressed: true) }.onEnded { _ in input.set(id, pressed: false) }) }
 }
 
 struct PauseMenu: View {
     @ObservedObject var session: PlayerSession
-    let game: Game; let core: LibretroCore
+    let game: Game; let core: LibretroCore; let store: LibraryStore?
+    @Environment(\.dismiss) private var dismiss
     var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    Button("Resume", systemImage: "play.fill") {}
-                    Button("Reset", systemImage: "arrow.counterclockwise") { session.reset() }
-                    Toggle("Fast forward", isOn: $session.fastForward)
-                }
-                Section("Save States") {
-                    Button("Quick Save", systemImage: "square.and.arrow.down") {}
-                    Button("Quick Load", systemImage: "square.and.arrow.up") {}
-                }
-                Section("Video") {
-                    Label("Shaders", systemImage: "camera.filters")
-                    Label("Aspect ratio", systemImage: "rectangle.inset.filled")
-                }
-                Section("Session") {
-                    Label("Netplay room", systemImage: "network")
-                    Label("RetroAchievements", systemImage: "trophy")
-                }
-                if !session.log.isEmpty {
-                    Section("Log") { ForEach(session.log, id: \.self) { Text($0) } }
-                }
-            }.navigationTitle("Paused")
+        NavigationStack { List {
+            Section { Button("Resume", systemImage: "play.fill") { dismiss() }; Button("Reset", systemImage: "arrow.counterclockwise") { session.reset() }; Toggle("Fast forward", isOn: $session.fastForward); Button("Rewind one second", systemImage: "gobackward") { session.rewind() } }
+            Section("Save States") { Stepper("Slot \(session.stateSlot)", value: $session.stateSlot, in: 0...9); Button("Quick Save", systemImage: "square.and.arrow.down") { quickSave() }; Button("Quick Load", systemImage: "square.and.arrow.up") { quickLoad() } }
+            Section("Video") { Label("Shader preset: \(session.currentFrame == nil ? "loading" : "active")", systemImage: "camera.filters"); Label("Aspect ratio and scaling come from Settings", systemImage: "rectangle.inset.filled") }
+            Section("Session") { Label("Netplay room configuration is available in Settings", systemImage: "network"); Label("RetroAchievements account is available in Settings", systemImage: "trophy") }
+            if !session.log.isEmpty { Section("Log") { ForEach(session.log, id: \.self) { Text($0) } } }
+        }.navigationTitle("Paused") }
+    }
+    private func quickSave() { Task { guard let directories = await store?.directories else { return }; do { let state = try session.quickSave(gameID: game.id, coreID: core.id, directories: directories); try await store?.add(saveState: state) } catch { session.log.append(error.localizedDescription) } } }
+    private func quickLoad() { Task { let states = await store?.saveStates ?? []; guard let state = states.first(where: { $0.gameID == game.id && $0.coreID == core.id && $0.slot == session.stateSlot }) else { session.log.append("No state in slot \(session.stateSlot)."); return }; do { try session.loadState(from: state.stateURL) } catch { session.log.append(error.localizedDescription) } } }
+}
+
+struct SoftPatchInfoView: View {
+    let game: Game
+    var body: some View {
+        List {
+            Section("Supported soft patches") {
+                Text("IPS patches are applied automatically when a .ips file with the same base name sits next to the ROM. BPS/UPS can still be handled by cores that provide native soft-patch support.")
+            }
+            Section("Expected file") {
+                Text(game.fileURL.deletingPathExtension().lastPathComponent + ".ips")
+            }
         }
+        .navigationTitle("Soft patches")
     }
 }
 #endif

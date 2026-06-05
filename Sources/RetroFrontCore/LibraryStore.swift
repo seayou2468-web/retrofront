@@ -52,8 +52,22 @@ public actor LibraryStore {
 
     public func update(settings newValue: FrontendSettings) async throws { settings = newValue; try await save() }
 
-    public func add(saveState: SaveState) async throws { saveStates.removeAll { $0.gameID == saveState.gameID && $0.slot == saveState.slot }; saveStates.append(saveState); try await save() }
-    public func add(cheat: CheatCode) async throws { cheats.append(cheat); try await save() }
+    public func markPlayed(gameID: UUID, additionalPlayTime: TimeInterval = 0) async throws {
+        guard let index = games.firstIndex(where: { $0.id == gameID }) else { return }
+        games[index].lastPlayedAt = Date()
+        games[index].playTime += additionalPlayTime
+        try await save()
+    }
+
+    public func add(saveState: SaveState) async throws { saveStates.removeAll { $0.gameID == saveState.gameID && $0.coreID == saveState.coreID && $0.slot == saveState.slot }; saveStates.append(saveState); try await save() }
+    public func delete(saveStateID: UUID) async throws {
+        if let state = saveStates.first(where: { $0.id == saveStateID }) { try? FileManager.default.removeItem(at: state.stateURL) }
+        saveStates.removeAll { $0.id == saveStateID }
+        try await save()
+    }
+    public func add(cheat: CheatCode) async throws { cheats.removeAll { $0.id == cheat.id }; cheats.append(cheat); try await save() }
+    public func update(cheat: CheatCode) async throws { if let index = cheats.firstIndex(where: { $0.id == cheat.id }) { cheats[index] = cheat } else { cheats.append(cheat) }; try await save() }
+    public func delete(cheatID: UUID) async throws { cheats.removeAll { $0.id == cheatID }; try await save() }
 
     private func read<T: Decodable>(_ type: T.Type, from url: URL) throws -> T { try decoder.decode(T.self, from: Data(contentsOf: url)) }
     private func write<T: Encodable>(_ value: T, to url: URL) throws { try encoder.encode(value).write(to: url, options: [.atomic]) }
