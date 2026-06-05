@@ -10,16 +10,18 @@ settings:
 packages: {}
 targets:
   CLibretroHost:
-    type: framework
-    platform: iOS
-    sources:
-      - path: Sources/CLibretroHost
-      - path: Externals/libretro-common/include
-        buildPhase: none
-    settings:
-      HEADER_SEARCH_PATHS:
-        - Sources/CLibretroHost/include
-        - Externals/libretro-common/include
+  type: framework
+  platform: iOS
+  sources:
+    - path: Sources/CLibretroHost
+    - path: Externals/libretro-common/include
+      buildPhase: none
+  settings:
+    DEFINES_MODULE: YES
+    MODULEMAP_FILE: Sources/CLibretroHost/include/module.modulemap
+    HEADER_SEARCH_PATHS:
+      - Sources/CLibretroHost/include
+      - Externals/libretro-common/include
   RetroFrontCore:
     type: library.static
     platform: iOS
