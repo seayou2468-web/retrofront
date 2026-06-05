@@ -21,7 +21,7 @@ targets:
         - Sources/CLibretroHost/include
         - Externals/libretro-common/include
   RetroFrontCore:
-    type: framework
+    type: library.static
     platform: iOS
     sources:
       - Sources/RetroFrontCore
