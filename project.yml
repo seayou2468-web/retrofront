@@ -15,55 +15,80 @@ packages: {}
 targets:
 
   CLibretroHost:
-    type: framework
+    type: library.static
     platform: iOS
+
+    headers:
+      public:
+        - Sources/CLibretroHost/include/RetroFrontLibretroHost.h
+
     sources:
       - path: Sources/CLibretroHost
+
       - path: Externals/libretro-common/include
         buildPhase: none
+
     settings:
       DEFINES_MODULE: YES
       MODULEMAP_FILE: Sources/CLibretroHost/include/module.modulemap
+
       HEADER_SEARCH_PATHS:
-        - Sources/CLibretroHost/include
-        - Externals/libretro-common/include
+        - $(SRCROOT)/Sources/CLibretroHost/include
+        - $(SRCROOT)/Externals/libretro-common/include
+
+      USER_HEADER_SEARCH_PATHS:
+        - $(SRCROOT)/Sources/CLibretroHost/include
+        - $(SRCROOT)/Externals/libretro-common/include
 
   RetroFrontCore:
     type: framework
     platform: iOS
+
     sources:
       - Sources/RetroFrontCore
+
     dependencies:
       - target: CLibretroHost
 
   RetroFrontiOS:
     type: application
     platform: iOS
+
     sources:
       - Sources/RetroFrontiOS
+
     dependencies:
       - target: RetroFrontCore
       - target: CLibretroHost
+
     info:
       path: Generated/Info.plist
+
       properties:
         CFBundleDisplayName: RetroFront
+
         UILaunchScreen: {}
+
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
+
     settings:
       CODE_SIGN_STYLE: Automatic
 
 schemes:
+
   RetroFrontiOS:
     build:
       targets:
         RetroFrontiOS: all
+
     run:
       config: Debug
+
     test:
       config: Debug
