@@ -1,0 +1,4 @@
+module CLibretroHost {
+    header "RetroFrontLibretroHost.h"
+    export *
+}
