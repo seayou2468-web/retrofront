@@ -39,6 +39,8 @@ struct RFCoreHandle {
     bool (*retro_serialize)(void *data, size_t size);
     bool (*retro_unserialize)(const void *data, size_t size);
     void (*retro_reset)(void);
+    void (*retro_cheat_reset)(void);
+    void (*retro_cheat_set)(unsigned index, bool enabled, const char *code);
     RFVideoFrameCallback video;
     RFAudioBatchCallback audio;
     RFInputStateCallback input;
@@ -163,6 +165,15 @@ static void *rf_symbol(RFCoreHandle *h, const char *name) {
     return sym;
 }
 
+
+static void *rf_optional_symbol(RFCoreHandle *h, const char *name) {
+#if defined(_WIN32)
+    return (void *)GetProcAddress(h->dylib, name);
+#else
+    return dlsym(h->dylib, name);
+#endif
+}
+
 static bool rf_environment(unsigned cmd, void *data) {
     RFCoreHandle *h = active_handle;
     switch (cmd) {
@@ -271,6 +282,8 @@ RFCoreHandle *rf_core_open(const char *path, RFLogCallback log, void *context) {
     LOAD(retro_set_input_state); LOAD(retro_load_game); LOAD(retro_unload_game); LOAD(retro_run);
     LOAD(retro_serialize_size); LOAD(retro_serialize); LOAD(retro_unserialize); LOAD(retro_reset);
 #undef LOAD
+    h->retro_cheat_reset = rf_optional_symbol(h, "retro_cheat_reset");
+    h->retro_cheat_set = rf_optional_symbol(h, "retro_cheat_set");
     return h;
 }
 
@@ -387,6 +400,8 @@ size_t rf_core_serialize_size(RFCoreHandle *h) { return rf_core_is_open(h) ? h->
 bool rf_core_serialize(RFCoreHandle *h, void *data, size_t size) { return rf_core_is_open(h) && h->retro_serialize(data, size); }
 bool rf_core_unserialize(RFCoreHandle *h, const void *data, size_t size) { return rf_core_is_open(h) && h->retro_unserialize(data, size); }
 void rf_core_reset(RFCoreHandle *h) { if (rf_core_is_open(h)) h->retro_reset(); }
+void rf_core_cheat_reset(RFCoreHandle *h) { if (rf_core_is_open(h) && h->retro_cheat_reset) h->retro_cheat_reset(); }
+void rf_core_set_cheat(RFCoreHandle *h, unsigned index, bool enabled, const char *code) { if (rf_core_is_open(h) && h->retro_cheat_set) h->retro_cheat_set(index, enabled, code); }
 void rf_core_set_callbacks(RFCoreHandle *h, RFVideoFrameCallback video, RFAudioBatchCallback audio, RFInputStateCallback input, void *context) {
     if (!h) return;
     h->video = video; h->audio = audio; h->input = input; h->context = context;

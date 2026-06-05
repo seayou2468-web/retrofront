@@ -71,6 +71,8 @@ size_t rf_core_serialize_size(RFCoreHandle *handle);
 bool rf_core_serialize(RFCoreHandle *handle, void *data, size_t size);
 bool rf_core_unserialize(RFCoreHandle *handle, const void *data, size_t size);
 void rf_core_reset(RFCoreHandle *handle);
+void rf_core_cheat_reset(RFCoreHandle *handle);
+void rf_core_set_cheat(RFCoreHandle *handle, unsigned index, bool enabled, const char *code);
 void rf_core_set_callbacks(RFCoreHandle *handle,
                            RFVideoFrameCallback video,
                            RFAudioBatchCallback audio,

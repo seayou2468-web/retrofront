@@ -68,3 +68,16 @@ extension RetroFrontCoreTests {
         XCTAssertEqual(Array(rom), [0, 0xAA, 0xBB, 0, 0xCC, 0xCC, 0xCC])
     }
 }
+
+extension RetroFrontCoreTests {
+    func testVideoFrameConvertsLibretroPixelFormats() {
+        let rgb565Red = VideoFrame(width: 1, height: 1, pitch: 2, pixelFormat: LibretroPixelFormat.rgb565.rawValue, bytes: Data([0x00, 0xF8]))
+        XCTAssertEqual(Array(rgb565Red.rgba8888), [255, 0, 0, 255])
+
+        let xrgbBlue = VideoFrame(width: 1, height: 1, pitch: 4, pixelFormat: LibretroPixelFormat.xrgb8888.rawValue, bytes: Data([255, 0, 0, 0]))
+        XCTAssertEqual(Array(xrgbBlue.rgba8888), [0, 0, 255, 255])
+
+        let rgb1555Green = VideoFrame(width: 1, height: 1, pitch: 2, pixelFormat: LibretroPixelFormat.rgb1555.rawValue, bytes: Data([0xE0, 0x03]))
+        XCTAssertEqual(Array(rgb1555Green.rgba8888), [0, 255, 0, 255])
+    }
+}

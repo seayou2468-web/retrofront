@@ -18,6 +18,12 @@ public struct CoreAVInfo: Sendable, Hashable {
     public var sampleRate: Double
 }
 
+public enum LibretroPixelFormat: UInt32, Codable, Sendable {
+    case rgb1555 = 0
+    case xrgb8888 = 1
+    case rgb565 = 2
+}
+
 public struct VideoFrame: Sendable {
     public var width: Int
     public var height: Int
@@ -31,6 +37,43 @@ public struct VideoFrame: Sendable {
         self.pitch = pitch
         self.pixelFormat = pixelFormat
         self.bytes = bytes
+    }
+
+    public var rgba8888: Data {
+        var output = Data(count: max(width * height * 4, 0))
+        guard width > 0, height > 0, pitch > 0 else { return output }
+        output.withUnsafeMutableBytes { dstRaw in
+            guard let dst = dstRaw.bindMemory(to: UInt8.self).baseAddress else { return }
+            bytes.withUnsafeBytes { srcRaw in
+                guard let src = srcRaw.bindMemory(to: UInt8.self).baseAddress else { return }
+                for y in 0..<height {
+                    let row = src + y * pitch
+                    for x in 0..<width {
+                        let out = dst + (y * width + x) * 4
+                        switch LibretroPixelFormat(rawValue: pixelFormat) ?? .rgb1555 {
+                        case .rgb1555:
+                            let value = UInt16(row[x * 2]) | (UInt16(row[x * 2 + 1]) << 8)
+                            out[0] = UInt8(((value >> 10) & 0x1F) * 255 / 31)
+                            out[1] = UInt8(((value >> 5) & 0x1F) * 255 / 31)
+                            out[2] = UInt8((value & 0x1F) * 255 / 31)
+                            out[3] = 255
+                        case .xrgb8888:
+                            out[0] = row[x * 4 + 2]
+                            out[1] = row[x * 4 + 1]
+                            out[2] = row[x * 4]
+                            out[3] = 255
+                        case .rgb565:
+                            let value = UInt16(row[x * 2]) | (UInt16(row[x * 2 + 1]) << 8)
+                            out[0] = UInt8(((value >> 11) & 0x1F) * 255 / 31)
+                            out[1] = UInt8(((value >> 5) & 0x3F) * 255 / 63)
+                            out[2] = UInt8((value & 0x1F) * 255 / 31)
+                            out[3] = 255
+                        }
+                    }
+                }
+            }
+        }
+        return output
     }
 }
 
@@ -108,6 +151,8 @@ public final class LibretroRuntime: @unchecked Sendable {
     }
     public func runFrame() { rf_core_run(handle) }
     public func reset() { rf_core_reset(handle) }
+    public func resetCheats() { rf_core_cheat_reset(handle) }
+    public func setCheat(index: Int, enabled: Bool, code: String) { rf_core_set_cheat(handle, UInt32(index), enabled, code) }
     public func serialize() throws -> Data {
         let size = rf_core_serialize_size(handle)
         guard size > 0 else { throw RuntimeError.serializationUnavailable }
@@ -121,7 +166,7 @@ public final class LibretroRuntime: @unchecked Sendable {
         guard ok else { throw RuntimeError.serializationFailed(lastError) }
     }
     public func unloadGame() { rf_core_unload_game(handle) }
-    public func close() { if handle != nil { rf_core_close(handle); handle = nil } }
+    public func close() { if handle != nil { rf_core_deinit(handle); rf_core_close(handle); handle = nil } }
     private var lastError: String { String(cString: rf_core_last_error(handle)) }
 
     public enum RuntimeError: Error, LocalizedError, Sendable {
