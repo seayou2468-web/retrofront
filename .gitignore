@@ -1,0 +1,4 @@
+/target/
+/swift/.build/
+.DS_Store
+*.xcuserdata/
