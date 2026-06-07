@@ -1,0 +1,4 @@
+module CRetrofrontCore {
+    header "retrofront_core.h"
+    export *
+}
