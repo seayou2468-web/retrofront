@@ -1529,27 +1529,31 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
     action_id: u32,
 ) -> bool {
     with_active_frontend(|core| match action_id {
-        1 => {
+        menu::ACTION_LOAD_CORE => {
             let cores = core.core_info.cores.clone();
             core.menu.push_core_list(&cores);
             true
         }
-        2 => {
+        menu::ACTION_LOAD_CONTENT => {
             core.menu.push_content_list(&core.scanner.games);
             true
         }
-        3 => {
+        menu::ACTION_QUICK_MENU => {
+            core.menu.push_quick_menu(core.game_info().is_some());
+            true
+        }
+        menu::ACTION_ONLINE_UPDATER => {
             core.menu.push_status(
                 "Online Updater",
-                "Network updater is not implemented yet in the Rust menu engine.",
+                "The RetroArch updater branch is modeled; network update jobs are not wired yet.",
             );
             true
         }
-        4 => {
+        menu::ACTION_SETTINGS => {
             core.menu.push_settings(&core.settings);
             true
         }
-        5 => {
+        menu::ACTION_INFORMATION | menu::ACTION_CORE_INFORMATION => {
             let system_info = core.system_info().cloned();
             let game_info = core.game_info().cloned();
             let gfx_status = core.gfx.driver_status().clone();
@@ -1557,20 +1561,85 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
                 .push_information(system_info.as_ref(), game_info.as_ref(), &gfx_status);
             true
         }
-        13 => {
+        menu::ACTION_CONFIGURATION_FILE => {
+            core.menu.push_configuration_file(&core.settings);
+            true
+        }
+        menu::ACTION_HELP => {
+            core.menu.push_help();
+            true
+        }
+        menu::ACTION_CORE_OPTIONS => {
             core.menu.push_status(
-                "Shaders",
-                "Shader configuration will be handled by the Rust video menu.",
+                "Core Options",
+                "Core option definitions are exposed through the Rust options manager.",
             );
             true
         }
-        14 => {
-            core.menu
-                .push_status("Save States", "Save-state actions are not implemented yet.");
+        menu::ACTION_CONTROLS => {
+            core.menu.push_placeholder_settings("Controls");
             true
         }
-        260..=262 => {
+        menu::ACTION_SHADERS => {
+            core.menu.push_status(
+                "Shaders",
+                "Shader configuration is represented in the Rust video menu branch.",
+            );
+            true
+        }
+        menu::ACTION_SAVE_STATES => {
+            core.menu.push_status(
+                "Save States",
+                "Save-state actions are modeled but not executed yet.",
+            );
+            true
+        }
+        menu::ACTION_CHEATS => {
+            core.menu.push_placeholder_settings("Cheats");
+            true
+        }
+        menu::ACTION_OVERRIDES => {
+            core.menu.push_placeholder_settings("Overrides");
+            true
+        }
+        menu::ACTION_SETTINGS_DRIVERS => {
+            core.menu.push_driver_settings(&core.settings);
+            true
+        }
+        menu::ACTION_SETTINGS_VIDEO => {
+            core.menu.push_video_settings(&core.settings);
+            true
+        }
+        menu::ACTION_SETTINGS_AUDIO => {
+            core.menu.push_audio_settings(&core.settings);
+            true
+        }
+        menu::ACTION_SETTINGS_INPUT => {
+            core.menu.push_input_settings(&core.settings);
+            true
+        }
+        menu::ACTION_SETTINGS_USER_INTERFACE | menu::ACTION_SKIN_SETTINGS..=262 => {
             core.menu.push_skin_settings(&core.settings);
+            true
+        }
+        menu::ACTION_SETTINGS_DIRECTORIES => {
+            core.menu.push_directory_settings(&core.settings);
+            true
+        }
+        menu::ACTION_SETTINGS_SAVING => {
+            core.menu.push_placeholder_settings("Saving");
+            true
+        }
+        menu::ACTION_SETTINGS_LATENCY => {
+            core.menu.push_placeholder_settings("Latency");
+            true
+        }
+        menu::ACTION_SETTINGS_FRAME_THROTTLE => {
+            core.menu.push_placeholder_settings("Frame Throttle");
+            true
+        }
+        menu::ACTION_SETTINGS_PLAYLISTS => {
+            core.menu.push_placeholder_settings("Playlists");
             true
         }
         _ => false,
@@ -1615,9 +1684,20 @@ pub unsafe extern "C" fn rf_frontend_set_base_dir(
     with_active_frontend(|core| {
         let base_dir = PathBuf::from(&path_str);
         core.settings.set_base_dir(&base_dir);
-        core.settings.set("libretro_directory", &base_dir.join("Cores").to_string_lossy());
-        core.settings.set("libretro_info_path", &base_dir.join("info").to_string_lossy());
-        core.settings.set("core_options_path", &base_dir.join("retroarch-core-options.cfg").to_string_lossy());
+        core.settings.set(
+            "libretro_directory",
+            &base_dir.join("Cores").to_string_lossy(),
+        );
+        core.settings.set(
+            "libretro_info_path",
+            &base_dir.join("info").to_string_lossy(),
+        );
+        core.settings.set(
+            "core_options_path",
+            &base_dir
+                .join("retroarch-core-options.cfg")
+                .to_string_lossy(),
+        );
         core.configure_from_settings();
     });
     true

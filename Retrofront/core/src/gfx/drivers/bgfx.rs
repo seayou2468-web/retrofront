@@ -2,7 +2,7 @@ use super::{DriverFrame, GfxDriver, PresentStatus};
 use crate::gfx::config::GfxVideoConfig;
 use crate::gfx::context::ContextDriver;
 use crate::gfx::frame::VideoFrame;
-use crate::gfx::hardware::{GfxBackendKind, HostRenderHandles, BgfxRenderCommand};
+use crate::gfx::hardware::{BgfxRenderCommand, GfxBackendKind, HostRenderHandles};
 use crate::gfx::CLEAR_COLOR_RGBA;
 use std::ptr;
 

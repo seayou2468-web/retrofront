@@ -1,10 +1,10 @@
+use crate::libretro;
 use std::collections::HashMap;
+use std::ffi::{CStr, CString};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
-use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
-use crate::libretro;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Default)]
 pub struct CoreOptionCategory {
@@ -51,7 +51,8 @@ impl CoreOptionsManager {
 
     pub fn get_variable_ptr(&mut self, key: &str) -> *const c_char {
         let val = self.values.get(key).or_else(|| {
-            self.definitions.iter()
+            self.definitions
+                .iter()
                 .find(|d| d.key == key)
                 .map(|d| &d.default_value)
         });
@@ -67,7 +68,8 @@ impl CoreOptionsManager {
 
     pub fn get_variable(&self, key: &str) -> Option<&String> {
         self.values.get(key).or_else(|| {
-            self.definitions.iter()
+            self.definitions
+                .iter()
                 .find(|d| d.key == key)
                 .map(|d| &d.default_value)
         })
@@ -86,22 +88,32 @@ impl CoreOptionsManager {
     }
 
     pub fn set_definitions_v0(&mut self, vars: *const libretro::retro_variable) {
-        if vars.is_null() { return; }
+        if vars.is_null() {
+            return;
+        }
         let mut i = 0;
         loop {
             let var = unsafe { &*vars.add(i) };
-            if var.key.is_null() || var.value.is_null() { break; }
+            if var.key.is_null() || var.value.is_null() {
+                break;
+            }
 
-            let key = unsafe { CStr::from_ptr(var.key) }.to_string_lossy().into_owned();
+            let key = unsafe { CStr::from_ptr(var.key) }
+                .to_string_lossy()
+                .into_owned();
             let value_str = unsafe { CStr::from_ptr(var.value) }.to_string_lossy();
 
             let parts: Vec<&str> = value_str.split(';').collect();
             if parts.len() >= 2 {
                 let desc = parts[0].trim().to_string();
                 let values_part = parts[1].trim();
-                let values: Vec<CoreOptionValue> = values_part.split('|').map(|v| {
-                    CoreOptionValue { value: v.trim().to_string(), label: v.trim().to_string() }
-                }).collect();
+                let values: Vec<CoreOptionValue> = values_part
+                    .split('|')
+                    .map(|v| CoreOptionValue {
+                        value: v.trim().to_string(),
+                        label: v.trim().to_string(),
+                    })
+                    .collect();
 
                 let default_value = values.first().map(|v| v.value.clone()).unwrap_or_default();
 
@@ -119,24 +131,58 @@ impl CoreOptionsManager {
     }
 
     pub fn set_definitions_v1(&mut self, vars: *const libretro::retro_core_option_definition) {
-        if vars.is_null() { return; }
+        if vars.is_null() {
+            return;
+        }
         let mut i = 0;
         loop {
             let var = unsafe { &*vars.add(i) };
-            if var.key.is_null() { break; }
+            if var.key.is_null() {
+                break;
+            }
 
-            let key = unsafe { CStr::from_ptr(var.key) }.to_string_lossy().into_owned();
-            let desc = if var.desc.is_null() { String::new() } else { unsafe { CStr::from_ptr(var.desc) }.to_string_lossy().into_owned() };
-            let info = if var.info.is_null() { String::new() } else { unsafe { CStr::from_ptr(var.info) }.to_string_lossy().into_owned() };
-            let default_value = if var.default_value.is_null() { String::new() } else { unsafe { CStr::from_ptr(var.default_value) }.to_string_lossy().into_owned() };
+            let key = unsafe { CStr::from_ptr(var.key) }
+                .to_string_lossy()
+                .into_owned();
+            let desc = if var.desc.is_null() {
+                String::new()
+            } else {
+                unsafe { CStr::from_ptr(var.desc) }
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            let info = if var.info.is_null() {
+                String::new()
+            } else {
+                unsafe { CStr::from_ptr(var.info) }
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            let default_value = if var.default_value.is_null() {
+                String::new()
+            } else {
+                unsafe { CStr::from_ptr(var.default_value) }
+                    .to_string_lossy()
+                    .into_owned()
+            };
 
             let mut values = Vec::new();
             for j in 0.. {
                 let val = &var.values[j];
-                if val.value.is_null() { break; }
+                if val.value.is_null() {
+                    break;
+                }
                 values.push(CoreOptionValue {
-                    value: unsafe { CStr::from_ptr(val.value) }.to_string_lossy().into_owned(),
-                    label: if val.label.is_null() { String::new() } else { unsafe { CStr::from_ptr(val.label) }.to_string_lossy().into_owned() },
+                    value: unsafe { CStr::from_ptr(val.value) }
+                        .to_string_lossy()
+                        .into_owned(),
+                    label: if val.label.is_null() {
+                        String::new()
+                    } else {
+                        unsafe { CStr::from_ptr(val.label) }
+                            .to_string_lossy()
+                            .into_owned()
+                    },
                 });
             }
 
@@ -152,17 +198,37 @@ impl CoreOptionsManager {
         }
     }
 
-    pub fn set_definitions_v2(&mut self, definitions: *const libretro::retro_core_option_v2_definition, categories: *const libretro::retro_core_option_v2_category) {
+    pub fn set_definitions_v2(
+        &mut self,
+        definitions: *const libretro::retro_core_option_v2_definition,
+        categories: *const libretro::retro_core_option_v2_category,
+    ) {
         if !categories.is_null() {
             let mut i = 0;
             self._categories.clear();
             loop {
                 let cat = unsafe { &*categories.add(i) };
-                if cat.key.is_null() { break; }
+                if cat.key.is_null() {
+                    break;
+                }
                 self._categories.push(CoreOptionCategory {
-                    _key: unsafe { CStr::from_ptr(cat.key) }.to_string_lossy().into_owned(),
-                    _desc: if cat.desc.is_null() { String::new() } else { unsafe { CStr::from_ptr(cat.desc) }.to_string_lossy().into_owned() },
-                    _info: if cat.info.is_null() { String::new() } else { unsafe { CStr::from_ptr(cat.info) }.to_string_lossy().into_owned() },
+                    _key: unsafe { CStr::from_ptr(cat.key) }
+                        .to_string_lossy()
+                        .into_owned(),
+                    _desc: if cat.desc.is_null() {
+                        String::new()
+                    } else {
+                        unsafe { CStr::from_ptr(cat.desc) }
+                            .to_string_lossy()
+                            .into_owned()
+                    },
+                    _info: if cat.info.is_null() {
+                        String::new()
+                    } else {
+                        unsafe { CStr::from_ptr(cat.info) }
+                            .to_string_lossy()
+                            .into_owned()
+                    },
                 });
                 i += 1;
             }
@@ -172,21 +238,61 @@ impl CoreOptionsManager {
             let mut i = 0;
             loop {
                 let var = unsafe { &*definitions.add(i) };
-                if var.key.is_null() { break; }
+                if var.key.is_null() {
+                    break;
+                }
 
-                let key = unsafe { CStr::from_ptr(var.key) }.to_string_lossy().into_owned();
-                let desc = if var.desc.is_null() { String::new() } else { unsafe { CStr::from_ptr(var.desc) }.to_string_lossy().into_owned() };
-                let info = if var.info.is_null() { String::new() } else { unsafe { CStr::from_ptr(var.info) }.to_string_lossy().into_owned() };
-                let default_value = if var.default_value.is_null() { String::new() } else { unsafe { CStr::from_ptr(var.default_value) }.to_string_lossy().into_owned() };
-                let category_key = if var.category_key.is_null() { None } else { Some(unsafe { CStr::from_ptr(var.category_key) }.to_string_lossy().into_owned()) };
+                let key = unsafe { CStr::from_ptr(var.key) }
+                    .to_string_lossy()
+                    .into_owned();
+                let desc = if var.desc.is_null() {
+                    String::new()
+                } else {
+                    unsafe { CStr::from_ptr(var.desc) }
+                        .to_string_lossy()
+                        .into_owned()
+                };
+                let info = if var.info.is_null() {
+                    String::new()
+                } else {
+                    unsafe { CStr::from_ptr(var.info) }
+                        .to_string_lossy()
+                        .into_owned()
+                };
+                let default_value = if var.default_value.is_null() {
+                    String::new()
+                } else {
+                    unsafe { CStr::from_ptr(var.default_value) }
+                        .to_string_lossy()
+                        .into_owned()
+                };
+                let category_key = if var.category_key.is_null() {
+                    None
+                } else {
+                    Some(
+                        unsafe { CStr::from_ptr(var.category_key) }
+                            .to_string_lossy()
+                            .into_owned(),
+                    )
+                };
 
                 let mut values = Vec::new();
                 for j in 0.. {
                     let val = &var.values[j];
-                    if val.value.is_null() { break; }
+                    if val.value.is_null() {
+                        break;
+                    }
                     values.push(CoreOptionValue {
-                        value: unsafe { CStr::from_ptr(val.value) }.to_string_lossy().into_owned(),
-                        label: if val.label.is_null() { String::new() } else { unsafe { CStr::from_ptr(val.label) }.to_string_lossy().into_owned() },
+                        value: unsafe { CStr::from_ptr(val.value) }
+                            .to_string_lossy()
+                            .into_owned(),
+                        label: if val.label.is_null() {
+                            String::new()
+                        } else {
+                            unsafe { CStr::from_ptr(val.label) }
+                                .to_string_lossy()
+                                .into_owned()
+                        },
                     });
                 }
 
@@ -212,15 +318,21 @@ impl CoreOptionsManager {
     }
 
     pub fn load(&mut self) {
-        let Some(ref path) = self.config_path else { return };
-        if !path.exists() { return; }
+        let Some(ref path) = self.config_path else {
+            return;
+        };
+        if !path.exists() {
+            return;
+        }
 
         if let Ok(file) = File::open(path) {
             let reader = BufReader::new(file);
             for line in reader.lines() {
                 if let Ok(line) = line {
                     let line = line.trim();
-                    if line.is_empty() || line.starts_with('#') { continue; }
+                    if line.is_empty() || line.starts_with('#') {
+                        continue;
+                    }
                     let parts: Vec<&str> = line.splitn(2, '=').collect();
                     if parts.len() == 2 {
                         let key = parts[0].trim().to_string();
@@ -233,8 +345,15 @@ impl CoreOptionsManager {
     }
 
     pub fn save(&self) {
-        let Some(ref path) = self.config_path else { return };
-        if let Ok(mut file) = OpenOptions::new().write(true).create(true).truncate(true).open(path) {
+        let Some(ref path) = self.config_path else {
+            return;
+        };
+        if let Ok(mut file) = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)
+        {
             let mut keys: Vec<&String> = self.values.keys().collect();
             keys.sort();
             for key in keys {
