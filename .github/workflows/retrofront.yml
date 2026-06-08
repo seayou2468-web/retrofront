@@ -2,9 +2,7 @@ name: Retrofront
 
 on:
   push:
-    branches:
-      - main
-      - work
+  commit:
   pull_request:
 
 jobs:
