@@ -174,16 +174,21 @@ public final class EmulatorRuntimeModel: ObservableObject {
   public func play() {
     guard frontendState == .gameLoaded, !isRunning else { return }
     isRunning = true
-    runTask = Task.detached(priority: .userInitiated) { [weak self] in
-      while !Task.isCancelled {
-        guard let self = self else { break }
-        let shouldStop: Bool = await autoreleasepool {
-            return self.runOneFrame()
-        }
-        if shouldStop { break }
-        try? await Task.sleep(nanoseconds: 16_666_667)
-      }
+runTask = Task.detached(priority: .userInitiated) { [weak self] in
+  while !Task.isCancelled {
+    guard let self = self else { break }
+
+    let shouldStop = await MainActor.run {
+      self.runOneFrame()
     }
+
+    if shouldStop {
+      break
+    }
+
+    try? await Task.sleep(nanoseconds: 16_666_667)
+  }
+}
   }
 
   public func stop() {
