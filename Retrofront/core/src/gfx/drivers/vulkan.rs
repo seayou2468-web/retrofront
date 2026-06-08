@@ -1,4 +1,5 @@
 use super::{DriverFrame, GfxDriver, PresentStatus};
+use crate::gfx::config::GfxVideoConfig;
 use crate::gfx::context::ContextDriver;
 use crate::gfx::frame::VideoFrame;
 use crate::gfx::hardware::{GfxBackendKind, HostRenderHandles, VulkanRenderCommand};
@@ -8,6 +9,7 @@ use std::ptr;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VulkanPresentPlan {
     pub extent: [u32; 2],
+    pub viewport: [i32; 4],
     pub native_view: u64,
     pub instance: u64,
     pub device: u64,
@@ -16,6 +18,7 @@ pub struct VulkanPresentPlan {
     pub image: u64,
     pub uses_moltenvk: bool,
     pub source_is_hardware: bool,
+    pub rotation_quarters: u32,
     pub required_instance_extensions: &'static [&'static str],
     pub required_device_extensions: &'static [&'static str],
 }
@@ -24,6 +27,7 @@ pub struct VulkanPresentPlan {
 pub struct VulkanDriver {
     handles: HostRenderHandles,
     last_present_plan: Option<VulkanPresentPlan>,
+    video_config: GfxVideoConfig,
     initialized: bool,
 }
 
@@ -33,6 +37,10 @@ impl VulkanDriver {
     }
     pub fn last_present_plan(&self) -> Option<&VulkanPresentPlan> {
         self.last_present_plan.as_ref()
+    }
+
+    pub fn set_video_config(&mut self, config: GfxVideoConfig) {
+        self.video_config = config;
     }
 
     fn build_plan(
@@ -45,7 +53,8 @@ impl VulkanDriver {
             return Err("Vulkan backend requires MoltenVK/native view, instance, device, queue, command buffer, image, and render callback handles".into());
         }
         Ok(VulkanPresentPlan {
-            extent: [width, height],
+            extent: self.video_config.output_size(width, height),
+            viewport: self.video_config.viewport(width, height),
             native_view: self.handles.native_view,
             instance: self.handles.vulkan_instance,
             device: self.handles.vulkan_device,
@@ -55,6 +64,7 @@ impl VulkanDriver {
             uses_moltenvk: cfg!(any(target_os = "ios", target_os = "macos"))
                 || self.handles.native_view != 0,
             source_is_hardware,
+            rotation_quarters: self.video_config.rotation_quarters % 4,
             required_instance_extensions: &["VK_KHR_surface", "VK_EXT_metal_surface"],
             required_device_extensions: &["VK_KHR_swapchain"],
         })
@@ -73,8 +83,13 @@ impl VulkanDriver {
             command_buffer: plan.command_buffer,
             image: plan.image,
             extent: plan.extent,
+            viewport: plan.viewport,
             source_is_hardware: plan.source_is_hardware,
             uses_moltenvk: plan.uses_moltenvk,
+            rotation_quarters: plan.rotation_quarters,
+            scale_mode: self.video_config.scale_mode as u32,
+            filter_mode: self.video_config.filter_mode as u32,
+            vsync: self.video_config.vsync,
             clear_color: CLEAR_COLOR_RGBA,
         };
         let (ptr, len) = rgba.map_or((ptr::null(), 0), |bytes| (bytes.as_ptr(), bytes.len()));

@@ -8,12 +8,14 @@
 //! frame conversion, command generation, callbacks, shader sources, and
 //! MoltenVK/iOS SDK metadata rather than a single ad-hoc upload helper.
 
+pub mod config;
 pub mod context;
 pub mod drivers;
 pub mod frame;
 pub mod hardware;
 
 use crate::libretro;
+pub use config::{GfxFilterMode, GfxScaleMode, GfxVideoConfig};
 use context::{ContextDriver, ContextEvent};
 pub use drivers::opengl::{GlDrawCall, OpenGlDriver, OPENGL_FRAGMENT_SHADER, OPENGL_VERTEX_SHADER};
 pub use drivers::software::SoftwareDriver;
@@ -46,6 +48,7 @@ pub struct GfxRuntime {
     pixel_format: PixelFormat,
     last_frame: VideoFrame,
     context: ContextDriver,
+    video_config: GfxVideoConfig,
     software: SoftwareDriver,
     opengl: OpenGlDriver,
     vulkan: VulkanDriver,
@@ -60,6 +63,7 @@ impl Default for GfxRuntime {
             pixel_format: PixelFormat::default(),
             last_frame: VideoFrame::default(),
             context: ContextDriver::default(),
+            video_config: GfxVideoConfig::default(),
             software: SoftwareDriver::default(),
             opengl: OpenGlDriver::default(),
             vulkan: VulkanDriver::default(),
@@ -98,6 +102,26 @@ impl GfxRuntime {
             hardware_ready: self.context.hardware_ready(),
             last_present: self.last_present.clone(),
         }
+    }
+
+    pub fn video_config(&self) -> GfxVideoConfig {
+        self.video_config
+    }
+
+    pub fn set_video_config(&mut self, config: GfxVideoConfig) {
+        self.video_config = config;
+        self.software.set_video_config(config);
+        self.opengl.set_video_config(config);
+        self.vulkan.set_video_config(config);
+    }
+
+    pub fn update_geometry(&mut self, geometry: &libretro::retro_game_geometry) {
+        let output = self
+            .video_config
+            .output_size(geometry.base_width, geometry.base_height);
+        self.set_video_config(
+            GfxVideoConfig::from_libretro_geometry(geometry).with_output_size(output[0], output[1]),
+        );
     }
 
     pub fn pixel_format(&self) -> PixelFormat {
@@ -142,6 +166,9 @@ impl GfxRuntime {
         let context = self.context.clone();
         self.opengl.configure(&context);
         self.vulkan.configure(&context);
+        if self.context.hardware_ready() {
+            self.context.notify_reset();
+        }
     }
 
     pub fn context_event(&mut self, event: ContextEvent) {
@@ -188,8 +215,12 @@ impl GfxRuntime {
 
     /// Fills a libretro callback structure with the frontend callbacks that the
     /// active context driver owns. Mirrors RetroArch's SET_HW_RENDER handling.
-    pub fn patch_hw_render_callback(&self, raw: &mut libretro::retro_hw_render_callback) {
+    pub fn patch_hw_render_callback(&mut self, raw: &mut libretro::retro_hw_render_callback) {
+        self.context.capture_callbacks(raw);
         self.context.patch_hw_render_callback(raw);
+        if self.context.hardware_ready() {
+            self.context.notify_reset();
+        }
     }
 
     pub fn opengl_draw_call(&self) -> Option<&GlDrawCall> {
@@ -392,6 +423,65 @@ mod tests {
             .expect("Vulkan software upload");
         assert_eq!(uploaded_len, 4);
         assert_eq!(gfx.vulkan_present_plan().expect("plan").image, 6);
+    }
+
+    #[test]
+    fn video_config_controls_opengl_viewport_and_sampling() {
+        let mut gfx = GfxRuntime::new();
+        gfx.set_backend(GfxBackendKind::OpenGl);
+        gfx.set_video_config(GfxVideoConfig {
+            output_width: 1280,
+            output_height: 720,
+            aspect_ratio: 4.0 / 3.0,
+            scale_mode: GfxScaleMode::KeepAspect,
+            filter_mode: GfxFilterMode::Linear,
+            rotation_quarters: 1,
+            ..GfxVideoConfig::default()
+        });
+        gfx.set_host_handles(HostRenderHandles {
+            native_view: 1,
+            gl_context: 2,
+            gl_framebuffer: 3,
+            opengl_render: Some(test_gl_render),
+            ..HostRenderHandles::default()
+        });
+        gfx.set_pixel_format(PixelFormat::Xrgb8888);
+        let pixels = vec![0u8; 320 * 240 * 4];
+        gfx.ingest_software_frame(pixels.as_ptr().cast(), 320, 240, 320 * 4)
+            .expect("OpenGL configured render");
+        let call = gfx.opengl_draw_call().expect("draw call");
+        assert_eq!(call.output_size, [1280, 720]);
+        assert_eq!(call.viewport, [160, 0, 960, 720]);
+        assert_eq!(call.rotation_quarters, 1);
+    }
+
+    #[test]
+    fn video_config_controls_vulkan_integer_viewport() {
+        let mut gfx = GfxRuntime::new();
+        gfx.set_backend(GfxBackendKind::Vulkan);
+        gfx.set_video_config(GfxVideoConfig {
+            output_width: 1000,
+            output_height: 700,
+            scale_mode: GfxScaleMode::Integer,
+            ..GfxVideoConfig::default()
+        });
+        gfx.set_host_handles(HostRenderHandles {
+            native_view: 1,
+            vulkan_instance: 2,
+            vulkan_device: 3,
+            vulkan_queue: 4,
+            vulkan_command_buffer: 5,
+            vulkan_image: 6,
+            vulkan_render: Some(test_vulkan_render),
+            ..HostRenderHandles::default()
+        });
+        gfx.set_pixel_format(PixelFormat::Xrgb8888);
+        let pixels = vec![0u8; 320 * 240 * 4];
+        gfx.ingest_software_frame(pixels.as_ptr().cast(), 320, 240, 320 * 4)
+            .expect("Vulkan configured render");
+        let plan = gfx.vulkan_present_plan().expect("plan");
+        assert_eq!(plan.extent, [1000, 700]);
+        assert_eq!(plan.viewport, [180, 110, 640, 480]);
     }
 
     #[test]

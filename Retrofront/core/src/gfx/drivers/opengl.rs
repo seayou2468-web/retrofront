@@ -1,4 +1,5 @@
 use super::{DriverFrame, GfxDriver, PresentStatus};
+use crate::gfx::config::GfxVideoConfig;
 use crate::gfx::context::ContextDriver;
 use crate::gfx::frame::VideoFrame;
 use crate::gfx::hardware::{GfxBackendKind, HostRenderHandles, OpenGlRenderCommand};
@@ -33,6 +34,7 @@ static OPENGL_FRAGMENT_SHADER_CSTR: &CStr = c"#version 300 es\nprecision mediump
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GlDrawCall {
     pub viewport: [i32; 4],
+    pub output_size: [u32; 2],
     pub texture_size: [u32; 2],
     pub framebuffer: usize,
     pub native_view: u64,
@@ -42,12 +44,14 @@ pub struct GlDrawCall {
     pub uses_ios_sdk_context: bool,
     pub bottom_left_origin: bool,
     pub source_is_hardware: bool,
+    pub rotation_quarters: u32,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct OpenGlDriver {
     handles: HostRenderHandles,
     last_draw_call: Option<GlDrawCall>,
+    video_config: GfxVideoConfig,
     initialized: bool,
 }
 
@@ -57,6 +61,10 @@ impl OpenGlDriver {
     }
     pub fn last_draw_call(&self) -> Option<&GlDrawCall> {
         self.last_draw_call.as_ref()
+    }
+
+    pub fn set_video_config(&mut self, config: GfxVideoConfig) {
+        self.video_config = config;
     }
 
     fn build_call(
@@ -73,7 +81,8 @@ impl OpenGlDriver {
             );
         }
         Ok(GlDrawCall {
-            viewport: [0, 0, width as i32, height as i32],
+            viewport: self.video_config.viewport(width, height),
+            output_size: self.video_config.output_size(width, height),
             texture_size: [width, height],
             framebuffer: self.handles.gl_framebuffer,
             native_view: self.handles.native_view,
@@ -83,6 +92,7 @@ impl OpenGlDriver {
             uses_ios_sdk_context: cfg!(target_os = "ios") || self.handles.gl_context != 0,
             bottom_left_origin,
             source_is_hardware,
+            rotation_quarters: self.video_config.rotation_quarters % 4,
         })
     }
 
@@ -96,9 +106,14 @@ impl OpenGlDriver {
             gl_context: call.gl_context,
             framebuffer: call.framebuffer,
             viewport: call.viewport,
+            output_size: call.output_size,
             texture_size: call.texture_size,
             source_is_hardware: call.source_is_hardware,
             bottom_left_origin: call.bottom_left_origin,
+            rotation_quarters: call.rotation_quarters,
+            scale_mode: self.video_config.scale_mode as u32,
+            filter_mode: self.video_config.filter_mode as u32,
+            vsync: self.video_config.vsync,
             clear_color: CLEAR_COLOR_RGBA,
             vertex_shader: OPENGL_VERTEX_SHADER_CSTR.as_ptr(),
             fragment_shader: OPENGL_FRAGMENT_SHADER_CSTR.as_ptr(),

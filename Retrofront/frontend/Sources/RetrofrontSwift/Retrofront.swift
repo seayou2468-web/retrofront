@@ -35,6 +35,45 @@ public enum GfxBackend: UInt32, Equatable, Sendable {
   case vulkan = 2
 }
 
+public enum GfxScaleMode: UInt32, Equatable, Sendable {
+  case stretch = 0
+  case keepAspect = 1
+  case integer = 2
+}
+
+public enum GfxFilterMode: UInt32, Equatable, Sendable {
+  case nearest = 0
+  case linear = 1
+}
+
+public struct GfxVideoConfig: Equatable, Sendable {
+  public let baseWidth: UInt32
+  public let baseHeight: UInt32
+  public let maxWidth: UInt32
+  public let maxHeight: UInt32
+  public let aspectRatio: Float
+  public let outputWidth: UInt32
+  public let outputHeight: UInt32
+  public let scaleMode: GfxScaleMode
+  public let filterMode: GfxFilterMode
+  public let rotationQuarters: UInt32
+  public let vsync: Bool
+
+  public init(baseWidth: UInt32, baseHeight: UInt32, maxWidth: UInt32 = 0, maxHeight: UInt32 = 0, aspectRatio: Float = 0, outputWidth: UInt32 = 0, outputHeight: UInt32 = 0, scaleMode: GfxScaleMode = .keepAspect, filterMode: GfxFilterMode = .nearest, rotationQuarters: UInt32 = 0, vsync: Bool = true) {
+    self.baseWidth = baseWidth
+    self.baseHeight = baseHeight
+    self.maxWidth = maxWidth
+    self.maxHeight = maxHeight
+    self.aspectRatio = aspectRatio
+    self.outputWidth = outputWidth
+    self.outputHeight = outputHeight
+    self.scaleMode = scaleMode
+    self.filterMode = filterMode
+    self.rotationQuarters = rotationQuarters
+    self.vsync = vsync
+  }
+}
+
 public struct GfxDriverStatus: Equatable, Sendable {
   public let backend: GfxBackend
   public let frameNumber: UInt64
@@ -109,6 +148,24 @@ public final class Retrofront: @unchecked Sendable {
 
   public func setGfxBackend(_ backend: GfxBackend) throws {
     guard rf_frontend_set_gfx_backend(handle, backend.rawValue) else {
+      throw lastError()
+    }
+  }
+
+  public func setGfxVideoConfig(_ config: GfxVideoConfig) throws {
+    var raw = RfGfxVideoConfig(
+      base_width: config.baseWidth,
+      base_height: config.baseHeight,
+      max_width: config.maxWidth,
+      max_height: config.maxHeight,
+      aspect_ratio: config.aspectRatio,
+      output_width: config.outputWidth,
+      output_height: config.outputHeight,
+      scale_mode: config.scaleMode.rawValue,
+      filter_mode: config.filterMode.rawValue,
+      rotation_quarters: config.rotationQuarters,
+      vsync: config.vsync)
+    guard rf_frontend_set_gfx_video_config(handle, &raw) else {
       throw lastError()
     }
   }

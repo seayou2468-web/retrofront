@@ -39,9 +39,14 @@ typedef struct RfOpenGlRenderCommand {
     uint64_t gl_context;
     uintptr_t framebuffer;
     int32_t viewport[4];
+    uint32_t output_size[2];
     uint32_t texture_size[2];
     bool source_is_hardware;
     bool bottom_left_origin;
+    uint32_t rotation_quarters;
+    uint32_t scale_mode;
+    uint32_t filter_mode;
+    bool vsync;
     float clear_color[4];
     const char *vertex_shader;
     const char *fragment_shader;
@@ -55,8 +60,13 @@ typedef struct RfVulkanRenderCommand {
     uint64_t command_buffer;
     uint64_t image;
     uint32_t extent[2];
+    int32_t viewport[4];
     bool source_is_hardware;
     bool uses_moltenvk;
+    uint32_t rotation_quarters;
+    uint32_t scale_mode;
+    uint32_t filter_mode;
+    bool vsync;
     float clear_color[4];
 } RfVulkanRenderCommand;
 
@@ -64,6 +74,20 @@ typedef bool (*RfOpenGlRenderCallback)(const RfOpenGlRenderCommand *command, con
 typedef bool (*RfVulkanRenderCallback)(const RfVulkanRenderCommand *command, const uint8_t *rgba, uintptr_t rgba_len, void *user_data);
 typedef void (*RfRetroProcAddress)(void);
 typedef RfRetroProcAddress (*RfGetProcAddressCallback)(const char *symbol, void *user_data);
+
+typedef struct RfGfxVideoConfig {
+    uint32_t base_width;
+    uint32_t base_height;
+    uint32_t max_width;
+    uint32_t max_height;
+    float aspect_ratio;
+    uint32_t output_width;
+    uint32_t output_height;
+    uint32_t scale_mode;
+    uint32_t filter_mode;
+    uint32_t rotation_quarters;
+    bool vsync;
+} RfGfxVideoConfig;
 
 typedef struct RfGfxHostHandles {
     uint64_t native_view;
@@ -95,6 +119,7 @@ bool rf_frontend_load_game(RfFrontend *frontend, const char *path, const char *m
 bool rf_frontend_run_frame(RfFrontend *frontend);
 void rf_frontend_unload_game(RfFrontend *frontend);
 bool rf_frontend_set_gfx_backend(RfFrontend *frontend, uint32_t backend);
+bool rf_frontend_set_gfx_video_config(RfFrontend *frontend, const RfGfxVideoConfig *config);
 bool rf_frontend_set_gfx_host_handles(RfFrontend *frontend, const RfGfxHostHandles *handles);
 bool rf_frontend_gfx_driver_info(const RfFrontend *frontend, RfGfxDriverInfo *out_info);
 bool rf_frontend_video_frame_info(const RfFrontend *frontend, RfVideoFrameInfo *out_info);

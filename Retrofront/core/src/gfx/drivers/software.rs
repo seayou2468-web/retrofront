@@ -1,4 +1,5 @@
 use super::{DriverFrame, GfxDriver, PresentStatus};
+use crate::gfx::config::GfxVideoConfig;
 use crate::gfx::context::ContextDriver;
 use crate::gfx::frame::VideoFrame;
 use crate::gfx::hardware::GfxBackendKind;
@@ -6,11 +7,16 @@ use crate::gfx::hardware::GfxBackendKind;
 #[derive(Debug, Clone, Default)]
 pub struct SoftwareDriver {
     last_frame: Option<VideoFrame>,
+    video_config: GfxVideoConfig,
 }
 
 impl SoftwareDriver {
     pub fn last_frame(&self) -> Option<&VideoFrame> {
         self.last_frame.as_ref()
+    }
+
+    pub fn set_video_config(&mut self, config: GfxVideoConfig) {
+        self.video_config = config;
     }
 }
 

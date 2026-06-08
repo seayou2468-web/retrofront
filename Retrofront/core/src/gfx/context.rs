@@ -13,6 +13,8 @@ pub enum ContextEvent {
 pub struct ContextDriver {
     request: Option<HardwareRenderRequest>,
     handles: HostRenderHandles,
+    context_reset: libretro::retro_hw_context_reset_t,
+    context_destroy: libretro::retro_hw_context_reset_t,
     reset_count: u64,
     destroy_count: u64,
 }
@@ -27,7 +29,13 @@ impl ContextDriver {
     pub fn set_request(&mut self, request: HardwareRenderRequest) {
         self.request = Some(request);
     }
+
+    pub fn capture_callbacks(&mut self, raw: &libretro::retro_hw_render_callback) {
+        self.context_reset = raw.context_reset;
+        self.context_destroy = raw.context_destroy;
+    }
     pub fn clear_request(&mut self) {
+        self.notify_destroy();
         self.request = None;
     }
     pub fn set_host_handles(&mut self, handles: HostRenderHandles) {
@@ -46,8 +54,22 @@ impl ContextDriver {
 
     pub fn apply_event(&mut self, event: ContextEvent) {
         match event {
-            ContextEvent::Reset => self.reset_count = self.reset_count.saturating_add(1),
-            ContextEvent::Destroyed => self.destroy_count = self.destroy_count.saturating_add(1),
+            ContextEvent::Reset => self.notify_reset(),
+            ContextEvent::Destroyed => self.notify_destroy(),
+        }
+    }
+
+    pub fn notify_reset(&mut self) {
+        self.reset_count = self.reset_count.saturating_add(1);
+        if let Some(callback) = self.context_reset {
+            unsafe { callback() };
+        }
+    }
+
+    pub fn notify_destroy(&mut self) {
+        self.destroy_count = self.destroy_count.saturating_add(1);
+        if let Some(callback) = self.context_destroy {
+            unsafe { callback() };
         }
     }
 

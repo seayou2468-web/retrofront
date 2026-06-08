@@ -10,8 +10,9 @@ pub mod libretro;
 
 use dylib::Library;
 use gfx::{
-    GfxBackendKind, GfxRuntime, HardwareRenderRequest, HostRenderHandles, OpenGlRenderCommand,
-    PixelFormat, VulkanRenderCommand, RETRO_HW_FRAME_BUFFER_VALID,
+    GfxBackendKind, GfxFilterMode, GfxRuntime, GfxScaleMode, GfxVideoConfig, HardwareRenderRequest,
+    HostRenderHandles, OpenGlRenderCommand, PixelFormat, VulkanRenderCommand,
+    RETRO_HW_FRAME_BUFFER_VALID,
 };
 use std::collections::VecDeque;
 use std::ffi::{CStr, CString};
@@ -435,9 +436,21 @@ unsafe extern "C" fn environment_callback(cmd: c_uint, data: *mut c_void) -> boo
             };
             true
         },
-        libretro::RETRO_ENVIRONMENT_SET_GEOMETRY
-        | libretro::RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO
-        | libretro::RETRO_ENVIRONMENT_GET_LOG_INTERFACE
+        libretro::RETRO_ENVIRONMENT_SET_GEOMETRY => unsafe {
+            let Some(geometry) = data.cast::<libretro::retro_game_geometry>().as_ref() else {
+                return false;
+            };
+            with_active_frontend(|frontend| frontend.gfx.update_geometry(geometry));
+            true
+        },
+        libretro::RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO => unsafe {
+            let Some(av_info) = data.cast::<libretro::retro_system_av_info>().as_ref() else {
+                return false;
+            };
+            with_active_frontend(|frontend| frontend.gfx.update_geometry(&av_info.geometry));
+            true
+        },
+        libretro::RETRO_ENVIRONMENT_GET_LOG_INTERFACE
         | libretro::RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME => true,
         _ => false,
     };
@@ -532,6 +545,21 @@ pub struct RfVideoFrameInfo {
     pub rgba_len: u64,
     pub pixel_format: u32,
     pub frame_number: u64,
+}
+
+#[repr(C)]
+pub struct RfGfxVideoConfig {
+    pub base_width: u32,
+    pub base_height: u32,
+    pub max_width: u32,
+    pub max_height: u32,
+    pub aspect_ratio: f32,
+    pub output_width: u32,
+    pub output_height: u32,
+    pub scale_mode: u32,
+    pub filter_mode: u32,
+    pub rotation_quarters: u32,
+    pub vsync: bool,
 }
 
 #[repr(C)]
@@ -726,6 +754,56 @@ pub unsafe extern "C" fn rf_frontend_set_gfx_backend(
         return false;
     };
     frontend.inner.set_gfx_backend(backend);
+    true
+}
+
+/// Sets RetroArch-style video geometry, aspect, scaling, filtering, rotation and vsync state.
+///
+/// # Safety
+///
+/// `frontend` must be valid and `config` must be readable.
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_set_gfx_video_config(
+    frontend: *mut RfFrontend,
+    config: *const RfGfxVideoConfig,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    let Some(config) = (unsafe { config.as_ref() }) else {
+        set_error(frontend, "gfx video config is null");
+        return false;
+    };
+    let scale_mode = match config.scale_mode {
+        0 => GfxScaleMode::Stretch,
+        1 => GfxScaleMode::KeepAspect,
+        2 => GfxScaleMode::Integer,
+        _ => {
+            set_error(frontend, "unknown gfx scale mode");
+            return false;
+        }
+    };
+    let filter_mode = match config.filter_mode {
+        0 => GfxFilterMode::Nearest,
+        1 => GfxFilterMode::Linear,
+        _ => {
+            set_error(frontend, "unknown gfx filter mode");
+            return false;
+        }
+    };
+    frontend.inner.gfx.set_video_config(GfxVideoConfig {
+        base_width: config.base_width,
+        base_height: config.base_height,
+        max_width: config.max_width,
+        max_height: config.max_height,
+        aspect_ratio: config.aspect_ratio,
+        output_width: config.output_width,
+        output_height: config.output_height,
+        scale_mode,
+        filter_mode,
+        rotation_quarters: config.rotation_quarters % 4,
+        vsync: config.vsync,
+    });
     true
 }
 
