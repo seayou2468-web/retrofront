@@ -16,7 +16,7 @@ final class EmulatorRuntimeModel: ObservableObject {
   @Published var selectedTab: AppSection = .library
   @Published var statusMessage = "Loading bundled emulator core…"
 
-  private let frontend: Retrofront?
+  private var frontend: Retrofront?
   private var runTask: Task<Void, Never>?
 
   init() {
