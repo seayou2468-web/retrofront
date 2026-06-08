@@ -29,6 +29,21 @@ public struct LibretroSystemInfo: Equatable, Sendable {
   public let blocksExtraction: Bool
 }
 
+public enum GfxBackend: UInt32, Equatable, Sendable {
+  case software = 0
+  case openGL = 1
+  case vulkan = 2
+}
+
+public struct VideoFrame: Equatable, Sendable {
+  public let width: UInt32
+  public let height: UInt32
+  public let sourcePitch: UInt64
+  public let pixelFormat: UInt32
+  public let frameNumber: UInt64
+  public let rgba: [UInt8]
+}
+
 public enum FrontendEvent: Equatable, Sendable {
   case videoFrame(width: UInt32, height: UInt32, pitch: UInt64)
   case audioBatch(frames: UInt64)
@@ -83,6 +98,38 @@ public final class Retrofront: @unchecked Sendable {
 
   public func unloadGame() {
     rf_frontend_unload_game(handle)
+  }
+
+  public func setGfxBackend(_ backend: GfxBackend) throws {
+    guard rf_frontend_set_gfx_backend(handle, backend.rawValue) else {
+      throw lastError()
+    }
+  }
+
+  public func latestVideoFrame() -> VideoFrame? {
+    var info = RfVideoFrameInfo()
+    guard rf_frontend_video_frame_info(handle, &info) else { return nil }
+    var rgba = [UInt8](repeating: 0, count: Int(info.rgba_len))
+    let copied = rgba.withUnsafeMutableBufferPointer { buffer in
+      rf_frontend_copy_video_frame_rgba(handle, buffer.baseAddress, UInt(buffer.count))
+    }
+    guard UInt64(copied) == info.rgba_len else { return nil }
+    return VideoFrame(
+      width: info.width,
+      height: info.height,
+      sourcePitch: info.pitch,
+      pixelFormat: info.pixel_format,
+      frameNumber: info.frame_number,
+      rgba: rgba)
+  }
+
+  public static func openGLShaderSources() -> (vertex: String, fragment: String) {
+    var vertex: UnsafePointer<CChar>?
+    var fragment: UnsafePointer<CChar>?
+    rf_frontend_opengl_shader_sources(&vertex, &fragment)
+    return (
+      vertex.map(String.init(cString:)) ?? "",
+      fragment.map(String.init(cString:)) ?? "")
   }
 
   public func systemInfo() throws -> LibretroSystemInfo {

@@ -69,10 +69,15 @@ struct PlaySurfaceView: View {
               Image(systemName: "display")
                 .font(.system(size: 54, weight: .semibold))
                 .foregroundStyle(.orange)
-              Text("Video output surface")
+              Text("Rust gfx video output")
                 .font(.headline)
-              Text("Waiting for a game-loaded libretro core.")
-                .foregroundStyle(.secondary)
+              if let frame = runtime.latestFrame {
+                Text("Latest frame: \(frame.width)×\(frame.height), #\(frame.frameNumber)")
+                  .foregroundStyle(.secondary)
+              } else {
+                Text("Waiting for a core-provided frame buffer.")
+                  .foregroundStyle(.secondary)
+              }
             }
           }
           .aspectRatio(16 / 9, contentMode: .fit)
@@ -80,7 +85,10 @@ struct PlaySurfaceView: View {
 
         HStack(spacing: 14) {
           ControlPill(title: "Menu", symbol: "line.3.horizontal")
-          ControlPill(title: runtime.canRunGame ? "Run" : "Idle", symbol: "play.fill")
+          Button { runtime.runOneFrameFromButton() } label: {
+            ControlPill(title: runtime.canRunGame ? "Run" : "Idle", symbol: "play.fill")
+          }
+          .disabled(!runtime.canRunGame)
           ControlPill(title: "Save", symbol: "square.and.arrow.down")
         }
         Spacer()
@@ -102,6 +110,7 @@ struct CoreStatusView: View {
           LabeledContent("Rust frontend core", value: runtime.isRuntimeConnected ? "Connected" : "Unavailable")
           LabeledContent("Session", value: String(describing: runtime.frontendState))
           LabeledContent("Emulator core", value: runtime.systemInfo?.libraryName ?? "Not loaded")
+          LabeledContent("Gfx path", value: runtime.latestFrame == nil ? "Rust ready" : "Rust displaying frames")
         }
         Section("libretro") {
           LabeledContent("Version", value: runtime.systemInfo?.libraryVersion ?? "—")

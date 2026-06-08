@@ -5,9 +5,11 @@
 //! metadata, and exposes a stable C ABI for Swift UI code on iOS and Linux.
 
 mod dylib;
+pub mod gfx;
 pub mod libretro;
 
 use dylib::Library;
+use gfx::{GfxBackendKind, GfxRuntime, PixelFormat};
 use std::collections::VecDeque;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_uint, c_void};
@@ -33,6 +35,7 @@ type RetroInit = unsafe extern "C" fn();
 type RetroDeinit = unsafe extern "C" fn();
 type RetroApiVersion = unsafe extern "C" fn() -> c_uint;
 type RetroGetSystemInfo = unsafe extern "C" fn(*mut libretro::retro_system_info);
+type RetroGetSystemAvInfo = unsafe extern "C" fn(*mut libretro::retro_system_av_info);
 type RetroLoadGame = unsafe extern "C" fn(*const libretro::retro_game_info) -> bool;
 type RetroUnloadGame = unsafe extern "C" fn();
 type RetroRun = unsafe extern "C" fn();
@@ -58,6 +61,8 @@ pub enum FrontendEvent {
         width: u32,
         height: u32,
         pitch: usize,
+        pixel_format: u32,
+        frame_number: u64,
     },
     AudioBatch {
         frames: usize,
@@ -92,6 +97,7 @@ struct CoreApi {
     retro_deinit: RetroDeinit,
     retro_api_version: RetroApiVersion,
     retro_get_system_info: RetroGetSystemInfo,
+    retro_get_system_av_info: RetroGetSystemAvInfo,
     retro_load_game: RetroLoadGame,
     retro_unload_game: RetroUnloadGame,
     retro_run: RetroRun,
@@ -115,6 +121,11 @@ impl CoreApi {
             retro_deinit: sym!(library, "retro_deinit", RetroDeinit),
             retro_api_version: sym!(library, "retro_api_version", RetroApiVersion),
             retro_get_system_info: sym!(library, "retro_get_system_info", RetroGetSystemInfo),
+            retro_get_system_av_info: sym!(
+                library,
+                "retro_get_system_av_info",
+                RetroGetSystemAvInfo
+            ),
             retro_load_game: sym!(library, "retro_load_game", RetroLoadGame),
             retro_unload_game: sym!(library, "retro_unload_game", RetroUnloadGame),
             retro_run: sym!(library, "retro_run", RetroRun),
@@ -129,6 +140,7 @@ pub struct FrontendCore {
     system_info: Option<SystemInfo>,
     game: Option<GameInfo>,
     events: VecDeque<FrontendEvent>,
+    gfx: GfxRuntime,
     last_error: Option<String>,
 }
 
@@ -167,6 +179,14 @@ impl FrontendCore {
         self.events.pop_front()
     }
 
+    pub fn gfx(&self) -> &GfxRuntime {
+        &self.gfx
+    }
+
+    pub fn set_gfx_backend(&mut self, backend: GfxBackendKind) {
+        self.gfx.set_backend(backend);
+    }
+
     pub fn load_core(&mut self, path: impl AsRef<Path>) -> Result<SystemInfo, String> {
         self.drop_current_core();
         let api = CoreApi::load(path).map_err(|e| self.record_error(e))?;
@@ -189,7 +209,9 @@ impl FrontendCore {
             )));
         }
 
+        set_active_frontend(self as *mut FrontendCore);
         unsafe { (api.retro_init)() };
+        clear_active_frontend();
         let info = read_system_info(&api);
         self.system_info = Some(info.clone());
         self.api = Some(api);
@@ -202,10 +224,11 @@ impl FrontendCore {
             return Err(self.record_error("load a core before loading a game"));
         }
         self.unload_game();
-        let api = self
+        let retro_load_game = self
             .api
             .as_ref()
-            .expect("core presence checked before unloading game");
+            .expect("core presence checked before unloading game")
+            .retro_load_game;
         let path = path.as_ref().to_path_buf();
         let c_path = CString::new(path.to_string_lossy().as_bytes()).map_err(|_| {
             self.record_error(format!(
@@ -226,7 +249,9 @@ impl FrontendCore {
             size: 0,
             meta: c_meta.as_ref().map_or(ptr::null(), |s| s.as_ptr()),
         };
-        let loaded = unsafe { (api.retro_load_game)(&raw) };
+        set_active_frontend(self as *mut FrontendCore);
+        let loaded = unsafe { (retro_load_game)(&raw) };
+        clear_active_frontend();
         if !loaded {
             return Err(
                 self.record_error(format!("libretro core rejected game {}", path.display()))
@@ -236,21 +261,23 @@ impl FrontendCore {
             path,
             meta: meta.map(ToOwned::to_owned),
         });
+        self.refresh_system_av_info();
         self.last_error = None;
         Ok(())
     }
 
     pub fn run_frame(&mut self) -> Result<(), String> {
-        let api = self
+        let retro_run = self
             .api
             .as_ref()
-            .ok_or_else(|| self.record_error("load a core before running a frame"))?;
+            .ok_or_else(|| self.record_error("load a core before running a frame"))?
+            .retro_run;
         if self.game.is_none() {
             return Err(self.record_error("load a game before running a frame"));
         }
-        set_active_events(&mut self.events as *mut VecDeque<FrontendEvent>);
-        unsafe { (api.retro_run)() };
-        clear_active_events();
+        set_active_frontend(self as *mut FrontendCore);
+        unsafe { (retro_run)() };
+        clear_active_frontend();
         self.last_error = None;
         Ok(())
     }
@@ -270,6 +297,17 @@ impl FrontendCore {
         }
         self.system_info = None;
         self.events.clear();
+        self.gfx = GfxRuntime::new();
+    }
+
+    fn refresh_system_av_info(&mut self) {
+        let Some(api) = self.api.as_ref() else { return };
+        let mut av = unsafe { std::mem::zeroed::<libretro::retro_system_av_info>() };
+        unsafe { (api.retro_get_system_av_info)(&mut av) };
+        self.events.push_back(FrontendEvent::EnvironmentCommand {
+            command: libretro::RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO,
+            handled: true,
+        });
     }
 
     fn record_error(&self, message: impl Into<String>) -> String {
@@ -309,40 +347,81 @@ fn c_string(ptr: *const c_char) -> String {
     }
 }
 
-fn active_events() -> &'static Mutex<Option<usize>> {
+fn active_frontend() -> &'static Mutex<Option<usize>> {
     static ACTIVE: OnceLock<Mutex<Option<usize>>> = OnceLock::new();
     ACTIVE.get_or_init(|| Mutex::new(None))
 }
 
-fn set_active_events(events: *mut VecDeque<FrontendEvent>) {
-    *active_events()
+fn set_active_frontend(frontend: *mut FrontendCore) {
+    *active_frontend()
         .lock()
-        .expect("active events mutex poisoned") = Some(events as usize);
+        .expect("active frontend mutex poisoned") = Some(frontend as usize);
 }
 
-fn clear_active_events() {
-    *active_events()
+fn clear_active_frontend() {
+    *active_frontend()
         .lock()
-        .expect("active events mutex poisoned") = None;
+        .expect("active frontend mutex poisoned") = None;
+}
+
+fn with_active_frontend<R>(f: impl FnOnce(&mut FrontendCore) -> R) -> Option<R> {
+    let ptr = *active_frontend()
+        .lock()
+        .expect("active frontend mutex poisoned");
+    ptr.map(|ptr| {
+        let frontend = ptr as *mut FrontendCore;
+        unsafe { f(&mut *frontend) }
+    })
 }
 
 fn push_event(event: FrontendEvent) {
-    let ptr = *active_events()
-        .lock()
-        .expect("active events mutex poisoned");
-    if let Some(ptr) = ptr {
-        let events = ptr as *mut VecDeque<FrontendEvent>;
-        unsafe { (*events).push_back(event) };
-    }
+    let _ = with_active_frontend(|frontend| frontend.events.push_back(event));
 }
 
-unsafe extern "C" fn environment_callback(cmd: c_uint, _data: *mut c_void) -> bool {
-    let handled = matches!(
-        cmd,
-        libretro::RETRO_ENVIRONMENT_GET_LOG_INTERFACE
-            | libretro::RETRO_ENVIRONMENT_SET_PIXEL_FORMAT
-            | libretro::RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME
-    );
+unsafe extern "C" fn environment_callback(cmd: c_uint, data: *mut c_void) -> bool {
+    let handled = match cmd {
+        libretro::RETRO_ENVIRONMENT_SET_PIXEL_FORMAT => unsafe {
+            let Some(raw) = data.cast::<c_uint>().as_ref() else {
+                push_event(FrontendEvent::EnvironmentCommand {
+                    command: cmd,
+                    handled: false,
+                });
+                return false;
+            };
+            let Some(format) = PixelFormat::from_libretro(*raw) else {
+                push_event(FrontendEvent::EnvironmentCommand {
+                    command: cmd,
+                    handled: false,
+                });
+                return false;
+            };
+            with_active_frontend(|frontend| frontend.gfx.set_pixel_format(format));
+            true
+        },
+        libretro::RETRO_ENVIRONMENT_GET_CAN_DUPE => unsafe {
+            if let Some(can_dupe) = data.cast::<bool>().as_mut() {
+                *can_dupe = true;
+                true
+            } else {
+                false
+            }
+        },
+        libretro::RETRO_ENVIRONMENT_SET_HW_RENDER => unsafe {
+            let request =
+                gfx::hw_render_request_from_raw(data.cast::<libretro::retro_hw_render_callback>());
+            if let Some(request) = request {
+                with_active_frontend(|frontend| frontend.gfx.set_hardware_render_request(request));
+                true
+            } else {
+                false
+            }
+        },
+        libretro::RETRO_ENVIRONMENT_SET_GEOMETRY
+        | libretro::RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO
+        | libretro::RETRO_ENVIRONMENT_GET_LOG_INTERFACE
+        | libretro::RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME => true,
+        _ => false,
+    };
     push_event(FrontendEvent::EnvironmentCommand {
         command: cmd,
         handled,
@@ -351,15 +430,33 @@ unsafe extern "C" fn environment_callback(cmd: c_uint, _data: *mut c_void) -> bo
 }
 
 unsafe extern "C" fn video_refresh_callback(
-    _data: *const c_void,
+    data: *const c_void,
     width: c_uint,
     height: c_uint,
     pitch: usize,
 ) {
-    push_event(FrontendEvent::VideoFrame {
-        width,
-        height,
-        pitch,
+    let _ = with_active_frontend(|frontend| {
+        let pixel_format = frontend.gfx.pixel_format().code();
+        let frame_number = match frontend
+            .gfx
+            .ingest_software_frame(data, width, height, pitch)
+        {
+            Ok(frame) => {
+                let _ = (frame.width, frame.height);
+                frontend.gfx.frame_counter()
+            }
+            Err(error) => {
+                frontend.last_error = Some(error);
+                frontend.gfx.frame_counter()
+            }
+        };
+        frontend.events.push_back(FrontendEvent::VideoFrame {
+            width,
+            height,
+            pitch,
+            pixel_format,
+            frame_number,
+        });
     });
 }
 
@@ -400,6 +497,16 @@ pub struct RfEvent {
     pub a: u64,
     pub b: u64,
     pub c: u64,
+}
+
+#[repr(C)]
+pub struct RfVideoFrameInfo {
+    pub width: u32,
+    pub height: u32,
+    pub pitch: u64,
+    pub rgba_len: u64,
+    pub pixel_format: u32,
+    pub frame_number: u64,
 }
 
 #[repr(C)]
@@ -547,6 +654,120 @@ pub unsafe extern "C" fn rf_frontend_unload_game(frontend: *mut RfFrontend) {
     }
 }
 
+/// Selects the shared Rust gfx backend: 0 software, 1 OpenGL/OpenGL ES, 2 Vulkan/MoltenVK.
+///
+/// # Safety
+///
+/// `frontend` must be a valid pointer returned by `rf_frontend_create`.
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_set_gfx_backend(
+    frontend: *mut RfFrontend,
+    backend: c_uint,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    let Some(backend) = GfxBackendKind::from_code(backend) else {
+        set_error(frontend, "unknown gfx backend");
+        return false;
+    };
+    frontend.inner.set_gfx_backend(backend);
+    true
+}
+
+/// Returns metadata for the latest core-provided video frame copied by Rust gfx.
+///
+/// # Safety
+///
+/// `frontend` must be a valid pointer returned by `rf_frontend_create`; `out`
+/// must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_video_frame_info(
+    frontend: *const RfFrontend,
+    out: *mut RfVideoFrameInfo,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_ref() }) else {
+        return false;
+    };
+    let Some(out) = (unsafe { out.as_mut() }) else {
+        return false;
+    };
+    let frame = frontend.inner.gfx().last_frame();
+    if frame.rgba.is_empty() || frame.width == 0 || frame.height == 0 {
+        return false;
+    }
+    *out = RfVideoFrameInfo {
+        width: frame.width,
+        height: frame.height,
+        pitch: frame.pitch as u64,
+        rgba_len: frame.rgba.len() as u64,
+        pixel_format: frame.source_format.code(),
+        frame_number: frontend.inner.gfx().frame_counter(),
+    };
+    true
+}
+
+/// Copies the latest RGBA8888 frame into `out_rgba` and returns bytes copied.
+///
+/// # Safety
+///
+/// `frontend` must be valid. `out_rgba` must be writable for `out_len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_copy_video_frame_rgba(
+    frontend: *const RfFrontend,
+    out_rgba: *mut u8,
+    out_len: usize,
+) -> usize {
+    let Some(frontend) = (unsafe { frontend.as_ref() }) else {
+        return 0;
+    };
+    if out_rgba.is_null() || out_len == 0 {
+        return 0;
+    }
+    let rgba = &frontend.inner.gfx().last_frame().rgba;
+    let count = rgba.len().min(out_len);
+    unsafe { ptr::copy_nonoverlapping(rgba.as_ptr(), out_rgba, count) };
+    count
+}
+
+/// Copies the built-in OpenGL ES shaders used to display RGBA frames.
+///
+/// # Safety
+///
+/// Output pointers may be null; returned strings have static lifetime.
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_opengl_shader_sources(
+    vertex_out: *mut *const c_char,
+    fragment_out: *mut *const c_char,
+) {
+    static VERTEX: &[u8] = concat!(
+        "#version 300 es\n",
+        "precision mediump float;\n",
+        "layout(location = 0) in vec2 a_position;\n",
+        "layout(location = 1) in vec2 a_texcoord;\n",
+        "out vec2 v_texcoord;\n",
+        "void main() { v_texcoord = a_texcoord; gl_Position = vec4(a_position, 0.0, 1.0); }\n",
+        "\0"
+    )
+    .as_bytes();
+    static FRAGMENT: &[u8] = concat!(
+        "#version 300 es\n",
+        "precision mediump float;\n",
+        "in vec2 v_texcoord;\n",
+        "uniform sampler2D u_frame;\n",
+        "out vec4 color;\n",
+        "void main() { color = texture(u_frame, v_texcoord); }\n",
+        "\0"
+    )
+    .as_bytes();
+    if let Some(out) = unsafe { vertex_out.as_mut() } {
+        *out = VERTEX.as_ptr().cast();
+    }
+    if let Some(out) = unsafe { fragment_out.as_mut() } {
+        *out = FRAGMENT.as_ptr().cast();
+    }
+}
+
 /// Copies cached system information into `out`.
 ///
 /// # Safety
@@ -611,6 +832,7 @@ pub unsafe extern "C" fn rf_frontend_next_event(
             width,
             height,
             pitch,
+            ..
         } => RfEvent {
             kind: 1,
             a: width as u64,

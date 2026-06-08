@@ -25,6 +25,15 @@ typedef struct RfEvent {
     uint64_t c;
 } RfEvent;
 
+typedef struct RfVideoFrameInfo {
+    uint32_t width;
+    uint32_t height;
+    uint64_t pitch;
+    uint64_t rgba_len;
+    uint32_t pixel_format;
+    uint64_t frame_number;
+} RfVideoFrameInfo;
+
 RfFrontend *rf_frontend_create(void);
 void rf_frontend_destroy(RfFrontend *frontend);
 uint32_t rf_frontend_state(const RfFrontend *frontend);
@@ -32,6 +41,10 @@ bool rf_frontend_load_core(RfFrontend *frontend, const char *path);
 bool rf_frontend_load_game(RfFrontend *frontend, const char *path, const char *meta);
 bool rf_frontend_run_frame(RfFrontend *frontend);
 void rf_frontend_unload_game(RfFrontend *frontend);
+bool rf_frontend_set_gfx_backend(RfFrontend *frontend, uint32_t backend);
+bool rf_frontend_video_frame_info(const RfFrontend *frontend, RfVideoFrameInfo *out_info);
+uintptr_t rf_frontend_copy_video_frame_rgba(const RfFrontend *frontend, uint8_t *out_rgba, uintptr_t out_len);
+void rf_frontend_opengl_shader_sources(const char **vertex_out, const char **fragment_out);
 bool rf_frontend_system_info(const RfFrontend *frontend, RfSystemInfo *out_info);
 bool rf_frontend_next_event(RfFrontend *frontend, RfEvent *out_event);
 const char *rf_frontend_last_error(const RfFrontend *frontend);
