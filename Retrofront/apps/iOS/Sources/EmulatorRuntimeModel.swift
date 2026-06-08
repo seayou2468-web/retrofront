@@ -4,22 +4,6 @@ import UIKit
 import Combine
 import UniformTypeIdentifiers
 
-public struct CoreDescriptor: Identifiable, Hashable {
-  public let id = UUID()
-  public let url: URL
-  public let isBundled: Bool
-
-  public var displayName: String {
-    url.deletingPathExtension().lastPathComponent
-      .replacingOccurrences(of: "_libretro_ios", with: "")
-      .replacingOccurrences(of: "_libretro", with: "")
-  }
-
-  public var locationDescription: String {
-    isBundled ? "Bundled" : "Imported"
-  }
-}
-
 @MainActor
 public final class EmulatorRuntimeModel: ObservableObject {
   @Published private(set) var frontendState: FrontendState = .empty
@@ -27,9 +11,10 @@ public final class EmulatorRuntimeModel: ObservableObject {
   @Published private(set) var coreOptions: [CoreOption] = []
   @Published private(set) var displayImage: UIImage?
   @Published private(set) var isRunning = false
-  @Published private(set) var availableCores: [CoreDescriptor] = []
-  @Published private(set) var coreURL: URL?
+  @Published private(set) var availableCores: [CoreInfo] = []
+  @Published private(set) var corePath: String?
   @Published private(set) var loadedGameURL: URL?
+  @Published private(set) var currentMenu: MenuList?
   @Published var statusMessage = "Ready"
 
   private var frontend: Retrofront?
@@ -38,6 +23,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
   public init() {
     setupFrontend()
     refreshAvailableCores()
+    refreshMenu()
   }
 
   private func setupFrontend() {
@@ -49,6 +35,11 @@ public final class EmulatorRuntimeModel: ObservableObject {
       let configPath = docs.appendingPathComponent("retrofront-core-options.cfg").path
       try? frontend.setOptionsConfigPath(configPath)
 
+      // Setup Info Dir
+      if let resourceURL = Bundle.main.resourceURL {
+          frontend.setInfoDir(resourceURL.appendingPathComponent("info").path)
+      }
+
       try? frontend.setGfxBackend(.bgfx)
       refresh()
     } catch {
@@ -57,37 +48,31 @@ public final class EmulatorRuntimeModel: ObservableObject {
   }
 
   public func refreshAvailableCores() {
-    var cores: [CoreDescriptor] = []
+    guard let frontend else { return }
 
-    // Bundled cores
+    // Scan Bundled cores
     if let frameworksURL = Bundle.main.privateFrameworksURL {
-        cores.append(contentsOf: dylibURLs(in: frameworksURL).map { CoreDescriptor(url: $0, isBundled: true) })
+        frontend.scanCores(in: frameworksURL.path)
     }
     if let resourceURL = Bundle.main.resourceURL {
-        cores.append(contentsOf: dylibURLs(in: resourceURL).map { CoreDescriptor(url: $0, isBundled: true) })
+        frontend.scanCores(in: resourceURL.path)
     }
 
-    // Imported cores
+    // Scan Imported cores
     let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     let coresDir = docs.appendingPathComponent("Cores")
-    if let urls = try? FileManager.default.contentsOfDirectory(at: coresDir, includingPropertiesForKeys: nil) {
-        cores.append(contentsOf: urls.filter { $0.pathExtension == "dylib" }.map { CoreDescriptor(url: $0, isBundled: false) })
-    }
+    try? FileManager.default.createDirectory(at: coresDir, withIntermediateDirectories: true)
+    frontend.scanCores(in: coresDir.path)
 
-    self.availableCores = cores
+    self.availableCores = frontend.availableCores()
   }
 
-  private func dylibURLs(in directory: URL) -> [URL] {
-    let urls = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-    return urls?.filter { $0.pathExtension == "dylib" } ?? []
-  }
-
-  public func loadCore(_ core: CoreDescriptor) {
+  public func loadCore(_ core: CoreInfo) {
     guard let frontend else { return }
     do {
       stop()
-      systemInfo = try frontend.loadCore(at: core.url.path)
-      coreURL = core.url
+      systemInfo = try frontend.loadCore(at: core.path)
+      corePath = core.path
       refresh()
       statusMessage = "Loaded core: \(systemInfo?.libraryName ?? "Unknown")"
     } catch {
@@ -147,6 +132,17 @@ public final class EmulatorRuntimeModel: ObservableObject {
     guard let frontend else { return }
     frontendState = frontend.state
     coreOptions = frontend.coreOptions()
+    refreshMenu()
+  }
+
+  public func refreshMenu() {
+      currentMenu = frontend?.currentMenuList()
+  }
+
+  public func menuPop() {
+      if frontend?.menuPop() == true {
+          refreshMenu()
+      }
   }
 
   public func setOption(key: String, value: String) {

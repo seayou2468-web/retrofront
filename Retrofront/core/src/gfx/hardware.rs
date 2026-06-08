@@ -125,6 +125,9 @@ pub struct HostRenderHandles {
     pub user_data: *mut c_void,
 }
 
+unsafe impl Send for HostRenderHandles {}
+unsafe impl Sync for HostRenderHandles {}
+
 impl Default for HostRenderHandles {
     fn default() -> Self {
         Self {

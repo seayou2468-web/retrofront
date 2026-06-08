@@ -1,4 +1,4 @@
-//! Retrofront Rust management core.
+content = r'''//! Retrofront Rust management core.
 //!
 //! This crate is **not** an emulator core. It is the frontend's portable
 //! management layer: it loads libretro cores, owns session state, stores ROM
@@ -1239,3 +1239,6 @@ mod tests {
         assert_eq!(frontend.joypad_button(8), 0);
     }
 }
+'''
+with open('Retrofront/core/src/lib.rs', 'w') as f:
+    f.write(content)

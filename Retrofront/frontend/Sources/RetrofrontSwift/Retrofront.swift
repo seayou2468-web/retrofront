@@ -130,6 +130,38 @@ public struct CoreOption: Equatable, Sendable {
   public let values: [CoreOptionValue]
 }
 
+public struct GameEntrySwift: Equatable, Sendable {
+  public let path: String
+  public let label: String
+}
+
+public struct CoreInfo: Equatable, Sendable {
+  public let path: String
+  public let displayName: String
+  public let systemName: String
+  public let supportedExtensions: [String]
+}
+
+public enum MenuEntryKind: UInt32, Sendable {
+  case action = 0
+  case submenu = 1
+  case toggle = 2
+  case setting = 3
+}
+
+public struct MenuEntry: Sendable {
+  public let label: String
+  public let sublabel: String
+  public let kind: MenuEntryKind
+  public let value: String
+  public let actionId: UInt32
+}
+
+public struct MenuList: Sendable {
+  public let title: String
+  public let entries: [MenuEntry]
+}
+
 public final class Retrofront: @unchecked Sendable {
   private let handle: OpaquePointer
 
@@ -281,7 +313,7 @@ public final class Retrofront: @unchecked Sendable {
     var options: [CoreOption] = []
     for i in 0..<count {
       var raw = RfCoreOption()
-      if rf_frontend_get_option(handle, i, &raw) {
+      if rf_frontend_get_option(handle, UInt(i), &raw) {
         var values: [CoreOptionValue] = []
         for j in 0..<raw.values_count {
             let val = raw.values[Int(j)]
@@ -310,6 +342,83 @@ public final class Retrofront: @unchecked Sendable {
 
   public func clearOptionsCache() {
     rf_frontend_clear_options_cache(handle)
+  }
+
+  // Core Discovery
+  public func setInfoDir(_ path: String) {
+    path.withCString { rf_frontend_set_info_dir(handle, $0) }
+  }
+
+  public func scanCores(in directory: String) {
+    directory.withCString { rf_frontend_scan_cores(handle, $0) }
+  }
+
+  public func scanGames(in directory: String, extensions: String) {
+    directory.withCString { d in
+      extensions.withCString { e in
+        rf_frontend_scan_games(handle, d, e)
+      }
+    }
+  }
+
+  public func availableGames() -> [GameEntrySwift] {
+    let count = rf_frontend_games_count(handle)
+    var games: [GameEntrySwift] = []
+    for i in 0..<count {
+      var raw = RfGameEntry()
+      if rf_frontend_get_game_info(handle, UInt(i), &raw) {
+        games.append(GameEntrySwift(
+          path: String(cString: raw.path),
+          label: String(cString: raw.label)
+        ))
+      }
+    }
+    return games
+  }
+
+  public func availableCores() -> [CoreInfo] {
+    let count = rf_frontend_cores_count(handle)
+    var cores: [CoreInfo] = []
+    for i in 0..<count {
+      var raw = RfCoreInfo()
+      if rf_frontend_get_core_info(handle, UInt(i), &raw) {
+        cores.append(CoreInfo(
+          path: String(cString: raw.path),
+          displayName: String(cString: raw.display_name),
+          systemName: String(cString: raw.system_name),
+          supportedExtensions: String(cString: raw.supported_extensions).split(separator: "|").map(String.init)
+        ))
+      }
+    }
+    return cores
+  }
+
+  // Menu Engine
+  public func currentMenuList() -> MenuList? {
+    var raw = RfMenuList()
+    guard rf_frontend_menu_current_list(handle, &raw) else { return nil }
+    var entries: [MenuEntry] = []
+    for i in 0..<raw.entry_count {
+      var entryRaw = RfMenuEntry()
+      if rf_frontend_menu_get_entry(handle, UInt(i), &entryRaw) {
+        entries.append(MenuEntry(
+          label: String(cString: entryRaw.label),
+          sublabel: String(cString: entryRaw.sublabel),
+          kind: MenuEntryKind(rawValue: entryRaw.kind) ?? .action,
+          value: String(cString: entryRaw.value),
+          actionId: entryRaw.action_id
+        ))
+      }
+    }
+    return MenuList(title: String(cString: raw.title), entries: entries)
+  }
+
+  public func pushCoreList() {
+    rf_frontend_menu_push_core_list(handle)
+  }
+
+  public func menuPop() -> Bool {
+    return rf_frontend_menu_pop(handle)
   }
 
   private func lastError() -> RetrofrontError {

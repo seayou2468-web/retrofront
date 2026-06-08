@@ -1,18 +1,41 @@
 /// How the frontend should scale a core frame into the output surface.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GfxScaleMode {
     Stretch = 0,
+    #[default]
     KeepAspect = 1,
     Integer = 2,
 }
 
+impl GfxScaleMode {
+    pub fn from_code(code: u32) -> Option<Self> {
+        match code {
+            0 => Some(Self::Stretch),
+            1 => Some(Self::KeepAspect),
+            2 => Some(Self::Integer),
+            _ => None,
+        }
+    }
+}
+
 /// Texture sampling requested for the final frame pass.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GfxFilterMode {
+    #[default]
     Nearest = 0,
     Linear = 1,
+}
+
+impl GfxFilterMode {
+    pub fn from_code(code: u32) -> Option<Self> {
+        match code {
+            0 => Some(Self::Nearest),
+            1 => Some(Self::Linear),
+            _ => None,
+        }
+    }
 }
 
 /// Runtime video geometry and presentation options mirrored from RetroArch's

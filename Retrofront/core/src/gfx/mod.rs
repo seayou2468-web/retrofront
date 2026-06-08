@@ -56,6 +56,11 @@ impl GfxRuntime {
         self.pixel_format = format;
     }
 
+    pub fn update_system_av_info(&mut self, av_info: &crate::libretro::retro_system_av_info) {
+        let config = GfxVideoConfig::from_libretro_geometry(&av_info.geometry);
+        self.set_video_config(config);
+    }
+
     pub fn set_video_config(&mut self, config: GfxVideoConfig) {
         self.video_config = config;
         self.software.set_video_config(config);

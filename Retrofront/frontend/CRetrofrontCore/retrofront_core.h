@@ -98,6 +98,26 @@ typedef struct RfCoreOption {
     uintptr_t values_count;
 } RfCoreOption;
 
+typedef struct RfCoreInfo {
+    const char *path;
+    const char *display_name;
+    const char *system_name;
+    const char *supported_extensions;
+} RfCoreInfo;
+
+typedef struct RfMenuEntry {
+    const char *label;
+    const char *sublabel;
+    uint32_t kind;
+    const char *value;
+    uint32_t action_id;
+} RfMenuEntry;
+
+typedef struct RfMenuList {
+    const char *title;
+    uintptr_t entry_count;
+} RfMenuList;
+
 RfFrontend *rf_frontend_create(void);
 void rf_frontend_destroy(RfFrontend *frontend);
 uint32_t rf_frontend_state(const RfFrontend *frontend);
@@ -122,6 +142,26 @@ uintptr_t rf_frontend_options_count(const RfFrontend *frontend);
 bool rf_frontend_get_option(RfFrontend *frontend, uintptr_t index, RfCoreOption *out_option);
 bool rf_frontend_set_option(RfFrontend *frontend, const char *key, const char *value);
 void rf_frontend_clear_options_cache(RfFrontend *frontend);
+
+// Core Discovery API
+void rf_frontend_set_info_dir(RfFrontend *frontend, const char *path);
+void rf_frontend_scan_cores(RfFrontend *frontend, const char *cores_dir);
+uintptr_t rf_frontend_cores_count(const RfFrontend *frontend);
+bool rf_frontend_get_core_info(RfFrontend *frontend, uintptr_t index, RfCoreInfo *out_info);
+typedef struct RfGameEntry {
+    const char *path;
+    const char *label;
+} RfGameEntry;
+
+void rf_frontend_scan_games(RfFrontend *frontend, const char *directory, const char *extensions);
+uintptr_t rf_frontend_games_count(const RfFrontend *frontend);
+bool rf_frontend_get_game_info(RfFrontend *frontend, uintptr_t index, RfGameEntry *out_info);
+
+// Menu Engine API
+bool rf_frontend_menu_current_list(RfFrontend *frontend, RfMenuList *out_list);
+bool rf_frontend_menu_get_entry(RfFrontend *frontend, uintptr_t index, RfMenuEntry *out_entry);
+void rf_frontend_menu_push_core_list(RfFrontend *frontend);
+bool rf_frontend_menu_pop(RfFrontend *frontend);
 
 #ifdef __cplusplus
 }
