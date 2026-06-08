@@ -18,3 +18,5 @@ default = []
 
 [build-dependencies]
 bindgen = "0.69"
+
+[dependencies]

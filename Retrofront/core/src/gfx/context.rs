@@ -1,4 +1,4 @@
-use super::hardware::{HardwareRenderRequest, HostRenderHandles};
+use super::hardware::{HardwareRenderRequest, HostRenderHandles, GfxBackendKind};
 use crate::libretro;
 use std::ffi::CStr;
 use std::os::raw::c_char;
@@ -20,13 +20,19 @@ pub struct ContextDriver {
 }
 
 impl ContextDriver {
-    pub fn request(&self) -> Option<HardwareRenderRequest> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn hardware_request(&self) -> Option<HardwareRenderRequest> {
         self.request
     }
+
     pub fn handles(&self) -> HostRenderHandles {
         self.handles
     }
-    pub fn set_request(&mut self, request: HardwareRenderRequest) {
+
+    pub fn set_hardware_request(&mut self, request: HardwareRenderRequest) {
         self.request = Some(request);
     }
 
@@ -34,20 +40,21 @@ impl ContextDriver {
         self.context_reset = raw.context_reset;
         self.context_destroy = raw.context_destroy;
     }
+
     pub fn clear_request(&mut self) {
         self.notify_destroy();
         self.request = None;
     }
-    pub fn set_host_handles(&mut self, handles: HostRenderHandles) {
+
+    pub fn set_handles(&mut self, handles: HostRenderHandles) {
         self.handles = handles;
     }
 
     pub fn hardware_ready(&self) -> bool {
         self.request
             .map(|request| match request.preferred_backend() {
-                super::hardware::GfxBackendKind::Software => true,
-                super::hardware::GfxBackendKind::OpenGl => self.handles.has_opengl(),
-                super::hardware::GfxBackendKind::Vulkan => self.handles.has_vulkan(),
+                GfxBackendKind::Software => true,
+                GfxBackendKind::Bgfx => self.handles.is_valid(),
             })
             .unwrap_or(false)
     }
@@ -80,7 +87,7 @@ impl ContextDriver {
 }
 
 unsafe extern "C" fn get_current_framebuffer() -> usize {
-    crate::with_active_frontend(|frontend| frontend.gfx.context_handles().gl_framebuffer)
+    crate::with_active_frontend(|frontend| frontend.gfx.context_handles().framebuffer)
         .unwrap_or(usize::MAX)
 }
 

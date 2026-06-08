@@ -10,9 +10,8 @@ pub mod libretro;
 
 use dylib::Library;
 use gfx::{
-    GfxBackendKind, GfxFilterMode, GfxRuntime, GfxScaleMode, GfxVideoConfig, HardwareRenderRequest,
-    HostRenderHandles, OpenGlRenderCommand, PixelFormat, VulkanRenderCommand,
-    RETRO_HW_FRAME_BUFFER_VALID,
+    GfxBackendKind, GfxRuntime, HardwareRenderRequest,
+    HostRenderHandles, PixelFormat,
 };
 use std::collections::VecDeque;
 use std::ffi::{CStr, CString};
@@ -20,6 +19,8 @@ use std::os::raw::{c_char, c_uint, c_void};
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::{Mutex, OnceLock};
+
+pub const RETRO_HW_FRAME_BUFFER_VALID: *const u8 = usize::MAX as *const u8;
 
 macro_rules! sym {
     ($lib:expr, $name:literal, $ty:ty) => {{
@@ -109,93 +110,65 @@ struct CoreApi {
 
 impl CoreApi {
     fn load(path: impl AsRef<Path>) -> Result<Self, String> {
-        let library = open_core_library(path.as_ref())?;
-        Ok(Self {
-            retro_set_environment: sym!(library, "retro_set_environment", RetroSetEnvironment),
-            retro_set_video_refresh: sym!(library, "retro_set_video_refresh", RetroSetVideoRefresh),
-            retro_set_audio_sample: sym!(library, "retro_set_audio_sample", RetroSetAudioSample),
-            retro_set_audio_sample_batch: sym!(
-                library,
-                "retro_set_audio_sample_batch",
-                RetroSetAudioSampleBatch
-            ),
-            retro_set_input_poll: sym!(library, "retro_set_input_poll", RetroSetInputPoll),
-            retro_set_input_state: sym!(library, "retro_set_input_state", RetroSetInputState),
-            retro_init: sym!(library, "retro_init", RetroInit),
-            retro_deinit: sym!(library, "retro_deinit", RetroDeinit),
-            retro_api_version: sym!(library, "retro_api_version", RetroApiVersion),
-            retro_get_system_info: sym!(library, "retro_get_system_info", RetroGetSystemInfo),
-            retro_get_system_av_info: sym!(
-                library,
-                "retro_get_system_av_info",
-                RetroGetSystemAvInfo
-            ),
-            retro_load_game: sym!(library, "retro_load_game", RetroLoadGame),
-            retro_unload_game: sym!(library, "retro_unload_game", RetroUnloadGame),
-            retro_run: sym!(library, "retro_run", RetroRun),
-            _library: library,
-        })
-    }
-}
-
-fn open_core_library(path: &Path) -> Result<Library, String> {
-    let path_text = path.to_string_lossy();
-    let mut candidates = Vec::new();
-
-    candidates.push(path_text.to_string());
-
-    if let Some(file_name) = path.file_name().and_then(|name| name.to_str()) {
-        candidates.push(format!("@executable_path/Frameworks/{file_name}"));
-        candidates.push(format!("@loader_path/Frameworks/{file_name}"));
-    }
-
-    candidates.dedup();
-
-    let mut errors = Vec::new();
-    for candidate in &candidates {
-        match Library::open(candidate) {
-            Ok(library) => return Ok(library),
-            Err(error) => errors.push(format!("{candidate}: {error}")),
+        let lib = Library::open(path.as_ref()).map_err(|e| e.to_string())?;
+        unsafe {
+            Ok(Self {
+                retro_set_environment: sym!(lib, "retro_set_environment", RetroSetEnvironment),
+                retro_set_video_refresh: sym!(lib, "retro_set_video_refresh", RetroSetVideoRefresh),
+                retro_set_audio_sample: sym!(lib, "retro_set_audio_sample", RetroSetAudioSample),
+                retro_set_audio_sample_batch: sym!(
+                    lib,
+                    "retro_set_audio_sample_batch",
+                    RetroSetAudioSampleBatch
+                ),
+                retro_set_input_poll: sym!(lib, "retro_set_input_poll", RetroSetInputPoll),
+                retro_set_input_state: sym!(lib, "retro_set_input_state", RetroSetInputState),
+                retro_init: sym!(lib, "retro_init", RetroInit),
+                retro_deinit: sym!(lib, "retro_deinit", RetroDeinit),
+                retro_api_version: sym!(lib, "retro_api_version", RetroApiVersion),
+                retro_get_system_info: sym!(lib, "retro_get_system_info", RetroGetSystemInfo),
+                retro_get_system_av_info: sym!(
+                    lib,
+                    "retro_get_system_av_info",
+                    RetroGetSystemAvInfo
+                ),
+                retro_load_game: sym!(lib, "retro_load_game", RetroLoadGame),
+                retro_unload_game: sym!(lib, "retro_unload_game", RetroUnloadGame),
+                retro_run: sym!(lib, "retro_run", RetroRun),
+                _library: lib,
+            })
         }
     }
-
-    Err(format!(
-        "failed to open libretro core {}; tried {}",
-        path.display(),
-        errors.join("; ")
-    ))
 }
 
-#[derive(Default)]
 pub struct FrontendCore {
     api: Option<CoreApi>,
     system_info: Option<SystemInfo>,
     game: Option<GameInfo>,
     events: VecDeque<FrontendEvent>,
-    gfx: GfxRuntime,
-    last_error: Option<String>,
     joypad_buttons: [i16; 16],
-}
-
-impl Drop for FrontendCore {
-    fn drop(&mut self) {
-        self.unload_game();
-        if let Some(api) = self.api.take() {
-            unsafe { (api.retro_deinit)() };
-        }
-    }
+    pub gfx: GfxRuntime,
 }
 
 impl FrontendCore {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            api: None,
+            system_info: None,
+            game: None,
+            events: VecDeque::new(),
+            joypad_buttons: [0; 16],
+            gfx: GfxRuntime::new(),
+        }
     }
 
     pub fn state(&self) -> SessionState {
-        match (&self.api, &self.game) {
-            (None, _) => SessionState::Empty,
-            (Some(_), None) => SessionState::CoreLoaded,
-            (Some(_), Some(_)) => SessionState::GameLoaded,
+        if self.game.is_some() {
+            SessionState::GameLoaded
+        } else if self.api.is_some() {
+            SessionState::CoreLoaded
+        } else {
+            SessionState::Empty
         }
     }
 
@@ -206,7 +179,7 @@ impl FrontendCore {
         self.game.as_ref()
     }
     pub fn last_error(&self) -> Option<&str> {
-        self.last_error.as_deref()
+        None // last_error is managed in RfFrontend
     }
     pub fn next_event(&mut self) -> Option<FrontendEvent> {
         self.events.pop_front()
@@ -222,10 +195,9 @@ impl FrontendCore {
 
     pub fn set_joypad_button(&mut self, button_id: u32, pressed: bool) -> Result<(), String> {
         let Some(slot) = self.joypad_buttons.get_mut(button_id as usize) else {
-            return Err(self.record_error(format!("unknown joypad button id {button_id}")));
+            return Err(format!("unknown joypad button id {button_id}"));
         };
         *slot = if pressed { 1 } else { 0 };
-        self.last_error = None;
         Ok(())
     }
 
@@ -238,7 +210,7 @@ impl FrontendCore {
 
     pub fn load_core(&mut self, path: impl AsRef<Path>) -> Result<SystemInfo, String> {
         self.drop_current_core();
-        let api = CoreApi::load(path).map_err(|e| self.record_error(e))?;
+        let api = CoreApi::load(path)?;
 
         unsafe {
             (api.retro_set_environment)(Some(environment_callback));
@@ -251,11 +223,11 @@ impl FrontendCore {
 
         let version = unsafe { (api.retro_api_version)() };
         if version != libretro::RETRO_API_VERSION {
-            return Err(self.record_error(format!(
+            return Err(format!(
                 "unsupported libretro API version {}; expected {}",
                 version,
                 libretro::RETRO_API_VERSION
-            )));
+            ));
         }
 
         set_active_frontend(self as *mut FrontendCore);
@@ -264,13 +236,12 @@ impl FrontendCore {
         let info = read_system_info(&api);
         self.system_info = Some(info.clone());
         self.api = Some(api);
-        self.last_error = None;
         Ok(info)
     }
 
     pub fn load_game(&mut self, path: impl AsRef<Path>, meta: Option<&str>) -> Result<(), String> {
         if self.api.is_none() {
-            return Err(self.record_error("load a core before loading a game"));
+            return Err("load a core before loading a game".to_string());
         }
         self.unload_game();
         let retro_load_game = self
@@ -280,15 +251,15 @@ impl FrontendCore {
             .retro_load_game;
         let path = path.as_ref().to_path_buf();
         let c_path = CString::new(path.to_string_lossy().as_bytes()).map_err(|_| {
-            self.record_error(format!(
+            format!(
                 "game path contains an interior NUL: {}",
                 path.display()
-            ))
+            )
         })?;
         let c_meta = match meta {
             Some(value) => Some(
                 CString::new(value)
-                    .map_err(|_| self.record_error("game metadata contains an interior NUL"))?,
+                    .map_err(|_| "game metadata contains an interior NUL")?,
             ),
             None => None,
         };
@@ -303,7 +274,7 @@ impl FrontendCore {
         clear_active_frontend();
         if !loaded {
             return Err(
-                self.record_error(format!("libretro core rejected game {}", path.display()))
+                format!("libretro core rejected game {}", path.display())
             );
         }
         self.game = Some(GameInfo {
@@ -311,7 +282,6 @@ impl FrontendCore {
             meta: meta.map(ToOwned::to_owned),
         });
         self.refresh_system_av_info();
-        self.last_error = None;
         Ok(())
     }
 
@@ -319,15 +289,14 @@ impl FrontendCore {
         let retro_run = self
             .api
             .as_ref()
-            .ok_or_else(|| self.record_error("load a core before running a frame"))?
+            .ok_or_else(|| "load a core before running a frame".to_string())?
             .retro_run;
         if self.game.is_none() {
-            return Err(self.record_error("load a game before running a frame"));
+            return Err("load a game before running a frame".to_string());
         }
         set_active_frontend(self as *mut FrontendCore);
         unsafe { (retro_run)() };
         clear_active_frontend();
-        self.last_error = None;
         Ok(())
     }
 
@@ -357,10 +326,6 @@ impl FrontendCore {
             command: libretro::RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO,
             handled: true,
         });
-    }
-
-    fn record_error(&self, message: impl Into<String>) -> String {
-        message.into()
     }
 }
 
@@ -401,109 +366,60 @@ fn active_frontend() -> &'static Mutex<Option<usize>> {
     ACTIVE.get_or_init(|| Mutex::new(None))
 }
 
-fn set_active_frontend(frontend: *mut FrontendCore) {
-    *active_frontend()
-        .lock()
-        .expect("active frontend mutex poisoned") = Some(frontend as usize);
+fn set_active_frontend(ptr: *mut FrontendCore) {
+    let mut active = active_frontend().lock().unwrap();
+    *active = Some(ptr as usize);
 }
 
 fn clear_active_frontend() {
-    *active_frontend()
-        .lock()
-        .expect("active frontend mutex poisoned") = None;
+    let mut active = active_frontend().lock().unwrap();
+    *active = None;
 }
 
-fn with_active_frontend<R>(f: impl FnOnce(&mut FrontendCore) -> R) -> Option<R> {
-    let ptr = *active_frontend()
-        .lock()
-        .expect("active frontend mutex poisoned");
-    ptr.map(|ptr| {
-        let frontend = ptr as *mut FrontendCore;
-        unsafe { f(&mut *frontend) }
-    })
+pub fn with_active_frontend<R>(f: impl FnOnce(&mut FrontendCore) -> R) -> Option<R> {
+    let active = active_frontend().lock().unwrap();
+    active.map(|ptr| unsafe { f(&mut *(ptr as *mut FrontendCore)) })
 }
 
-fn push_event(event: FrontendEvent) {
-    let _ = with_active_frontend(|frontend| frontend.events.push_back(event));
-}
-
-unsafe extern "C" fn environment_callback(cmd: c_uint, data: *mut c_void) -> bool {
-    let handled = match cmd {
-        libretro::RETRO_ENVIRONMENT_SET_PIXEL_FORMAT => unsafe {
-            let Some(raw) = data.cast::<c_uint>().as_ref() else {
-                push_event(FrontendEvent::EnvironmentCommand {
-                    command: cmd,
-                    handled: false,
-                });
-                return false;
-            };
-            let Some(format) = PixelFormat::from_libretro(*raw) else {
-                push_event(FrontendEvent::EnvironmentCommand {
-                    command: cmd,
-                    handled: false,
-                });
-                return false;
-            };
-            with_active_frontend(|frontend| frontend.gfx.set_pixel_format(format));
+unsafe extern "C" fn environment_callback(command: c_uint, data: *mut c_void) -> bool {
+    with_active_frontend(|frontend| match command {
+        libretro::RETRO_ENVIRONMENT_GET_CAN_DUPE => {
+            if !data.is_null() {
+                unsafe { *(data.cast::<bool>()) = true };
+            }
             true
-        },
-        libretro::RETRO_ENVIRONMENT_GET_CAN_DUPE => unsafe {
-            if let Some(can_dupe) = data.cast::<bool>().as_mut() {
-                *can_dupe = true;
+        }
+        libretro::RETRO_ENVIRONMENT_SET_PIXEL_FORMAT => {
+            if data.is_null() {
+                return false;
+            }
+            let format = unsafe { *(data.cast::<u32>()) };
+            if let Some(pixel_format) = PixelFormat::from_libretro(format) {
+                frontend.gfx.set_pixel_format(pixel_format);
                 true
             } else {
                 false
             }
-        },
-        libretro::RETRO_ENVIRONMENT_SET_HW_RENDER => unsafe {
-            let Some(raw) = data.cast::<libretro::retro_hw_render_callback>().as_mut() else {
+        }
+        libretro::RETRO_ENVIRONMENT_SET_HW_RENDER => {
+            if data.is_null() {
                 return false;
-            };
+            }
+            let raw = unsafe { &mut *(data.cast::<libretro::retro_hw_render_callback>()) };
             let request = HardwareRenderRequest::from_libretro(raw);
-            with_active_frontend(|frontend| {
-                frontend.gfx.set_hardware_render_request(request);
-                frontend.gfx.patch_hw_render_callback(raw);
+            frontend.gfx.set_hardware_render_request(request);
+            frontend.gfx.patch_hw_render_callback(raw);
+            true
+        }
+        _ => {
+            frontend.events.push_back(FrontendEvent::EnvironmentCommand {
+                command,
+                handled: false,
             });
-            true
-        },
-        libretro::RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER => unsafe {
-            let Some(out) = data.cast::<c_uint>().as_mut() else {
-                return false;
-            };
-            let preferred = with_active_frontend(|frontend| frontend.gfx.backend())
-                .unwrap_or(GfxBackendKind::Software);
-            *out = match preferred {
-                GfxBackendKind::Software => libretro::retro_hw_context_type_RETRO_HW_CONTEXT_NONE,
-                GfxBackendKind::OpenGl => {
-                    libretro::retro_hw_context_type_RETRO_HW_CONTEXT_OPENGLES_VERSION
-                }
-                GfxBackendKind::Vulkan => libretro::retro_hw_context_type_RETRO_HW_CONTEXT_VULKAN,
-            };
-            true
-        },
-        libretro::RETRO_ENVIRONMENT_SET_GEOMETRY => unsafe {
-            let Some(geometry) = data.cast::<libretro::retro_game_geometry>().as_ref() else {
-                return false;
-            };
-            with_active_frontend(|frontend| frontend.gfx.update_geometry(geometry));
-            true
-        },
-        libretro::RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO => unsafe {
-            let Some(av_info) = data.cast::<libretro::retro_system_av_info>().as_ref() else {
-                return false;
-            };
-            with_active_frontend(|frontend| frontend.gfx.update_geometry(&av_info.geometry));
-            true
-        },
-        libretro::RETRO_ENVIRONMENT_GET_LOG_INTERFACE
-        | libretro::RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME => true,
-        _ => false,
-    };
-    push_event(FrontendEvent::EnvironmentCommand {
-        command: cmd,
-        handled,
-    });
-    handled
+            false
+        }
+    })
+    .unwrap_or(false)
 }
 
 unsafe extern "C" fn video_refresh_callback(
@@ -512,60 +428,65 @@ unsafe extern "C" fn video_refresh_callback(
     height: c_uint,
     pitch: usize,
 ) {
-    let _ = with_active_frontend(|frontend| {
-        let pixel_format = frontend.gfx.pixel_format().code();
-        let frame_number = match if data == RETRO_HW_FRAME_BUFFER_VALID {
-            frontend
-                .gfx
-                .ingest_hardware_frame(width, height)
-                .map(|_| frontend.gfx.last_frame())
+    with_active_frontend(|frontend| {
+        let frame_number = if data == RETRO_HW_FRAME_BUFFER_VALID as *const c_void {
+            frontend.gfx.ingest_hardware_frame(width, height).ok();
+            frontend.gfx.frame_counter()
+        } else if !data.is_null() {
+            frontend.gfx.ingest_software_frame(data.cast(), width, height, pitch).ok();
+            frontend.gfx.frame_counter()
         } else {
-            frontend
-                .gfx
-                .ingest_software_frame(data, width, height, pitch)
-        } {
-            Ok(frame) => {
-                let _ = (frame.width, frame.height);
-                frontend.gfx.frame_counter()
-            }
-            Err(error) => {
-                frontend.last_error = Some(error);
-                frontend.gfx.frame_counter()
-            }
+            0
         };
+
         frontend.events.push_back(FrontendEvent::VideoFrame {
             width,
             height,
             pitch,
-            pixel_format,
+            pixel_format: 0, // TODO
             frame_number,
         });
     });
 }
 
 unsafe extern "C" fn audio_sample_callback(left: i16, right: i16) {
-    push_event(FrontendEvent::AudioSample { left, right });
+    with_active_frontend(|frontend| {
+        frontend
+            .events
+            .push_back(FrontendEvent::AudioSample { left, right });
+    });
 }
 
 unsafe extern "C" fn audio_sample_batch_callback(_data: *const i16, frames: usize) -> usize {
-    push_event(FrontendEvent::AudioBatch { frames });
-    frames
+    with_active_frontend(|frontend| {
+        frontend
+            .events
+            .push_back(FrontendEvent::AudioBatch { frames });
+        frames
+    })
+    .unwrap_or(0)
 }
 
 unsafe extern "C" fn input_poll_callback() {
-    push_event(FrontendEvent::InputPoll);
+    with_active_frontend(|frontend| {
+        frontend.events.push_back(FrontendEvent::InputPoll);
+    });
 }
 
 unsafe extern "C" fn input_state_callback(
     port: c_uint,
     device: c_uint,
-    _index: c_uint,
+    index: c_uint,
     id: c_uint,
 ) -> i16 {
-    if port != 0 || device != libretro::RETRO_DEVICE_JOYPAD {
-        return 0;
-    }
-    with_active_frontend(|frontend| frontend.joypad_button(id)).unwrap_or(0)
+    with_active_frontend(|frontend| {
+        if port == 0 && device == libretro::RETRO_DEVICE_JOYPAD && index == 0 {
+            frontend.joypad_button(id)
+        } else {
+            0
+        }
+    })
+    .unwrap_or(0)
 }
 
 #[repr(C)]
@@ -579,7 +500,7 @@ pub struct RfSystemInfo {
 
 #[repr(C)]
 pub struct RfEvent {
-    pub kind: c_uint,
+    pub kind: u32,
     pub a: u64,
     pub b: u64,
     pub c: u64,
@@ -613,21 +534,10 @@ pub struct RfGfxVideoConfig {
 #[repr(C)]
 pub struct RfGfxHostHandles {
     pub native_view: u64,
-    pub gl_context: u64,
-    pub gl_framebuffer: usize,
-    pub vulkan_instance: u64,
-    pub vulkan_device: u64,
-    pub vulkan_queue: u64,
-    pub vulkan_command_buffer: u64,
-    pub vulkan_image: u64,
-    pub opengl_render: Option<
-        unsafe extern "C" fn(*const OpenGlRenderCommand, *const u8, usize, *mut c_void) -> bool,
-    >,
-    pub vulkan_render: Option<
-        unsafe extern "C" fn(*const VulkanRenderCommand, *const u8, usize, *mut c_void) -> bool,
-    >,
-    pub get_proc_address:
-        Option<unsafe extern "C" fn(*const c_char, *mut c_void) -> libretro::retro_proc_address_t>,
+    pub context: u64,
+    pub framebuffer: usize,
+    pub render_callback: Option<gfx::hardware::BgfxRenderCallback>,
+    pub get_proc_address: Option<gfx::hardware::GetProcAddressCallback>,
     pub user_data: *mut c_void,
 }
 
@@ -639,7 +549,6 @@ pub struct RfGfxDriverInfo {
     pub rendered: bool,
 }
 
-#[repr(C)]
 pub struct RfFrontend {
     inner: FrontendCore,
     info_name: CString,
@@ -649,7 +558,7 @@ pub struct RfFrontend {
 }
 
 #[no_mangle]
-pub extern "C" fn rf_frontend_create() -> *mut RfFrontend {
+pub unsafe extern "C" fn rf_frontend_create() -> *mut RfFrontend {
     Box::into_raw(Box::new(RfFrontend {
         inner: FrontendCore::new(),
         info_name: CString::default(),
@@ -659,26 +568,15 @@ pub extern "C" fn rf_frontend_create() -> *mut RfFrontend {
     }))
 }
 
-/// Destroys a frontend allocated by [`rf_frontend_create`].
-///
-/// # Safety
-///
-/// `frontend` must be either null or a pointer returned by `rf_frontend_create`
-/// that has not already been destroyed.
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_destroy(frontend: *mut RfFrontend) {
     if !frontend.is_null() {
-        drop(unsafe { Box::from_raw(frontend) });
+        unsafe { drop(Box::from_raw(frontend)) };
     }
 }
 
-/// Returns the current frontend state code.
-///
-/// # Safety
-///
-/// `frontend` must be null or a valid pointer returned by `rf_frontend_create`.
 #[no_mangle]
-pub unsafe extern "C" fn rf_frontend_state(frontend: *const RfFrontend) -> c_uint {
+pub unsafe extern "C" fn rf_frontend_state(frontend: *const RfFrontend) -> u32 {
     let Some(frontend) = (unsafe { frontend.as_ref() }) else {
         return 0;
     };
@@ -689,12 +587,6 @@ pub unsafe extern "C" fn rf_frontend_state(frontend: *const RfFrontend) -> c_uin
     }
 }
 
-/// Loads and initializes a libretro core from `path`.
-///
-/// # Safety
-///
-/// `frontend` must be a valid pointer returned by `rf_frontend_create`; `path`
-/// must point to a valid null-terminated UTF-8 string for the duration of the call.
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_load_core(
     frontend: *mut RfFrontend,
@@ -703,13 +595,13 @@ pub unsafe extern "C" fn rf_frontend_load_core(
     let Some(frontend) = (unsafe { frontend.as_mut() }) else {
         return false;
     };
-    let Some(path) = ptr_to_str(path) else {
-        set_error(frontend, "core path is null or invalid UTF-8");
+    let Some(path_str) = ptr_to_str(path) else {
         return false;
     };
-    match frontend.inner.load_core(path) {
+    match frontend.inner.load_core(path_str) {
         Ok(info) => {
             cache_system_info(frontend, &info);
+            frontend.last_error = CString::default();
             true
         }
         Err(error) => {
@@ -719,13 +611,6 @@ pub unsafe extern "C" fn rf_frontend_load_core(
     }
 }
 
-/// Loads a game into the active libretro core.
-///
-/// # Safety
-///
-/// `frontend` must be a valid pointer returned by `rf_frontend_create`; `path`
-/// must be a valid null-terminated UTF-8 string, and `meta` must be null or a
-/// valid null-terminated UTF-8 string for the duration of the call.
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_load_game(
     frontend: *mut RfFrontend,
@@ -735,17 +620,15 @@ pub unsafe extern "C" fn rf_frontend_load_game(
     let Some(frontend) = (unsafe { frontend.as_mut() }) else {
         return false;
     };
-    let Some(path) = ptr_to_str(path) else {
-        set_error(frontend, "game path is null or invalid UTF-8");
+    let Some(path_str) = ptr_to_str(path) else {
         return false;
     };
-    let meta = if meta.is_null() {
-        None
-    } else {
-        ptr_to_str(meta)
-    };
-    match frontend.inner.load_game(path, meta.as_deref()) {
-        Ok(()) => true,
+    let meta_str = ptr_to_str(meta);
+    match frontend.inner.load_game(path_str, meta_str.as_deref()) {
+        Ok(()) => {
+            frontend.last_error = CString::default();
+            true
+        },
         Err(error) => {
             set_error(frontend, &error);
             false
@@ -753,18 +636,16 @@ pub unsafe extern "C" fn rf_frontend_load_game(
     }
 }
 
-/// Runs one frame on the loaded game.
-///
-/// # Safety
-///
-/// `frontend` must be a valid pointer returned by `rf_frontend_create`.
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_run_frame(frontend: *mut RfFrontend) -> bool {
     let Some(frontend) = (unsafe { frontend.as_mut() }) else {
         return false;
     };
     match frontend.inner.run_frame() {
-        Ok(()) => true,
+        Ok(()) => {
+            frontend.last_error = CString::default();
+            true
+        },
         Err(error) => {
             set_error(frontend, &error);
             false
@@ -772,11 +653,6 @@ pub unsafe extern "C" fn rf_frontend_run_frame(frontend: *mut RfFrontend) -> boo
     }
 }
 
-/// Unloads the current game if one is loaded.
-///
-/// # Safety
-///
-/// `frontend` must be null or a valid pointer returned by `rf_frontend_create`.
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_unload_game(frontend: *mut RfFrontend) {
     if let Some(frontend) = unsafe { frontend.as_mut() } {
@@ -784,32 +660,22 @@ pub unsafe extern "C" fn rf_frontend_unload_game(frontend: *mut RfFrontend) {
     }
 }
 
-/// Selects the shared Rust gfx backend: 0 software, 1 OpenGL/OpenGL ES, 2 Vulkan/MoltenVK.
-///
-/// # Safety
-///
-/// `frontend` must be a valid pointer returned by `rf_frontend_create`.
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_set_gfx_backend(
     frontend: *mut RfFrontend,
-    backend: c_uint,
+    backend_code: u32,
 ) -> bool {
     let Some(frontend) = (unsafe { frontend.as_mut() }) else {
         return false;
     };
-    let Some(backend) = GfxBackendKind::from_code(backend) else {
-        set_error(frontend, "unknown gfx backend");
-        return false;
-    };
-    frontend.inner.set_gfx_backend(backend);
-    true
+    if let Some(backend) = GfxBackendKind::from_code(backend_code) {
+        frontend.inner.set_gfx_backend(backend);
+        true
+    } else {
+        false
+    }
 }
 
-/// Sets RetroArch-style video geometry, aspect, scaling, filtering, rotation and vsync state.
-///
-/// # Safety
-///
-/// `frontend` must be valid and `config` must be readable.
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_set_gfx_video_config(
     frontend: *mut RfFrontend,
@@ -819,27 +685,9 @@ pub unsafe extern "C" fn rf_frontend_set_gfx_video_config(
         return false;
     };
     let Some(config) = (unsafe { config.as_ref() }) else {
-        set_error(frontend, "gfx video config is null");
         return false;
     };
-    let scale_mode = match config.scale_mode {
-        0 => GfxScaleMode::Stretch,
-        1 => GfxScaleMode::KeepAspect,
-        2 => GfxScaleMode::Integer,
-        _ => {
-            set_error(frontend, "unknown gfx scale mode");
-            return false;
-        }
-    };
-    let filter_mode = match config.filter_mode {
-        0 => GfxFilterMode::Nearest,
-        1 => GfxFilterMode::Linear,
-        _ => {
-            set_error(frontend, "unknown gfx filter mode");
-            return false;
-        }
-    };
-    frontend.inner.gfx.set_video_config(GfxVideoConfig {
+    frontend.inner.gfx.set_video_config(gfx::config::GfxVideoConfig {
         base_width: config.base_width,
         base_height: config.base_height,
         max_width: config.max_width,
@@ -847,20 +695,21 @@ pub unsafe extern "C" fn rf_frontend_set_gfx_video_config(
         aspect_ratio: config.aspect_ratio,
         output_width: config.output_width,
         output_height: config.output_height,
-        scale_mode,
-        filter_mode,
-        rotation_quarters: config.rotation_quarters % 4,
+        scale_mode: match config.scale_mode {
+            1 => gfx::config::GfxScaleMode::KeepAspect,
+            2 => gfx::config::GfxScaleMode::Integer,
+            _ => gfx::config::GfxScaleMode::Stretch,
+        },
+        filter_mode: match config.filter_mode {
+            1 => gfx::config::GfxFilterMode::Linear,
+            _ => gfx::config::GfxFilterMode::Nearest,
+        },
+        rotation_quarters: config.rotation_quarters,
         vsync: config.vsync,
     });
     true
 }
 
-/// Supplies native OpenGL ES or Vulkan/MoltenVK handles to the Rust gfx driver.
-///
-/// # Safety
-///
-/// `frontend` must be a valid pointer returned by `rf_frontend_create`; `handles`
-/// must be readable. Handles are opaque and remain owned by the native host.
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_set_gfx_host_handles(
     frontend: *mut RfFrontend,
@@ -870,34 +719,19 @@ pub unsafe extern "C" fn rf_frontend_set_gfx_host_handles(
         return false;
     };
     let Some(handles) = (unsafe { handles.as_ref() }) else {
-        set_error(frontend, "gfx host handles are null");
         return false;
     };
     frontend.inner.gfx.set_host_handles(HostRenderHandles {
         native_view: handles.native_view,
-        gl_context: handles.gl_context,
-        gl_framebuffer: handles.gl_framebuffer,
-        vulkan_instance: handles.vulkan_instance,
-        vulkan_device: handles.vulkan_device,
-        vulkan_queue: handles.vulkan_queue,
-        vulkan_command_buffer: handles.vulkan_command_buffer,
-        vulkan_image: handles.vulkan_image,
-        opengl_render: handles.opengl_render,
-        vulkan_render: handles.vulkan_render,
+        context: handles.context,
+        framebuffer: handles.framebuffer,
+        render_callback: handles.render_callback,
         get_proc_address: handles.get_proc_address,
         user_data: handles.user_data,
     });
     true
 }
 
-/// Sets one RetroPad button state for controller port 0.
-///
-/// Button IDs follow libretro RETRO_DEVICE_ID_JOYPAD_* (B=0, Y=1, Select=2,
-/// Start=3, Up=4, Down=5, Left=6, Right=7, A=8, X=9, L=10, R=11).
-///
-/// # Safety
-///
-/// `frontend` must be a valid pointer returned by `rf_frontend_create`.
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_set_joypad_button(
     frontend: *mut RfFrontend,
@@ -908,7 +742,10 @@ pub unsafe extern "C" fn rf_frontend_set_joypad_button(
         return false;
     };
     match frontend.inner.set_joypad_button(button_id, pressed) {
-        Ok(()) => true,
+        Ok(()) => {
+            frontend.last_error = CString::default();
+            true
+        },
         Err(error) => {
             set_error(frontend, &error);
             false
@@ -916,11 +753,6 @@ pub unsafe extern "C" fn rf_frontend_set_joypad_button(
     }
 }
 
-/// Returns the active gfx driver status, including hardware readiness.
-///
-/// # Safety
-///
-/// `frontend` must be valid and `out` must be writable.
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_gfx_driver_info(
     frontend: *const RfFrontend,
@@ -933,24 +765,16 @@ pub unsafe extern "C" fn rf_frontend_gfx_driver_info(
         return false;
     };
     let status = frontend.inner.gfx.driver_status();
+    let last_present = status.last_present.as_ref();
     *out = RfGfxDriverInfo {
-        backend: status.backend as u32,
+        backend: last_present.map_or(0, |p| p.backend as u32),
         frame_number: status.frame_counter,
         hardware_ready: status.hardware_ready,
-        rendered: status
-            .last_present
-            .as_ref()
-            .is_some_and(|present| present.rendered),
+        rendered: last_present.is_some_and(|p| p.rendered),
     };
     true
 }
 
-/// Returns metadata for the latest core-provided video frame copied by Rust gfx.
-///
-/// # Safety
-///
-/// `frontend` must be a valid pointer returned by `rf_frontend_create`; `out`
-/// must be writable.
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_video_frame_info(
     frontend: *const RfFrontend,
@@ -962,8 +786,8 @@ pub unsafe extern "C" fn rf_frontend_video_frame_info(
     let Some(out) = (unsafe { out.as_mut() }) else {
         return false;
     };
-    let frame = frontend.inner.gfx().last_frame();
-    if frame.rgba.is_empty() || frame.width == 0 || frame.height == 0 {
+    let frame = frontend.inner.gfx.last_frame();
+    if frame.width == 0 {
         return false;
     }
     *out = RfVideoFrameInfo {
@@ -972,16 +796,11 @@ pub unsafe extern "C" fn rf_frontend_video_frame_info(
         pitch: frame.pitch as u64,
         rgba_len: frame.rgba.len() as u64,
         pixel_format: frame.source_format.code(),
-        frame_number: frontend.inner.gfx().frame_counter(),
+        frame_number: frontend.inner.gfx.frame_counter(),
     };
     true
 }
 
-/// Copies the latest RGBA8888 frame into `out_rgba` and returns bytes copied.
-///
-/// # Safety
-///
-/// `frontend` must be valid. `out_rgba` must be writable for `out_len` bytes.
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_copy_video_frame_rgba(
     frontend: *const RfFrontend,
@@ -994,62 +813,16 @@ pub unsafe extern "C" fn rf_frontend_copy_video_frame_rgba(
     if out_rgba.is_null() || out_len == 0 {
         return 0;
     }
-    let rgba = &frontend.inner.gfx().last_frame().rgba;
+    let frame = frontend.inner.gfx.last_frame();
+    if frame.width == 0 {
+        return 0;
+    }
+    let rgba = &frame.rgba;
     let count = rgba.len().min(out_len);
     unsafe { ptr::copy_nonoverlapping(rgba.as_ptr(), out_rgba, count) };
     count
 }
 
-/// Copies the built-in OpenGL ES shaders used to display RGBA frames.
-///
-/// # Safety
-///
-/// Output pointers may be null; returned strings have static lifetime.
-#[no_mangle]
-pub unsafe extern "C" fn rf_frontend_opengl_shader_sources(
-    vertex_out: *mut *const c_char,
-    fragment_out: *mut *const c_char,
-) {
-    static VERTEX: &[u8] = concat!(
-        "#version 300 es\n",
-        "precision mediump float;\n",
-        "layout(location = 0) in vec2 a_position;\n",
-        "layout(location = 1) in vec2 a_texcoord;\n",
-        "out vec2 v_texcoord;\n",
-        "void main() {\n",
-        "    v_texcoord = a_texcoord;\n",
-        "    gl_Position = vec4(a_position, 0.0, 1.0);\n",
-        "}\n",
-        "\0"
-    )
-    .as_bytes();
-    static FRAGMENT: &[u8] = concat!(
-        "#version 300 es\n",
-        "precision mediump float;\n",
-        "in vec2 v_texcoord;\n",
-        "uniform sampler2D u_frame;\n",
-        "out vec4 color;\n",
-        "void main() {\n",
-        "    color = texture(u_frame, v_texcoord);\n",
-        "}\n",
-        "\0"
-    )
-    .as_bytes();
-    if let Some(out) = unsafe { vertex_out.as_mut() } {
-        *out = VERTEX.as_ptr().cast();
-    }
-    if let Some(out) = unsafe { fragment_out.as_mut() } {
-        *out = FRAGMENT.as_ptr().cast();
-    }
-}
-
-/// Copies cached system information into `out`.
-///
-/// # Safety
-///
-/// `frontend` must be a valid pointer returned by `rf_frontend_create`; `out`
-/// must be a valid writable pointer. Returned string pointers are owned by the
-/// frontend and remain valid until the next core load or destruction.
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_system_info(
     frontend: *const RfFrontend,
@@ -1082,12 +855,6 @@ pub unsafe extern "C" fn rf_frontend_system_info(
     true
 }
 
-/// Pops the next captured frontend event into `out`.
-///
-/// # Safety
-///
-/// `frontend` must be a valid pointer returned by `rf_frontend_create`; `out`
-/// must be a valid writable pointer.
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_next_event(
     frontend: *mut RfFrontend,
@@ -1122,8 +889,8 @@ pub unsafe extern "C" fn rf_frontend_next_event(
         },
         FrontendEvent::AudioSample { left, right } => RfEvent {
             kind: 3,
-            a: left as i64 as u64,
-            b: right as i64 as u64,
+            a: left as i16 as u64,
+            b: right as i16 as u64,
             c: 0,
         },
         FrontendEvent::EnvironmentCommand { command, handled } => RfEvent {
@@ -1142,12 +909,6 @@ pub unsafe extern "C" fn rf_frontend_next_event(
     true
 }
 
-/// Returns the last error string owned by the frontend.
-///
-/// # Safety
-///
-/// `frontend` must be null or a valid pointer returned by `rf_frontend_create`.
-/// The returned pointer remains valid until the next mutating call or destruction.
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_last_error(frontend: *const RfFrontend) -> *const c_char {
     let Some(frontend) = (unsafe { frontend.as_ref() }) else {
@@ -1174,7 +935,6 @@ fn cache_system_info(frontend: &mut RfFrontend, info: &SystemInfo) {
     frontend.info_name = CString::new(info.library_name.as_str()).unwrap_or_default();
     frontend.info_version = CString::new(info.library_version.as_str()).unwrap_or_default();
     frontend.info_extensions = CString::new(info.valid_extensions.join("|")).unwrap_or_default();
-    frontend.last_error = CString::default();
 }
 
 #[cfg(test)]
@@ -1196,18 +956,5 @@ mod tests {
         assert_eq!(frontend.joypad_button(8), 1);
         frontend.set_joypad_button(8, false).unwrap();
         assert_eq!(frontend.joypad_button(8), 0);
-        assert!(frontend.set_joypad_button(16, true).is_err());
-    }
-
-    #[test]
-    fn splits_extensions() {
-        assert_eq!(
-            "nes|fds|unif"
-                .split('|')
-                .filter(|s| !s.is_empty())
-                .map(ToOwned::to_owned)
-                .collect::<Vec<String>>(),
-            vec!["nes", "fds", "unif"]
-        );
     }
 }

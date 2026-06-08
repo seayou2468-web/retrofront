@@ -51,8 +51,7 @@ public enum JoypadButton: UInt32, CaseIterable, Sendable {
 
 public enum GfxBackend: UInt32, Equatable, Sendable {
   case software = 0
-  case openGL = 1
-  case vulkan = 2
+  case bgfx = 1
 }
 
 public enum GfxScaleMode: UInt32, Equatable, Sendable {
@@ -197,6 +196,13 @@ public final class Retrofront: @unchecked Sendable {
     }
   }
 
+  public func setGfxHostHandles(_ handles: RfGfxHostHandles) throws {
+    var raw = handles
+    guard rf_frontend_set_gfx_host_handles(handle, &raw) else {
+      throw lastError()
+    }
+  }
+
   public func gfxDriverStatus() -> GfxDriverStatus? {
     var info = RfGfxDriverInfo()
     guard rf_frontend_gfx_driver_info(handle, &info) else { return nil }
@@ -222,15 +228,6 @@ public final class Retrofront: @unchecked Sendable {
       pixelFormat: info.pixel_format,
       frameNumber: info.frame_number,
       rgba: rgba)
-  }
-
-  public static func openGLShaderSources() -> (vertex: String, fragment: String) {
-    var vertex: UnsafePointer<CChar>?
-    var fragment: UnsafePointer<CChar>?
-    rf_frontend_opengl_shader_sources(&vertex, &fragment)
-    return (
-      vertex.map(String.init(cString:)) ?? "",
-      fragment.map(String.init(cString:)) ?? "")
   }
 
   public func systemInfo() throws -> LibretroSystemInfo {

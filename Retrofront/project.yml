@@ -35,6 +35,9 @@ targets:
       - path: apps/iOS/Sources
     dependencies:
       - target: RetrofrontSwift
+      - framework: ../Externals/MoltenVK/MoltenVK.xcframework
+      - sdk: OpenGLES.framework
+      - sdk: GLKit.framework
     postBuildScripts:
       - name: Copy libretro cores
         script: |

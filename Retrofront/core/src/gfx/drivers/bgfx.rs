@@ -2,64 +2,37 @@ use super::{DriverFrame, GfxDriver, PresentStatus};
 use crate::gfx::config::GfxVideoConfig;
 use crate::gfx::context::ContextDriver;
 use crate::gfx::frame::VideoFrame;
-use crate::gfx::hardware::{GfxBackendKind, HostRenderHandles, OpenGlRenderCommand};
+use crate::gfx::hardware::{GfxBackendKind, HostRenderHandles, BgfxRenderCommand};
 use crate::gfx::CLEAR_COLOR_RGBA;
-use std::ffi::CStr;
 use std::ptr;
 
-pub const OPENGL_VERTEX_SHADER: &str = r#"#version 300 es
-precision mediump float;
-layout(location = 0) in vec2 a_position;
-layout(location = 1) in vec2 a_texcoord;
-out vec2 v_texcoord;
-void main() {
-    v_texcoord = a_texcoord;
-    gl_Position = vec4(a_position, 0.0, 1.0);
-}
-"#;
-
-pub const OPENGL_FRAGMENT_SHADER: &str = r#"#version 300 es
-precision mediump float;
-in vec2 v_texcoord;
-uniform sampler2D u_frame;
-out vec4 color;
-void main() {
-    color = texture(u_frame, v_texcoord);
-}
-"#;
-
-static OPENGL_VERTEX_SHADER_CSTR: &CStr = c"#version 300 es\nprecision mediump float;\nlayout(location = 0) in vec2 a_position;\nlayout(location = 1) in vec2 a_texcoord;\nout vec2 v_texcoord;\nvoid main() {\n    v_texcoord = a_texcoord;\n    gl_Position = vec4(a_position, 0.0, 1.0);\n}\n";
-static OPENGL_FRAGMENT_SHADER_CSTR: &CStr = c"#version 300 es\nprecision mediump float;\nin vec2 v_texcoord;\nuniform sampler2D u_frame;\nout vec4 color;\nvoid main() {\n    color = texture(u_frame, v_texcoord);\n}\n";
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GlDrawCall {
+pub struct BgfxDrawCall {
     pub viewport: [i32; 4],
     pub output_size: [u32; 2],
     pub texture_size: [u32; 2],
     pub framebuffer: usize,
     pub native_view: u64,
-    pub gl_context: u64,
-    pub vertex_shader: &'static str,
-    pub fragment_shader: &'static str,
-    pub uses_ios_sdk_context: bool,
-    pub bottom_left_origin: bool,
+    pub context: u64,
     pub source_is_hardware: bool,
+    pub bottom_left_origin: bool,
     pub rotation_quarters: u32,
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct OpenGlDriver {
+pub struct BgfxDriver {
     handles: HostRenderHandles,
-    last_draw_call: Option<GlDrawCall>,
+    last_draw_call: Option<BgfxDrawCall>,
     video_config: GfxVideoConfig,
     initialized: bool,
 }
 
-impl OpenGlDriver {
+impl BgfxDriver {
     pub fn configure(&mut self, context: &ContextDriver) {
         self.handles = context.handles();
     }
-    pub fn last_draw_call(&self) -> Option<&GlDrawCall> {
+
+    pub fn last_draw_call(&self) -> Option<&BgfxDrawCall> {
         self.last_draw_call.as_ref()
     }
 
@@ -73,37 +46,32 @@ impl OpenGlDriver {
         height: u32,
         bottom_left_origin: bool,
         source_is_hardware: bool,
-    ) -> Result<GlDrawCall, String> {
-        if !self.handles.has_opengl() {
-            return Err(
-                "OpenGL backend requires native_view, GL context, and render callback handles"
-                    .into(),
-            );
+    ) -> Result<BgfxDrawCall, String> {
+        if !self.handles.is_valid() {
+            return Err("bgfx backend requires valid host handles".into());
         }
-        Ok(GlDrawCall {
+        Ok(BgfxDrawCall {
             viewport: self.video_config.viewport(width, height),
             output_size: self.video_config.output_size(width, height),
             texture_size: [width, height],
-            framebuffer: self.handles.gl_framebuffer,
+            framebuffer: self.handles.framebuffer,
             native_view: self.handles.native_view,
-            gl_context: self.handles.gl_context,
-            vertex_shader: OPENGL_VERTEX_SHADER,
-            fragment_shader: OPENGL_FRAGMENT_SHADER,
-            uses_ios_sdk_context: cfg!(target_os = "ios") || self.handles.gl_context != 0,
+            context: self.handles.context,
             bottom_left_origin,
             source_is_hardware,
             rotation_quarters: self.video_config.rotation_quarters % 4,
         })
     }
 
-    fn execute(&self, call: &GlDrawCall, rgba: Option<&[u8]>) -> Result<(), String> {
+    fn execute(&self, call: &BgfxDrawCall, rgba: Option<&[u8]>) -> Result<(), String> {
         let callback = self
             .handles
-            .opengl_render
-            .ok_or_else(|| "OpenGL render callback was not configured".to_string())?;
-        let command = OpenGlRenderCommand {
+            .render_callback
+            .ok_or_else(|| "bgfx render callback was not configured".to_string())?;
+
+        let command = BgfxRenderCommand {
             native_view: call.native_view,
-            gl_context: call.gl_context,
+            context: call.context,
             framebuffer: call.framebuffer,
             viewport: call.viewport,
             output_size: call.output_size,
@@ -115,22 +83,21 @@ impl OpenGlDriver {
             filter_mode: self.video_config.filter_mode as u32,
             vsync: self.video_config.vsync,
             clear_color: CLEAR_COLOR_RGBA,
-            vertex_shader: OPENGL_VERTEX_SHADER_CSTR.as_ptr(),
-            fragment_shader: OPENGL_FRAGMENT_SHADER_CSTR.as_ptr(),
         };
+
         let (ptr, len) = rgba.map_or((ptr::null(), 0), |bytes| (bytes.as_ptr(), bytes.len()));
         let rendered = unsafe { callback(&command, ptr, len, self.handles.user_data) };
         if rendered {
             Ok(())
         } else {
-            Err("OpenGL render callback reported failure".into())
+            Err("bgfx render callback reported failure".into())
         }
     }
 }
 
-impl GfxDriver for OpenGlDriver {
+impl GfxDriver for BgfxDriver {
     fn name(&self) -> &'static str {
-        "opengl-es-host"
+        "bgfx-host"
     }
     fn init(&mut self, context: &ContextDriver, _bootstrap_frame: &VideoFrame) {
         self.configure(context);
@@ -167,10 +134,10 @@ impl GfxDriver for OpenGlDriver {
         self.execute(&call, rgba)?;
         self.last_draw_call = Some(call);
         Ok(PresentStatus {
-            backend: GfxBackendKind::OpenGl,
+            backend: GfxBackendKind::Bgfx,
             frame_number,
             rendered: true,
-            details: format!("OpenGL ES rendered {width}x{height} through host callback"),
+            details: format!("bgfx rendered {width}x{height} through host callback"),
         })
     }
     fn destroy(&mut self) {

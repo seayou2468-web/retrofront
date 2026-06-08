@@ -34,9 +34,9 @@ typedef struct RfVideoFrameInfo {
     uint64_t frame_number;
 } RfVideoFrameInfo;
 
-typedef struct RfOpenGlRenderCommand {
+typedef struct RfBgfxRenderCommand {
     uint64_t native_view;
-    uint64_t gl_context;
+    uint64_t context;
     uintptr_t framebuffer;
     int32_t viewport[4];
     uint32_t output_size[2];
@@ -48,30 +48,9 @@ typedef struct RfOpenGlRenderCommand {
     uint32_t filter_mode;
     bool vsync;
     float clear_color[4];
-    const char *vertex_shader;
-    const char *fragment_shader;
-} RfOpenGlRenderCommand;
+} RfBgfxRenderCommand;
 
-typedef struct RfVulkanRenderCommand {
-    uint64_t native_view;
-    uint64_t instance;
-    uint64_t device;
-    uint64_t queue;
-    uint64_t command_buffer;
-    uint64_t image;
-    uint32_t extent[2];
-    int32_t viewport[4];
-    bool source_is_hardware;
-    bool uses_moltenvk;
-    uint32_t rotation_quarters;
-    uint32_t scale_mode;
-    uint32_t filter_mode;
-    bool vsync;
-    float clear_color[4];
-} RfVulkanRenderCommand;
-
-typedef bool (*RfOpenGlRenderCallback)(const RfOpenGlRenderCommand *command, const uint8_t *rgba, uintptr_t rgba_len, void *user_data);
-typedef bool (*RfVulkanRenderCallback)(const RfVulkanRenderCommand *command, const uint8_t *rgba, uintptr_t rgba_len, void *user_data);
+typedef bool (*RfBgfxRenderCallback)(const RfBgfxRenderCommand *command, const uint8_t *rgba, uintptr_t rgba_len, void *user_data);
 typedef void (*RfRetroProcAddress)(void);
 typedef RfRetroProcAddress (*RfGetProcAddressCallback)(const char *symbol, void *user_data);
 
@@ -91,15 +70,9 @@ typedef struct RfGfxVideoConfig {
 
 typedef struct RfGfxHostHandles {
     uint64_t native_view;
-    uint64_t gl_context;
-    uintptr_t gl_framebuffer;
-    uint64_t vulkan_instance;
-    uint64_t vulkan_device;
-    uint64_t vulkan_queue;
-    uint64_t vulkan_command_buffer;
-    uint64_t vulkan_image;
-    RfOpenGlRenderCallback opengl_render;
-    RfVulkanRenderCallback vulkan_render;
+    uint64_t context;
+    uintptr_t framebuffer;
+    RfBgfxRenderCallback render_callback;
     RfGetProcAddressCallback get_proc_address;
     void *user_data;
 } RfGfxHostHandles;
@@ -125,7 +98,6 @@ bool rf_frontend_set_gfx_host_handles(RfFrontend *frontend, const RfGfxHostHandl
 bool rf_frontend_gfx_driver_info(const RfFrontend *frontend, RfGfxDriverInfo *out_info);
 bool rf_frontend_video_frame_info(const RfFrontend *frontend, RfVideoFrameInfo *out_info);
 uintptr_t rf_frontend_copy_video_frame_rgba(const RfFrontend *frontend, uint8_t *out_rgba, uintptr_t out_len);
-void rf_frontend_opengl_shader_sources(const char **vertex_out, const char **fragment_out);
 bool rf_frontend_system_info(const RfFrontend *frontend, RfSystemInfo *out_info);
 bool rf_frontend_next_event(RfFrontend *frontend, RfEvent *out_event);
 const char *rf_frontend_last_error(const RfFrontend *frontend);
