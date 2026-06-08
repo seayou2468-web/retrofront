@@ -20,7 +20,9 @@ struct DashboardView: View {
         .tag(AppSection.cores)
 
       SettingsView()
-        .tabItem { Label(AppSection.settings.rawValue, systemImage: AppSection.settings.symbolName) }
+        .tabItem {
+          Label(AppSection.settings.rawValue, systemImage: AppSection.settings.symbolName)
+        }
         .tag(AppSection.settings)
     }
     .tint(.orange)
@@ -38,10 +40,15 @@ struct LibraryView: View {
           HeroCard(
             title: "Retrofront",
             subtitle: runtime.statusMessage,
-            systemImage: runtime.isRuntimeConnected ? "checkmark.seal.fill" : "exclamationmark.triangle.fill"
+            systemImage: runtime.isRuntimeConnected
+              ? "checkmark.seal.fill" : "exclamationmark.triangle.fill"
           )
 
-          SectionHeader(title: "ROM Library", subtitle: "Choose a ROM from Files. Retrofront copies it into Documents, loads the bundled mGBA libretro core, then opens the Play tab.")
+          SectionHeader(
+            title: "ROM Library",
+            subtitle:
+              "Choose a ROM from Files. Retrofront copies it into Documents and opens it with the selected libretro core."
+          )
 
           Button {
             isImporterPresented = true
@@ -124,17 +131,25 @@ struct PlaySurfaceView: View {
         }
 
         HStack(spacing: 14) {
-          Button { runtime.stop() } label: {
+          Button {
+            runtime.stop()
+          } label: {
             ControlPill(title: "Pause", symbol: "pause.fill")
           }
           .disabled(!runtime.isRunning)
 
-          Button { runtime.toggleRunning() } label: {
-            ControlPill(title: runtime.isRunning ? "Running" : "Play", symbol: runtime.isRunning ? "stop.fill" : "play.fill")
+          Button {
+            runtime.toggleRunning()
+          } label: {
+            ControlPill(
+              title: runtime.isRunning ? "Running" : "Play",
+              symbol: runtime.isRunning ? "stop.fill" : "play.fill")
           }
           .disabled(!runtime.canRunGame)
 
-          Button { runtime.runOneFrameFromButton() } label: {
+          Button {
+            runtime.runOneFrameFromButton()
+          } label: {
             ControlPill(title: "Frame", symbol: "forward.frame.fill")
           }
           .disabled(!runtime.canRunGame)
@@ -155,29 +170,87 @@ struct PlaySurfaceView: View {
 
 struct CoreStatusView: View {
   @EnvironmentObject private var runtime: EmulatorRuntimeModel
+  @State private var isCoreImporterPresented = false
+
+  private let dylibType = UTType(filenameExtension: "dylib") ?? .data
 
   var body: some View {
     NavigationStack {
       List {
+        Section("Core Library") {
+          Button {
+            isCoreImporterPresented = true
+          } label: {
+            Label("Import libretro core dylib", systemImage: "square.and.arrow.down")
+          }
+          .disabled(!runtime.isRuntimeConnected)
+
+          if runtime.availableCores.isEmpty {
+            Text(
+              "No .dylib cores found. Add cores to Retrofront/dylibs before generating the app, or import one from Files."
+            )
+            .foregroundStyle(.secondary)
+          } else {
+            ForEach(runtime.availableCores) { core in
+              Button {
+                runtime.loadCore(core)
+              } label: {
+                HStack {
+                  VStack(alignment: .leading) {
+                    Text(core.displayName)
+                    Text(core.locationDescription)
+                      .font(.caption)
+                      .foregroundStyle(.secondary)
+                  }
+                  Spacer()
+                  if runtime.coreURL?.path == core.url.path {
+                    Image(systemName: "checkmark.circle.fill")
+                      .foregroundStyle(.orange)
+                  }
+                }
+              }
+            }
+          }
+        }
+
         Section("Runtime") {
-          LabeledContent("Rust frontend core", value: runtime.isRuntimeConnected ? "Connected" : "Unavailable")
+          LabeledContent(
+            "Rust frontend core", value: runtime.isRuntimeConnected ? "Connected" : "Unavailable")
           LabeledContent("Session", value: String(describing: runtime.frontendState))
-          LabeledContent("Bundled dylib", value: runtime.coreURL?.lastPathComponent ?? "Missing")
+          LabeledContent("Loaded dylib", value: runtime.coreURL?.lastPathComponent ?? "Missing")
           LabeledContent("Loaded ROM", value: runtime.loadedGameName)
         }
         Section("libretro") {
           LabeledContent("Core", value: runtime.systemInfo?.libraryName ?? "Not loaded")
           LabeledContent("Version", value: runtime.systemInfo?.libraryVersion ?? "—")
-          LabeledContent("Extensions", value: runtime.systemInfo?.validExtensions.joined(separator: ", ") ?? "—")
-          LabeledContent("Needs full path", value: runtime.systemInfo?.needsFullPath == true ? "Yes" : "No")
+          LabeledContent(
+            "Extensions", value: runtime.systemInfo?.validExtensions.joined(separator: ", ") ?? "—")
+          LabeledContent(
+            "Needs full path", value: runtime.systemInfo?.needsFullPath == true ? "Yes" : "No")
         }
         Section("Video") {
-          LabeledContent("Frame", value: runtime.latestFrame.map { "\($0.width)×\($0.height) #\($0.frameNumber)" } ?? "—")
+          LabeledContent(
+            "Frame",
+            value: runtime.latestFrame.map { "\($0.width)×\($0.height) #\($0.frameNumber)" } ?? "—")
           LabeledContent("Renderer", value: "Software RGBA → SwiftUI Image")
         }
       }
       .navigationTitle("Cores")
       .toolbar { Button("Refresh") { runtime.refresh() } }
+      .fileImporter(
+        isPresented: $isCoreImporterPresented,
+        allowedContentTypes: [dylibType, .data, .item],
+        allowsMultipleSelection: false
+      ) { result in
+        switch result {
+        case .success(let urls):
+          if let url = urls.first {
+            runtime.importCore(from: url)
+          }
+        case .failure(let error):
+          runtime.statusMessage = "Core picker failed: \(error.localizedDescription)"
+        }
+      }
     }
   }
 }

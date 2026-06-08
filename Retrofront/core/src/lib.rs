@@ -109,15 +109,7 @@ struct CoreApi {
 
 impl CoreApi {
     fn load(path: impl AsRef<Path>) -> Result<Self, String> {
-        let path_str = path.as_ref().to_string_lossy();
-
-let final_path = if path_str.starts_with("@") {
-    path_str.to_string()
-} else {
-    format!("@executable_path/Frameworks/{}", path_str)
-};
-
-let library = Library::open(final_path)?;
+        let library = open_core_library(path.as_ref())?;
         Ok(Self {
             retro_set_environment: sym!(library, "retro_set_environment", RetroSetEnvironment),
             retro_set_video_refresh: sym!(library, "retro_set_video_refresh", RetroSetVideoRefresh),
@@ -144,6 +136,34 @@ let library = Library::open(final_path)?;
             _library: library,
         })
     }
+}
+
+fn open_core_library(path: &Path) -> Result<Library, String> {
+    let path_text = path.to_string_lossy();
+    let mut candidates = Vec::new();
+
+    candidates.push(path_text.to_string());
+
+    if let Some(file_name) = path.file_name().and_then(|name| name.to_str()) {
+        candidates.push(format!("@executable_path/Frameworks/{file_name}"));
+        candidates.push(format!("@loader_path/Frameworks/{file_name}"));
+    }
+
+    candidates.dedup();
+
+    let mut errors = Vec::new();
+    for candidate in &candidates {
+        match Library::open(candidate) {
+            Ok(library) => return Ok(library),
+            Err(error) => errors.push(format!("{candidate}: {error}")),
+        }
+    }
+
+    Err(format!(
+        "failed to open libretro core {}; tried {}",
+        path.display(),
+        errors.join("; ")
+    ))
 }
 
 #[derive(Default)]

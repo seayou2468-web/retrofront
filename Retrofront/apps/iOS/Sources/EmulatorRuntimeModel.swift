@@ -3,6 +3,15 @@ import RetrofrontSwift
 import SwiftUI
 import UIKit
 
+struct CoreDescriptor: Identifiable, Equatable {
+  let url: URL
+  let isBundled: Bool
+
+  var id: String { url.path }
+  var displayName: String { url.deletingPathExtension().lastPathComponent }
+  var locationDescription: String { isBundled ? "Bundled" : "Documents/Cores" }
+}
+
 @MainActor
 final class EmulatorRuntimeModel: ObservableObject {
   @Published private(set) var frontendState: FrontendState = .empty
@@ -12,22 +21,28 @@ final class EmulatorRuntimeModel: ObservableObject {
   @Published private(set) var displayImage: UIImage?
   @Published private(set) var loadedGameURL: URL?
   @Published private(set) var coreURL: URL?
+  @Published private(set) var availableCores: [CoreDescriptor] = []
   @Published private(set) var isRunning = false
   @Published var selectedTab: AppSection = .library
-  @Published var statusMessage = "Loading bundled emulator core…"
+  @Published var statusMessage = "Loading emulator cores…"
 
   private var frontend: Retrofront?
   private var runTask: Task<Void, Never>?
 
   init() {
+    refreshAvailableCores()
     do {
       let frontend = try Retrofront()
       self.frontend = frontend
       try? frontend.setGfxBackend(.software)
-      try loadBundledCore(using: frontend)
+      do {
+        try loadDefaultCore(using: frontend)
+      } catch {
+        statusMessage = "No core loaded: \(error)"
+      }
       refresh()
     } catch {
-      frontend = nil
+      self.frontend = nil
       statusMessage = "Runtime unavailable: \(error)"
     }
   }
@@ -48,7 +63,12 @@ final class EmulatorRuntimeModel: ObservableObject {
     loadedGameURL?.lastPathComponent ?? "No ROM selected"
   }
 
+  var loadedCoreName: String {
+    systemInfo?.libraryName ?? coreURL?.lastPathComponent ?? "No core loaded"
+  }
+
   func refresh() {
+    refreshAvailableCores()
     guard let frontend else { return }
     frontendState = frontend.state
     recentEvents.append(contentsOf: frontend.drainEvents())
@@ -72,15 +92,45 @@ final class EmulatorRuntimeModel: ObservableObject {
     do {
       let localURL = try copyROMIntoDocuments(from: sourceURL)
       if frontend.state == .empty {
-        try loadBundledCore(using: frontend)
+        try loadDefaultCore(using: frontend)
       }
       try frontend.loadGame(at: localURL.path)
       loadedGameURL = localURL
       selectedTab = .play
       refresh()
-      statusMessage = "Loaded \(localURL.lastPathComponent). Tap Play to run frames."
+      statusMessage =
+        "Loaded \(localURL.lastPathComponent) with \(loadedCoreName). Tap Play to run frames."
     } catch {
       statusMessage = "ROM load failed: \(error)"
+    }
+  }
+
+  func importCore(from sourceURL: URL) {
+    guard let frontend else { return }
+    let securityScoped = sourceURL.startAccessingSecurityScopedResource()
+    defer {
+      if securityScoped { sourceURL.stopAccessingSecurityScopedResource() }
+    }
+
+    do {
+      let localURL = try copyCoreIntoDocuments(from: sourceURL)
+      try loadCore(at: localURL, using: frontend)
+      refreshAvailableCores()
+      selectedTab = .cores
+      statusMessage = "Imported and loaded core: \(loadedCoreName)."
+    } catch {
+      statusMessage = "Core import failed: \(error)"
+    }
+  }
+
+  func loadCore(_ core: CoreDescriptor) {
+    guard let frontend else { return }
+    do {
+      try loadCore(at: core.url, using: frontend)
+      selectedTab = .cores
+      statusMessage = "Loaded core: \(loadedCoreName). Choose a ROM to start."
+    } catch {
+      statusMessage = "Core load failed: \(error)"
     }
   }
 
@@ -139,20 +189,70 @@ final class EmulatorRuntimeModel: ObservableObject {
     }
   }
 
-  private func loadBundledCore(using frontend: Retrofront) throws {
-    let core = [
-      Bundle.main.privateFrameworksURL?.appendingPathComponent("mgba_libretro_ios.dylib"),
-      Bundle.main.url(forResource: "mgba_libretro_ios", withExtension: "dylib")
-    ]
-    .compactMap { $0 }
-    .first { FileManager.default.fileExists(atPath: $0.path) }
-    guard let core else {
-      throw RetrofrontError.operationFailed("Bundled core mgba_libretro_ios.dylib was not found in Frameworks or the app bundle")
+  private func loadDefaultCore(using frontend: Retrofront) throws {
+    refreshAvailableCores()
+    guard let core = availableCores.first else {
+      throw RetrofrontError.operationFailed(
+        "No libretro core dylibs were found in Frameworks, the app bundle, or Documents/Cores")
     }
-    coreURL = core
-    systemInfo = try frontend.loadCore(at: core.path)
+    try loadCore(at: core.url, using: frontend)
+    statusMessage = "Loaded core: \(loadedCoreName)."
+  }
+
+  private func loadCore(at url: URL, using frontend: Retrofront) throws {
+    stop()
+    systemInfo = try frontend.loadCore(at: url.path)
+    coreURL = url
+    loadedGameURL = nil
+    latestFrame = nil
+    displayImage = nil
     frontendState = frontend.state
-    statusMessage = "Loaded bundled core: \(systemInfo?.libraryName ?? core.lastPathComponent)."
+  }
+
+  private func refreshAvailableCores() {
+    var cores: [CoreDescriptor] = []
+    var seen = Set<String>()
+
+    for url in bundledCoreURLs() {
+      if seen.insert(url.path).inserted {
+        cores.append(CoreDescriptor(url: url, isBundled: true))
+      }
+    }
+
+    if let documentsCoreDirectory = try? coreDirectory(create: false) {
+      for url in dylibURLs(in: documentsCoreDirectory) {
+        if seen.insert(url.path).inserted {
+          cores.append(CoreDescriptor(url: url, isBundled: false))
+        }
+      }
+    }
+
+    availableCores = cores.sorted {
+      if $0.isBundled != $1.isBundled { return $0.isBundled && !$1.isBundled }
+      return $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+    }
+  }
+
+  private func bundledCoreURLs() -> [URL] {
+    var directories: [URL] = []
+    if let frameworksURL = Bundle.main.privateFrameworksURL {
+      directories.append(frameworksURL)
+    }
+    if let resourceURL = Bundle.main.resourceURL {
+      directories.append(resourceURL)
+    }
+    return directories.flatMap(dylibURLs)
+  }
+
+  private func dylibURLs(in directory: URL) -> [URL] {
+    guard
+      let urls = try? FileManager.default.contentsOfDirectory(
+        at: directory,
+        includingPropertiesForKeys: [.isRegularFileKey],
+        options: [.skipsHiddenFiles]
+      )
+    else { return [] }
+    return urls.filter { $0.pathExtension == "dylib" }
   }
 
   private func copyROMIntoDocuments(from sourceURL: URL) throws -> URL {
@@ -171,22 +271,50 @@ final class EmulatorRuntimeModel: ObservableObject {
     return destination
   }
 
+  private func copyCoreIntoDocuments(from sourceURL: URL) throws -> URL {
+    guard sourceURL.pathExtension == "dylib" else {
+      throw RetrofrontError.operationFailed("Core files must use the .dylib extension")
+    }
+    let destinationDirectory = try coreDirectory(create: true)
+    let destination = destinationDirectory.appendingPathComponent(sourceURL.lastPathComponent)
+    if FileManager.default.fileExists(atPath: destination.path) {
+      try FileManager.default.removeItem(at: destination)
+    }
+    try FileManager.default.copyItem(at: sourceURL, to: destination)
+    return destination
+  }
+
+  private func coreDirectory(create: Bool) throws -> URL {
+    let documents = try FileManager.default.url(
+      for: .documentDirectory,
+      in: .userDomainMask,
+      appropriateFor: nil,
+      create: true)
+    let directory = documents.appendingPathComponent("Cores", isDirectory: true)
+    if create {
+      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+    return directory
+  }
+
   private static func image(from frame: VideoFrame) -> UIImage? {
     guard frame.width > 0, frame.height > 0, !frame.rgba.isEmpty else { return nil }
     let data = Data(frame.rgba)
     guard let provider = CGDataProvider(data: data as CFData) else { return nil }
-    guard let cgImage = CGImage(
-      width: Int(frame.width),
-      height: Int(frame.height),
-      bitsPerComponent: 8,
-      bitsPerPixel: 32,
-      bytesPerRow: Int(frame.width) * 4,
-      space: CGColorSpaceCreateDeviceRGB(),
-      bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
-      provider: provider,
-      decode: nil,
-      shouldInterpolate: false,
-      intent: .defaultIntent)
+    guard
+      let cgImage = CGImage(
+        width: Int(frame.width),
+        height: Int(frame.height),
+        bitsPerComponent: 8,
+        bitsPerPixel: 32,
+        bytesPerRow: Int(frame.width) * 4,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
+        provider: provider,
+        decode: nil,
+        shouldInterpolate: false,
+        intent: .defaultIntent
+      )
     else { return nil }
     return UIImage(cgImage: cgImage)
   }
@@ -202,14 +330,10 @@ enum AppSection: String, CaseIterable, Identifiable {
 
   var symbolName: String {
     switch self {
-    case .library:
-      return "square.grid.2x2.fill"
-    case .play:
-      return "play.rectangle.fill"
-    case .cores:
-      return "cpu.fill"
-    case .settings:
-      return "gearshape.fill"
+    case .library: return "books.vertical.fill"
+    case .play: return "gamecontroller.fill"
+    case .cores: return "cpu.fill"
+    case .settings: return "gearshape.fill"
     }
   }
 }
