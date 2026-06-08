@@ -120,6 +120,7 @@ bool rf_frontend_run_frame(RfFrontend *frontend);
 void rf_frontend_unload_game(RfFrontend *frontend);
 bool rf_frontend_set_gfx_backend(RfFrontend *frontend, uint32_t backend);
 bool rf_frontend_set_gfx_video_config(RfFrontend *frontend, const RfGfxVideoConfig *config);
+bool rf_frontend_set_joypad_button(RfFrontend *frontend, uint32_t button_id, bool pressed);
 bool rf_frontend_set_gfx_host_handles(RfFrontend *frontend, const RfGfxHostHandles *handles);
 bool rf_frontend_gfx_driver_info(const RfFrontend *frontend, RfGfxDriverInfo *out_info);
 bool rf_frontend_video_frame_info(const RfFrontend *frontend, RfVideoFrameInfo *out_info);

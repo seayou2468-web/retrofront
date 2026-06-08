@@ -54,6 +54,10 @@ jobs:
         working-directory: Retrofront
         run: make xcodegen
 
+      - name: Verify bundled libretro core exists
+        working-directory: Retrofront
+        run: test -f dylibs/mgba_libretro_ios.dylib
+
       - name: Build app for generic iOS device
         working-directory: Retrofront
         run: |
@@ -84,6 +88,7 @@ jobs:
           zip -r ../Retrofront.ipa .
           cd ..
 
+          test -f Payload/Retrofront.app/Frameworks/mgba_libretro_ios.dylib
           ls -lah Retrofront.ipa
 
       - name: Upload IPA artifact

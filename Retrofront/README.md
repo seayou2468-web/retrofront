@@ -31,7 +31,7 @@ swift build
 
 ## iOS device app
 
-The iOS app is generated with XcodeGen and builds for real devices only; no iOS simulator setup is required. The app intentionally ships without emulator cores or ROMs, but it links the Rust frontend runtime.
+The iOS app is generated with XcodeGen and builds for real devices only; no iOS simulator setup is required. The app bundles `dylibs/mgba_libretro_ios.dylib` as its libretro core, loads it at launch, lets the user pick a ROM from Files, runs the core frame loop, forwards virtual RetroPad input, and draws software video frames in SwiftUI.
 
 ```sh
 cd Retrofront

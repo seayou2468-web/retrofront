@@ -29,6 +29,26 @@ public struct LibretroSystemInfo: Equatable, Sendable {
   public let blocksExtraction: Bool
 }
 
+
+public enum JoypadButton: UInt32, CaseIterable, Sendable {
+  case b = 0
+  case y = 1
+  case select = 2
+  case start = 3
+  case up = 4
+  case down = 5
+  case left = 6
+  case right = 7
+  case a = 8
+  case x = 9
+  case l = 10
+  case r = 11
+  case l2 = 12
+  case r2 = 13
+  case l3 = 14
+  case r3 = 15
+}
+
 public enum GfxBackend: UInt32, Equatable, Sendable {
   case software = 0
   case openGL = 1
@@ -144,6 +164,13 @@ public final class Retrofront: @unchecked Sendable {
 
   public func unloadGame() {
     rf_frontend_unload_game(handle)
+  }
+
+
+  public func setJoypadButton(_ button: JoypadButton, pressed: Bool) throws {
+    guard rf_frontend_set_joypad_button(handle, button.rawValue, pressed) else {
+      throw lastError()
+    }
   }
 
   public func setGfxBackend(_ backend: GfxBackend) throws {

@@ -146,6 +146,7 @@ pub struct FrontendCore {
     events: VecDeque<FrontendEvent>,
     gfx: GfxRuntime,
     last_error: Option<String>,
+    joypad_buttons: [i16; 16],
 }
 
 impl Drop for FrontendCore {
@@ -189,6 +190,22 @@ impl FrontendCore {
 
     pub fn set_gfx_backend(&mut self, backend: GfxBackendKind) {
         self.gfx.set_backend(backend);
+    }
+
+    pub fn set_joypad_button(&mut self, button_id: u32, pressed: bool) -> Result<(), String> {
+        let Some(slot) = self.joypad_buttons.get_mut(button_id as usize) else {
+            return Err(self.record_error(format!("unknown joypad button id {button_id}")));
+        };
+        *slot = if pressed { 1 } else { 0 };
+        self.last_error = None;
+        Ok(())
+    }
+
+    pub fn joypad_button(&self, button_id: u32) -> i16 {
+        self.joypad_buttons
+            .get(button_id as usize)
+            .copied()
+            .unwrap_or(0)
     }
 
     pub fn load_core(&mut self, path: impl AsRef<Path>) -> Result<SystemInfo, String> {
@@ -512,12 +529,15 @@ unsafe extern "C" fn input_poll_callback() {
 }
 
 unsafe extern "C" fn input_state_callback(
-    _port: c_uint,
-    _device: c_uint,
+    port: c_uint,
+    device: c_uint,
     _index: c_uint,
-    _id: c_uint,
+    id: c_uint,
 ) -> i16 {
-    0
+    if port != 0 || device != libretro::RETRO_DEVICE_JOYPAD {
+        return 0;
+    }
+    with_active_frontend(|frontend| frontend.joypad_button(id)).unwrap_or(0)
 }
 
 #[repr(C)]
@@ -842,6 +862,32 @@ pub unsafe extern "C" fn rf_frontend_set_gfx_host_handles(
     true
 }
 
+/// Sets one RetroPad button state for controller port 0.
+///
+/// Button IDs follow libretro RETRO_DEVICE_ID_JOYPAD_* (B=0, Y=1, Select=2,
+/// Start=3, Up=4, Down=5, Left=6, Right=7, A=8, X=9, L=10, R=11).
+///
+/// # Safety
+///
+/// `frontend` must be a valid pointer returned by `rf_frontend_create`.
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_set_joypad_button(
+    frontend: *mut RfFrontend,
+    button_id: c_uint,
+    pressed: bool,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    match frontend.inner.set_joypad_button(button_id, pressed) {
+        Ok(()) => true,
+        Err(error) => {
+            set_error(frontend, &error);
+            false
+        }
+    }
+}
+
 /// Returns the active gfx driver status, including hardware readiness.
 ///
 /// # Safety
@@ -1112,6 +1158,17 @@ mod tests {
         let frontend = FrontendCore::new();
         assert_eq!(frontend.state(), SessionState::Empty);
         assert!(frontend.system_info().is_none());
+    }
+
+    #[test]
+    fn joypad_buttons_are_mutable() {
+        let mut frontend = FrontendCore::new();
+        assert_eq!(frontend.joypad_button(8), 0);
+        frontend.set_joypad_button(8, true).unwrap();
+        assert_eq!(frontend.joypad_button(8), 1);
+        frontend.set_joypad_button(8, false).unwrap();
+        assert_eq!(frontend.joypad_button(8), 0);
+        assert!(frontend.set_joypad_button(16, true).is_err());
     }
 
     #[test]
