@@ -14,6 +14,7 @@ let package = Package(
   products: [
     .library(name: "RetrofrontSwift", targets: ["RetrofrontSwift"]),
     .executable(name: "retrofront", targets: ["retrofront-cli"]),
+    .executable(name: "retrofront-linux-ui", targets: ["retrofront-linux-ui"]),
   ],
   targets: [
     .target(
@@ -34,6 +35,11 @@ let package = Package(
       name: "retrofront-cli",
       dependencies: ["RetrofrontSwift"],
       path: "frontend/Sources/retrofront-cli"
+    ),
+    .executableTarget(
+      name: "retrofront-linux-ui",
+      dependencies: ["RetrofrontSwift"],
+      path: "frontend/Sources/retrofront-linux-ui"
     ),
     .testTarget(
       name: "RetrofrontSwiftTests",

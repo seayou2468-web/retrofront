@@ -1,0 +1,46 @@
+name: Retrofront
+
+on:
+  push:
+    branches: [main, work]
+  pull_request:
+
+jobs:
+  linux:
+    name: Linux Swift/Rust UI
+    runs-on: ubuntu-latest
+    container: swift:6.0-jammy
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native dependencies
+        run: apt-get update && apt-get install -y clang libclang-dev make
+      - name: Test Linux workspace
+        working-directory: Retrofront
+        run: make test
+      - name: Build Linux UI
+        working-directory: Retrofront
+        run: make linux-ui
+
+  ios-device:
+    name: iOS device build
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Build Rust static library for iOS device
+        working-directory: Retrofront
+        run: make ios-rust
+      - name: Generate Xcode project
+        working-directory: Retrofront
+        run: make xcodegen
+      - name: Build app for generic iOS device
+        working-directory: Retrofront
+        run: |
+          xcodebuild \
+            -project Retrofront.xcodeproj \
+            -scheme RetrofrontiOS \
+            -destination 'generic/platform=iOS' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            build

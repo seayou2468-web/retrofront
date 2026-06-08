@@ -27,3 +27,23 @@ cd Retrofront
 cargo build --release
 swift build
 ```
+
+
+## iOS device app
+
+The iOS app is generated with XcodeGen and builds for real devices only; no iOS simulator setup is required. The app intentionally ships without emulator cores or ROMs, but it links the Rust frontend runtime.
+
+```sh
+cd Retrofront
+make ios-rust
+make xcodegen
+make ios-device-build
+```
+
+## Linux UI
+
+```sh
+cd Retrofront
+make linux-ui
+.build/debug/retrofront-linux-ui
+```

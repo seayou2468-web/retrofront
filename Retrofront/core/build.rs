@@ -7,8 +7,19 @@ fn main() {
 
     println!("cargo:rerun-if-changed={}", header.display());
 
-    let bindings = bindgen::Builder::default()
-        .header(header.to_string_lossy())
+    let clang_target = match env::var("TARGET").as_deref() {
+        Ok("aarch64-apple-ios") => Some("arm64-apple-ios"),
+        Ok("aarch64-apple-ios-sim") => Some("arm64-apple-ios-simulator"),
+        Ok("x86_64-apple-ios") => Some("x86_64-apple-ios-simulator"),
+        _ => None,
+    };
+
+    let mut builder = bindgen::Builder::default().header(header.to_string_lossy());
+    if let Some(clang_target) = clang_target {
+        builder = builder.clang_arg(format!("--target={clang_target}"));
+    }
+
+    let bindings = builder
         .allowlist_type("retro_.*")
         .allowlist_function("retro_.*")
         .allowlist_var("RETRO_.*")

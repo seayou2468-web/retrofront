@@ -1,4 +1,4 @@
-.PHONY: all rust swift test clean ios-info
+.PHONY: all rust swift test clean linux-ui ios-rust xcodegen ios-device-build ios-info
 
 all: rust swift
 
@@ -11,6 +11,18 @@ swift: rust
 test: rust
 	cargo test --manifest-path Cargo.toml
 	swift test
+
+linux-ui: rust
+	swift build --product retrofront-linux-ui
+
+ios-rust:
+	./scripts/build-rust-ios.sh
+
+xcodegen:
+	./scripts/generate-xcodeproj.sh
+
+ios-device-build: ios-rust xcodegen
+	xcodebuild -project Retrofront.xcodeproj -scheme RetrofrontiOS -destination 'generic/platform=iOS' -configuration Debug CODE_SIGNING_ALLOWED=NO build
 
 clean:
 	cargo clean --manifest-path Cargo.toml

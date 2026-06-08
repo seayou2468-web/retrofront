@@ -18,3 +18,10 @@ Retrofront separates UI and frontend management:
 
 - Linux uses `.so` libretro cores and links Rust with `libdl`.
 - iOS should link the Rust `staticlib` into the Xcode app target. Dynamic loading of third-party cores may be restricted by platform policy, so static or bundled core strategies can be added behind the same Rust management API.
+
+
+## UI shells
+
+- The iOS SwiftUI app is an empty emulator shell: it connects to the Rust frontend runtime, shows library/play/core/settings screens, and does not require any libretro emulator core to build or launch.
+- The Linux UI is a terminal dashboard executable that also connects to the same Swift/Rust runtime without requiring a loaded emulator core.
+- iOS project generation uses XcodeGen. Build the Rust `aarch64-apple-ios` static library first, then generate/build the Xcode project for `generic/platform=iOS`.
