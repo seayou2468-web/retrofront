@@ -9,7 +9,10 @@ pub mod gfx;
 pub mod libretro;
 
 use dylib::Library;
-use gfx::{GfxBackendKind, GfxRuntime, PixelFormat};
+use gfx::{
+    GfxBackendKind, GfxRuntime, HardwareRenderRequest, HostRenderHandles, PixelFormat,
+    RETRO_HW_FRAME_BUFFER_VALID,
+};
 use std::collections::VecDeque;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_uint, c_void};
@@ -407,14 +410,30 @@ unsafe extern "C" fn environment_callback(cmd: c_uint, data: *mut c_void) -> boo
             }
         },
         libretro::RETRO_ENVIRONMENT_SET_HW_RENDER => unsafe {
-            let request =
-                gfx::hw_render_request_from_raw(data.cast::<libretro::retro_hw_render_callback>());
-            if let Some(request) = request {
-                with_active_frontend(|frontend| frontend.gfx.set_hardware_render_request(request));
-                true
-            } else {
-                false
-            }
+            let Some(raw) = data.cast::<libretro::retro_hw_render_callback>().as_mut() else {
+                return false;
+            };
+            let request = HardwareRenderRequest::from_libretro(raw);
+            with_active_frontend(|frontend| {
+                frontend.gfx.set_hardware_render_request(request);
+                frontend.gfx.patch_hw_render_callback(raw);
+            });
+            true
+        },
+        libretro::RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER => unsafe {
+            let Some(out) = data.cast::<c_uint>().as_mut() else {
+                return false;
+            };
+            let preferred = with_active_frontend(|frontend| frontend.gfx.backend())
+                .unwrap_or(GfxBackendKind::Software);
+            *out = match preferred {
+                GfxBackendKind::Software => libretro::retro_hw_context_type_RETRO_HW_CONTEXT_NONE,
+                GfxBackendKind::OpenGl => {
+                    libretro::retro_hw_context_type_RETRO_HW_CONTEXT_OPENGLES_VERSION
+                }
+                GfxBackendKind::Vulkan => libretro::retro_hw_context_type_RETRO_HW_CONTEXT_VULKAN,
+            };
+            true
         },
         libretro::RETRO_ENVIRONMENT_SET_GEOMETRY
         | libretro::RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO
@@ -437,10 +456,16 @@ unsafe extern "C" fn video_refresh_callback(
 ) {
     let _ = with_active_frontend(|frontend| {
         let pixel_format = frontend.gfx.pixel_format().code();
-        let frame_number = match frontend
-            .gfx
-            .ingest_software_frame(data, width, height, pitch)
-        {
+        let frame_number = match if data == RETRO_HW_FRAME_BUFFER_VALID {
+            frontend
+                .gfx
+                .ingest_hardware_frame(width, height)
+                .map(|_| frontend.gfx.last_frame())
+        } else {
+            frontend
+                .gfx
+                .ingest_software_frame(data, width, height, pitch)
+        } {
             Ok(frame) => {
                 let _ = (frame.width, frame.height);
                 frontend.gfx.frame_counter()
@@ -507,6 +532,25 @@ pub struct RfVideoFrameInfo {
     pub rgba_len: u64,
     pub pixel_format: u32,
     pub frame_number: u64,
+}
+
+#[repr(C)]
+pub struct RfGfxHostHandles {
+    pub native_view: u64,
+    pub gl_context: u64,
+    pub vulkan_instance: u64,
+    pub vulkan_device: u64,
+    pub vulkan_queue: u64,
+    pub vulkan_command_buffer: u64,
+    pub vulkan_image: u64,
+}
+
+#[repr(C)]
+pub struct RfGfxDriverInfo {
+    pub backend: u32,
+    pub frame_number: u64,
+    pub hardware_ready: bool,
+    pub rendered: bool,
 }
 
 #[repr(C)]
@@ -675,6 +719,65 @@ pub unsafe extern "C" fn rf_frontend_set_gfx_backend(
     true
 }
 
+/// Supplies native OpenGL ES or Vulkan/MoltenVK handles to the Rust gfx driver.
+///
+/// # Safety
+///
+/// `frontend` must be a valid pointer returned by `rf_frontend_create`; `handles`
+/// must be readable. Handles are opaque and remain owned by the native host.
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_set_gfx_host_handles(
+    frontend: *mut RfFrontend,
+    handles: *const RfGfxHostHandles,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    let Some(handles) = (unsafe { handles.as_ref() }) else {
+        set_error(frontend, "gfx host handles are null");
+        return false;
+    };
+    frontend.inner.gfx.set_host_handles(HostRenderHandles {
+        native_view: handles.native_view,
+        gl_context: handles.gl_context,
+        vulkan_instance: handles.vulkan_instance,
+        vulkan_device: handles.vulkan_device,
+        vulkan_queue: handles.vulkan_queue,
+        vulkan_command_buffer: handles.vulkan_command_buffer,
+        vulkan_image: handles.vulkan_image,
+    });
+    true
+}
+
+/// Returns the active gfx driver status, including hardware readiness.
+///
+/// # Safety
+///
+/// `frontend` must be valid and `out` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_gfx_driver_info(
+    frontend: *const RfFrontend,
+    out: *mut RfGfxDriverInfo,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_ref() }) else {
+        return false;
+    };
+    let Some(out) = (unsafe { out.as_mut() }) else {
+        return false;
+    };
+    let status = frontend.inner.gfx.driver_status();
+    *out = RfGfxDriverInfo {
+        backend: status.backend as u32,
+        frame_number: status.frame_counter,
+        hardware_ready: status.hardware_ready,
+        rendered: status
+            .last_present
+            .as_ref()
+            .is_some_and(|present| present.rendered),
+    };
+    true
+}
+
 /// Returns metadata for the latest core-provided video frame copied by Rust gfx.
 ///
 /// # Safety
@@ -746,7 +849,10 @@ pub unsafe extern "C" fn rf_frontend_opengl_shader_sources(
         "layout(location = 0) in vec2 a_position;\n",
         "layout(location = 1) in vec2 a_texcoord;\n",
         "out vec2 v_texcoord;\n",
-        "void main() { v_texcoord = a_texcoord; gl_Position = vec4(a_position, 0.0, 1.0); }\n",
+        "void main() {\n",
+        "    v_texcoord = a_texcoord;\n",
+        "    gl_Position = vec4(a_position, 0.0, 1.0);\n",
+        "}\n",
         "\0"
     )
     .as_bytes();
@@ -756,7 +862,9 @@ pub unsafe extern "C" fn rf_frontend_opengl_shader_sources(
         "in vec2 v_texcoord;\n",
         "uniform sampler2D u_frame;\n",
         "out vec4 color;\n",
-        "void main() { color = texture(u_frame, v_texcoord); }\n",
+        "void main() {\n",
+        "    color = texture(u_frame, v_texcoord);\n",
+        "}\n",
         "\0"
     )
     .as_bytes();
