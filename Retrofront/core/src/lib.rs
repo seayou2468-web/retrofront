@@ -109,7 +109,15 @@ struct CoreApi {
 
 impl CoreApi {
     fn load(path: impl AsRef<Path>) -> Result<Self, String> {
-        let library = Library::open(path)?;
+        let path_str = path.as_ref().to_string_lossy();
+
+let final_path = if path_str.starts_with("@") {
+    path_str.to_string()
+} else {
+    format!("@executable_path/Frameworks/{}", path_str)
+};
+
+let library = Library::open(final_path)?;
         Ok(Self {
             retro_set_environment: sym!(library, "retro_set_environment", RetroSetEnvironment),
             retro_set_video_refresh: sym!(library, "retro_set_video_refresh", RetroSetVideoRefresh),
