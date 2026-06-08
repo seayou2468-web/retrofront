@@ -35,7 +35,7 @@ targets:
       - path: apps/iOS/Sources
     dependencies:
       - target: RetrofrontSwift
-      - framework: dylibs/mgba_libretro_ios.dylib
+      - path: dylibs/mgba_libretro_ios.dylib
         embed: true
         codeSign: true
     settings:
