@@ -2,7 +2,9 @@ name: Retrofront
 
 on:
   push:
-    branches: [main, work]
+    branches:
+      - main
+      - work
   pull_request:
 
 jobs:
@@ -10,30 +12,48 @@ jobs:
     name: Linux Swift/Rust UI
     runs-on: ubuntu-latest
     container: swift:6.0-jammy
+
     steps:
       - uses: actions/checkout@v4
+
       - name: Install native dependencies
         run: apt-get update && apt-get install -y clang libclang-dev make
+
       - name: Test Linux workspace
         working-directory: Retrofront
         run: make test
+
       - name: Build Linux UI
         working-directory: Retrofront
         run: make linux-ui
 
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: retrofront-linux-ui
+          path: |
+            Retrofront/.build
+            Retrofront/build
+          if-no-files-found: warn
+
   ios-device:
     name: iOS device build
     runs-on: macos-15
+
     steps:
       - uses: actions/checkout@v4
+
       - name: Install XcodeGen
         run: brew install xcodegen
+
       - name: Build Rust static library for iOS device
         working-directory: Retrofront
         run: make ios-rust
+
       - name: Generate Xcode project
         working-directory: Retrofront
         run: make xcodegen
+
       - name: Build app for generic iOS device
         working-directory: Retrofront
         run: |
@@ -41,6 +61,41 @@ jobs:
             -project Retrofront.xcodeproj \
             -scheme RetrofrontiOS \
             -destination 'generic/platform=iOS' \
-            -configuration Debug \
+            -configuration Release \
             CODE_SIGNING_ALLOWED=NO \
+            -derivedDataPath DerivedData \
             build
+
+      - name: Create IPA
+        working-directory: Retrofront
+        run: |
+          APP_PATH=$(find DerivedData/Build/Products -type d -name "*.app" | head -n 1)
+
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app found"
+            exit 1
+          fi
+
+          rm -rf Payload
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+
+          cd Payload
+          zip -r ../Retrofront.ipa .
+          cd ..
+
+          ls -lah Retrofront.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Retrofront-IPA
+          path: Retrofront/Retrofront.ipa
+          if-no-files-found: error
+
+      - name: Upload APP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Retrofront-APP
+          path: Retrofront/Payload/*.app
+          if-no-files-found: warn
