@@ -1,37 +1,66 @@
 name: Retrofront
 
 on:
+  workflow_dispatch:
+
   push:
-  commit:
+
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
+
   linux:
     name: Linux Swift/Rust UI
+
     runs-on: ubuntu-latest
-    container: swift:6.0-jammy
+
+    container:
+      image: swift:6.0-jammy
 
     steps:
-      - uses: actions/checkout@v4
+
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Install native dependencies
-        run: apt-get update && apt-get install -y clang libclang-dev make curl
+        shell: bash
+        run: |
+          apt-get update
+
+          apt-get install -y \
+            clang \
+            libclang-dev \
+            make \
+            curl
 
       - name: Install Rust
+        shell: bash
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          curl --proto '=https' \
+            --tlsv1.2 \
+            -sSf \
+            https://sh.rustup.rs \
+            | sh -s -- -y
+
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Test Linux workspace
         working-directory: Retrofront
+        shell: bash
         run: |
-          . $HOME/.cargo/env
+          . "$HOME/.cargo/env"
+
           make test
 
       - name: Build Linux UI
         working-directory: Retrofront
+        shell: bash
         run: |
-          . $HOME/.cargo/env
+          . "$HOME/.cargo/env"
+
           make linux-ui
 
       - name: Upload Linux artifacts
@@ -44,34 +73,46 @@ jobs:
           if-no-files-found: warn
 
   ios-device:
-    name: iOS device build
+    name: iOS Device Build
+
     runs-on: macos-15
 
     steps:
-      - uses: actions/checkout@v4
+
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Install XcodeGen
-        run: brew install xcodegen
+        shell: bash
+        run: |
+          brew install xcodegen
 
       - name: Build Rust static library for iOS device
         working-directory: Retrofront
-        run: make ios-rust
+        shell: bash
+        run: |
+          make ios-rust
 
       - name: Generate Xcode project
         working-directory: Retrofront
-        run: make xcodegen
+        shell: bash
+        run: |
+          make xcodegen
 
       - name: Verify bundled libretro core exists
         working-directory: Retrofront
-        run: test -f dylibs/mgba_libretro_ios.dylib
+        shell: bash
+        run: |
+          test -f dylibs/mgba_libretro_ios.dylib
 
       - name: Build app for generic iOS device
         working-directory: Retrofront
+        shell: bash
         run: |
           xcodebuild \
             -project Retrofront.xcodeproj \
             -scheme RetrofrontiOS \
-            -destination 'generic/platform=iOS' \
+            -destination "generic/platform=iOS" \
             -configuration Release \
             CODE_SIGNING_ALLOWED=NO \
             -derivedDataPath DerivedData \
@@ -79,23 +120,40 @@ jobs:
 
       - name: Create IPA
         working-directory: Retrofront
+        shell: bash
         run: |
-          APP_PATH=$(find DerivedData/Build/Products -type d -name "*.app" | head -n 1)
+          APP_PATH=$(
+            find DerivedData/Build/Products \
+              -type d \
+              -name "*.app" \
+              | head -n 1
+          )
 
           if [ -z "$APP_PATH" ]; then
             echo "No .app found"
-            return 1
+            exit 1
           fi
 
+          echo "Found app:"
+          echo "$APP_PATH"
+
           rm -rf Payload
+          rm -f Retrofront.ipa
+
           mkdir -p Payload
+
           cp -R "$APP_PATH" Payload/
 
-          cd Payload
-          zip -r ../Retrofront.ipa .
-          cd ..
+          echo "Payload contents:"
+          find Payload
+
+          zip -r Retrofront.ipa Payload
+
+          echo "IPA contents:"
+          unzip -l Retrofront.ipa
 
           test -f Payload/Retrofront.app/Frameworks/mgba_libretro_ios.dylib
+
           ls -lah Retrofront.ipa
 
       - name: Upload IPA artifact
