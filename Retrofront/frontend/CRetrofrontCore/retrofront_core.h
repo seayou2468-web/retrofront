@@ -84,6 +84,20 @@ typedef struct RfGfxDriverInfo {
     bool rendered;
 } RfGfxDriverInfo;
 
+typedef struct RfCoreOptionValue {
+    const char *value;
+    const char *label;
+} RfCoreOptionValue;
+
+typedef struct RfCoreOption {
+    const char *key;
+    const char *desc;
+    const char *info;
+    const char *value;
+    const RfCoreOptionValue *values;
+    uintptr_t values_count;
+} RfCoreOption;
+
 RfFrontend *rf_frontend_create(void);
 void rf_frontend_destroy(RfFrontend *frontend);
 uint32_t rf_frontend_state(const RfFrontend *frontend);
@@ -101,6 +115,13 @@ uintptr_t rf_frontend_copy_video_frame_rgba(const RfFrontend *frontend, uint8_t 
 bool rf_frontend_system_info(const RfFrontend *frontend, RfSystemInfo *out_info);
 bool rf_frontend_next_event(RfFrontend *frontend, RfEvent *out_event);
 const char *rf_frontend_last_error(const RfFrontend *frontend);
+
+// Core Options API
+bool rf_frontend_set_options_config_path(RfFrontend *frontend, const char *path);
+uintptr_t rf_frontend_options_count(const RfFrontend *frontend);
+bool rf_frontend_get_option(RfFrontend *frontend, uintptr_t index, RfCoreOption *out_option);
+bool rf_frontend_set_option(RfFrontend *frontend, const char *key, const char *value);
+void rf_frontend_clear_options_cache(RfFrontend *frontend);
 
 #ifdef __cplusplus
 }

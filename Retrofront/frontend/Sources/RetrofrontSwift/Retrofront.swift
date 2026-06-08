@@ -117,6 +117,19 @@ public enum FrontendEvent: Equatable, Sendable {
   case inputPoll
 }
 
+public struct CoreOptionValue: Equatable, Sendable {
+  public let value: String
+  public let label: String
+}
+
+public struct CoreOption: Equatable, Sendable {
+  public let key: String
+  public let desc: String
+  public let info: String
+  public let value: String
+  public let values: [CoreOptionValue]
+}
+
 public final class Retrofront: @unchecked Sendable {
   private let handle: OpaquePointer
 
@@ -254,6 +267,49 @@ public final class Retrofront: @unchecked Sendable {
       }
     }
     return events
+  }
+
+  public func setOptionsConfigPath(_ path: String) throws {
+    guard path.withCString({ rf_frontend_set_options_config_path(handle, $0) }) else {
+      throw lastError()
+    }
+  }
+
+  public func coreOptions() -> [CoreOption] {
+    rf_frontend_clear_options_cache(handle)
+    let count = rf_frontend_options_count(handle)
+    var options: [CoreOption] = []
+    for i in 0..<count {
+      var raw = RfCoreOption()
+      if rf_frontend_get_option(handle, i, &raw) {
+        var values: [CoreOptionValue] = []
+        for j in 0..<raw.values_count {
+            let val = raw.values[Int(j)]
+            values.append(CoreOptionValue(
+                value: String(cString: val.value),
+                label: String(cString: val.label)
+            ))
+        }
+        options.append(CoreOption(
+          key: String(cString: raw.key),
+          desc: String(cString: raw.desc),
+          info: String(cString: raw.info),
+          value: String(cString: raw.value),
+          values: values
+        ))
+      }
+    }
+    return options
+  }
+
+  public func setCoreOption(key: String, value: String) throws {
+    guard key.withCString({ k in value.withCString({ v in rf_frontend_set_option(handle, k, v) }) }) else {
+      throw lastError()
+    }
+  }
+
+  public func clearOptionsCache() {
+    rf_frontend_clear_options_cache(handle)
   }
 
   private func lastError() -> RetrofrontError {

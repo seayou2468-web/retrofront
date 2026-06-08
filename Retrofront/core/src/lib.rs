@@ -5,10 +5,13 @@
 //! metadata, and exposes a stable C ABI for Swift UI code on iOS and Linux.
 
 mod dylib;
+mod options;
 pub mod gfx;
 pub mod libretro;
 
 use dylib::Library;
+use options::CoreOptionsManager;
+pub use options::{CoreOptionDefinition, CoreOptionValue};
 use gfx::{
     GfxBackendKind, GfxRuntime, HardwareRenderRequest,
     HostRenderHandles, PixelFormat,
@@ -148,6 +151,7 @@ pub struct FrontendCore {
     events: VecDeque<FrontendEvent>,
     joypad_buttons: [i16; 16],
     pub gfx: GfxRuntime,
+    pub options: CoreOptionsManager,
 }
 
 impl FrontendCore {
@@ -159,6 +163,7 @@ impl FrontendCore {
             events: VecDeque::new(),
             joypad_buttons: [0; 16],
             gfx: GfxRuntime::new(),
+            options: CoreOptionsManager::new(),
         }
     }
 
@@ -316,6 +321,7 @@ impl FrontendCore {
         self.system_info = None;
         self.events.clear();
         self.gfx = GfxRuntime::new();
+        self.options = CoreOptionsManager::new();
     }
 
     fn refresh_system_av_info(&mut self) {
@@ -409,6 +415,39 @@ unsafe extern "C" fn environment_callback(command: c_uint, data: *mut c_void) ->
             let request = HardwareRenderRequest::from_libretro(raw);
             frontend.gfx.set_hardware_render_request(request);
             frontend.gfx.patch_hw_render_callback(raw);
+            true
+        }
+        libretro::RETRO_ENVIRONMENT_GET_VARIABLE => {
+            if data.is_null() { return true; }
+            let var = unsafe { &mut *(data.cast::<libretro::retro_variable>()) };
+            if var.key.is_null() { return true; }
+            let key = unsafe { CStr::from_ptr(var.key) }.to_string_lossy();
+            var.value = frontend.options.get_variable_ptr(&key);
+            !var.value.is_null()
+        }
+        libretro::RETRO_ENVIRONMENT_SET_VARIABLES => {
+            frontend.options.set_definitions_v0(data.cast());
+            true
+        }
+        libretro::RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE => {
+            if !data.is_null() {
+                unsafe { *(data.cast::<bool>()) = frontend.options.check_updated() };
+            }
+            true
+        }
+        libretro::RETRO_ENVIRONMENT_GET_CORE_OPTIONS_VERSION => {
+            if !data.is_null() {
+                unsafe { *(data.cast::<u32>()) = 2 };
+            }
+            true
+        }
+        libretro::RETRO_ENVIRONMENT_SET_CORE_OPTIONS => {
+            frontend.options.set_definitions_v1(data.cast());
+            true
+        }
+        libretro::RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2 => {
+            let options_v2 = unsafe { &*(data.cast::<libretro::retro_core_options_v2>()) };
+            frontend.options.set_definitions_v2(options_v2.definitions, options_v2.categories);
             true
         }
         _ => {
@@ -549,12 +588,31 @@ pub struct RfGfxDriverInfo {
     pub rendered: bool,
 }
 
+#[repr(C)]
+pub struct RfCoreOptionValue {
+    pub value: *const c_char,
+    pub label: *const c_char,
+}
+
+#[repr(C)]
+pub struct RfCoreOption {
+    pub key: *const c_char,
+    pub desc: *const c_char,
+    pub info: *const c_char,
+    pub value: *const c_char,
+    pub values: *const RfCoreOptionValue,
+    pub values_count: usize,
+}
+
 pub struct RfFrontend {
     inner: FrontendCore,
     info_name: CString,
     info_version: CString,
     info_extensions: CString,
     last_error: CString,
+    // Cached option structures for C API
+    cached_options: Vec<CString>,
+    cached_option_values: Vec<Vec<RfCoreOptionValue>>,
 }
 
 #[no_mangle]
@@ -565,6 +623,8 @@ pub unsafe extern "C" fn rf_frontend_create() -> *mut RfFrontend {
         info_version: CString::default(),
         info_extensions: CString::default(),
         last_error: CString::default(),
+        cached_options: Vec::new(),
+        cached_option_values: Vec::new(),
     }))
 }
 
@@ -915,6 +975,91 @@ pub unsafe extern "C" fn rf_frontend_last_error(frontend: *const RfFrontend) -> 
         return ptr::null();
     };
     frontend.last_error.as_ptr()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_set_options_config_path(
+    frontend: *mut RfFrontend,
+    path: *const c_char,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else { return false; };
+    let Some(path_str) = ptr_to_str(path) else { return false; };
+    frontend.inner.options.set_config_path(PathBuf::from(path_str));
+    true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_options_count(frontend: *const RfFrontend) -> usize {
+    let Some(frontend) = (unsafe { frontend.as_ref() }) else { return 0; };
+    frontend.inner.options.definitions().len()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_get_option(
+    frontend: *mut RfFrontend,
+    index: usize,
+    out: *mut RfCoreOption,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else { return false; };
+    let Some(out) = (unsafe { out.as_mut() }) else { return false; };
+
+    let defs = frontend.inner.options.definitions();
+    let Some(def) = defs.get(index) else { return false; };
+
+    let current_value = frontend.inner.options.get_variable(&def.key).cloned().unwrap_or_else(|| def.default_value.clone());
+
+    let key_c = CString::new(def.key.as_str()).unwrap_or_default();
+    let desc_c = CString::new(def.desc.as_str()).unwrap_or_default();
+    let info_c = CString::new(def.info.as_str()).unwrap_or_default();
+    let value_c = CString::new(current_value.as_str()).unwrap_or_default();
+
+    let mut values_c = Vec::new();
+    for v in &def.values {
+        let val_c = CString::new(v.value.as_str()).unwrap_or_default();
+        let label_c = CString::new(v.label.as_str()).unwrap_or_default();
+        values_c.push(RfCoreOptionValue {
+            value: val_c.as_ptr(),
+            label: label_c.as_ptr(),
+        });
+        frontend.cached_options.push(val_c);
+        frontend.cached_options.push(label_c);
+    }
+
+    out.key = key_c.as_ptr();
+    out.desc = desc_c.as_ptr();
+    out.info = info_c.as_ptr();
+    out.value = value_c.as_ptr();
+    out.values = values_c.as_ptr();
+    out.values_count = values_c.len();
+
+    frontend.cached_options.push(key_c);
+    frontend.cached_options.push(desc_c);
+    frontend.cached_options.push(info_c);
+    frontend.cached_options.push(value_c);
+    frontend.cached_option_values.push(values_c);
+
+    true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_set_option(
+    frontend: *mut RfFrontend,
+    key: *const c_char,
+    value: *const c_char,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else { return false; };
+    let Some(key_str) = ptr_to_str(key) else { return false; };
+    let Some(value_str) = ptr_to_str(value) else { return false; };
+    frontend.inner.options.set_variable(key_str, value_str);
+    true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_clear_options_cache(frontend: *mut RfFrontend) {
+    if let Some(frontend) = unsafe { frontend.as_mut() } {
+        frontend.cached_options.clear();
+        frontend.cached_option_values.clear();
+    }
 }
 
 fn ptr_to_str(ptr: *const c_char) -> Option<String> {
