@@ -17,6 +17,8 @@ pub struct CoreInfo {
     pub categories: String,
     pub notes: String,
     pub description: String,
+    pub database: String,
+    pub firmware_count: usize,
 }
 
 pub struct CoreInfoList {
@@ -86,6 +88,27 @@ impl CoreInfoList {
         self.sort_and_resolve_extensions();
     }
 
+    pub fn rebuild_indexes(&mut self) {
+        self.sort_and_resolve_extensions();
+    }
+
+    pub fn compatible_cores_for_extension(&self, extension: &str) -> Vec<CoreInfo> {
+        let wanted = extension.trim_start_matches('.').to_lowercase();
+        if wanted.is_empty() {
+            return Vec::new();
+        }
+
+        self.cores
+            .iter()
+            .filter(|core| {
+                core.supported_extensions
+                    .iter()
+                    .any(|ext| ext.trim_start_matches('.').eq_ignore_ascii_case(&wanted))
+            })
+            .cloned()
+            .collect()
+    }
+
     fn sort_and_resolve_extensions(&mut self) {
         self.cores.sort_by(|a, b| {
             a.display_name
@@ -113,7 +136,7 @@ impl CoreInfoList {
             .extension()
             .and_then(|ext| ext.to_str())
             .unwrap_or_default();
-        matches!(ext, "dylib" | "so" | "dll")
+        matches!(ext.to_ascii_lowercase().as_str(), "dylib" | "so" | "dll")
     }
 
     fn load_info_for_core(&self, core_path: &Path) -> CoreInfo {
@@ -170,6 +193,13 @@ impl CoreInfoList {
             if let Some(val) = map.get("description") {
                 info.description = val.clone();
             }
+            if let Some(val) = map.get("database") {
+                info.database = val.clone();
+            }
+            info.firmware_count = map
+                .keys()
+                .filter(|key| key.starts_with("firmware") && key.ends_with("_path"))
+                .count();
         }
         info
     }

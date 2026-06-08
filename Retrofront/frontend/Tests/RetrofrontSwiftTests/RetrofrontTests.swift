@@ -20,4 +20,13 @@ final class RetrofrontTests: XCTestCase {
     XCTAssertEqual(frontend.setting("libretro_directory"), "/tmp/RetrofrontTests/Cores")
     XCTAssertTrue(frontend.settings().contains { $0.key == "core_options_path" })
   }
+
+  func testContentLaunchPlanReportsMissingCore() throws {
+    let frontend = try Retrofront()
+    try frontend.setBaseDirectory("/tmp/RetrofrontTestsNoCores")
+    let plan = frontend.planContentLaunch(path: "/tmp/game.gba")
+    XCTAssertEqual(plan?.decision, .noCore)
+    XCTAssertEqual(plan?.contentExtension, "gba")
+  }
+
 }

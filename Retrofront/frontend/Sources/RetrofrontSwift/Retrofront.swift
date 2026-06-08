@@ -135,6 +135,21 @@ public struct GameEntrySwift: Equatable, Sendable {
   public let label: String
 }
 
+public enum LaunchDecision: UInt32, Equatable, Sendable {
+  case noCore = 0
+  case selected = 1
+  case needsCoreChoice = 2
+}
+
+public struct LaunchPlan: Equatable, Sendable {
+  public let contentPath: String
+  public let contentExtension: String
+  public let decision: LaunchDecision
+  public let selectedCorePath: String?
+  public let candidateCount: Int
+  public let reason: String
+}
+
 public struct CoreInfo: Equatable, Sendable {
   public let path: String
   public let displayName: String
@@ -200,6 +215,24 @@ public final class Retrofront: @unchecked Sendable {
         }
       }
       return rf_frontend_load_game(handle, cPath, nil)
+    }
+    guard ok else { throw lastError() }
+  }
+
+  public func launchContent(at path: String, preferredCore: String? = nil, metadata: String? = nil) throws {
+    let ok = path.withCString { cPath in
+      if let preferredCore {
+        return preferredCore.withCString { cCore in
+          if let metadata {
+            return metadata.withCString { cMeta in rf_frontend_launch_content(handle, cPath, cCore, cMeta) }
+          }
+          return rf_frontend_launch_content(handle, cPath, cCore, nil)
+        }
+      }
+      if let metadata {
+        return metadata.withCString { cMeta in rf_frontend_launch_content(handle, cPath, nil, cMeta) }
+      }
+      return rf_frontend_launch_content(handle, cPath, nil, nil)
     }
     guard ok else { throw lastError() }
   }
@@ -421,6 +454,44 @@ public final class Retrofront: @unchecked Sendable {
     }
   }
 
+
+  public func planContentLaunch(path: String, preferredCore: String? = nil) -> LaunchPlan? {
+    var raw = RfLaunchPlan()
+    let ok = path.withCString { cPath in
+      if let preferredCore {
+        return preferredCore.withCString { cCore in rf_frontend_plan_content_launch(handle, cPath, cCore, &raw) }
+      }
+      return rf_frontend_plan_content_launch(handle, cPath, nil, &raw)
+    }
+    guard ok else { return nil }
+    let selected = String(cString: raw.selected_core_path)
+    return LaunchPlan(
+      contentPath: String(cString: raw.content_path),
+      contentExtension: String(cString: raw.content_extension),
+      decision: LaunchDecision(rawValue: raw.decision) ?? .noCore,
+      selectedCorePath: selected.isEmpty ? nil : selected,
+      candidateCount: Int(raw.candidate_count),
+      reason: String(cString: raw.reason)
+    )
+  }
+
+  public func launchCandidates() -> [CoreInfo] {
+    let count = rf_frontend_launch_candidate_count(handle)
+    var cores: [CoreInfo] = []
+    for i in 0..<count {
+      var raw = RfCoreInfo()
+      if rf_frontend_get_launch_candidate(handle, UInt(i), &raw) {
+        cores.append(CoreInfo(
+          path: String(cString: raw.path),
+          displayName: String(cString: raw.display_name),
+          systemName: String(cString: raw.system_name),
+          supportedExtensions: String(cString: raw.supported_extensions).split(separator: "|").map(String.init)
+        ))
+      }
+    }
+    return cores
+  }
+
   public func availableGames() -> [GameEntrySwift] {
     let count = rf_frontend_games_count(handle)
     var games: [GameEntrySwift] = []
@@ -479,6 +550,10 @@ public final class Retrofront: @unchecked Sendable {
 
   public func pushSettingsMenu() {
     rf_frontend_menu_push_settings(handle)
+  }
+
+  public func pushSkinSettingsMenu() {
+    rf_frontend_menu_push_skin_settings(handle)
   }
 
   public func menuPop() -> Bool {

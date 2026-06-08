@@ -3,6 +3,7 @@
 mod core_info;
 mod dylib;
 pub mod gfx;
+mod launch;
 pub mod libretro;
 mod menu;
 mod options;
@@ -12,6 +13,7 @@ mod settings;
 
 use dylib::Library;
 use gfx::{GfxBackendKind, GfxRuntime, HardwareRenderRequest, PixelFormat};
+use launch::LaunchDecisionKind;
 use options::CoreOptionsManager;
 pub use options::{CoreOptionDefinition, CoreOptionValue};
 use std::cell::RefCell;
@@ -156,6 +158,7 @@ pub struct FrontendCore {
     pub settings: settings::Settings,
     pub menu: menu::MenuEngine,
     pub scanner: scanner::Scanner,
+    pub launcher: launch::LaunchManager,
 }
 
 static CORE_INSTANCE: OnceLock<Mutex<FrontendCore>> = OnceLock::new();
@@ -200,6 +203,7 @@ impl FrontendCore {
             settings: settings::Settings::new(),
             menu: menu::MenuEngine::new(),
             scanner: scanner::Scanner::new(),
+            launcher: launch::LaunchManager::new(),
         }
     }
 
@@ -339,6 +343,37 @@ impl FrontendCore {
             Ok(())
         } else {
             Err("core failed to load game".to_string())
+        }
+    }
+
+    pub fn launch_content(
+        &mut self,
+        path: impl AsRef<Path>,
+        requested_core: Option<PathBuf>,
+        meta: Option<String>,
+    ) -> Result<launch::LaunchPlan, String> {
+        if self.core_info.cores.is_empty() {
+            let dir = self.settings.libretro_directory();
+            self.core_info.scan_directory(&dir);
+        }
+
+        let content_path = path.as_ref().to_path_buf();
+        let plan = self.launcher.plan_content_launch(
+            &content_path,
+            &self.core_info,
+            &self.settings,
+            requested_core.as_deref(),
+        );
+
+        match (&plan.decision, plan.selected_core.clone()) {
+            (LaunchDecisionKind::Selected, Some(core_path)) => {
+                self.load_core(core_path)?;
+                self.load_game(&content_path, meta)?;
+                Ok(plan)
+            }
+            (LaunchDecisionKind::NeedsCoreChoice, _) => Err(plan.reason.clone()),
+            (LaunchDecisionKind::NoCore, _) => Err(plan.reason.clone()),
+            _ => Err("invalid launch plan".to_string()),
         }
     }
 
@@ -623,6 +658,16 @@ pub struct RfSettingEntry {
     pub value: *const c_char,
 }
 
+#[repr(C)]
+pub struct RfLaunchPlan {
+    pub content_path: *const c_char,
+    pub content_extension: *const c_char,
+    pub decision: u32,
+    pub selected_core_path: *const c_char,
+    pub candidate_count: usize,
+    pub reason: *const c_char,
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_create() -> *mut RfFrontend {
     Box::into_raw(Box::new(RfFrontend {
@@ -699,6 +744,38 @@ pub unsafe extern "C" fn rf_frontend_load_game(
     match res {
         Ok(()) => {
             frontend.last_error = CString::default();
+            true
+        }
+        Err(error) => {
+            set_error(frontend, &error);
+            false
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_launch_content(
+    frontend: *mut RfFrontend,
+    path: *const c_char,
+    preferred_core: *const c_char,
+    meta: *const c_char,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    let Some(path_str) = ptr_to_str(path) else {
+        return false;
+    };
+    let preferred = ptr_to_str(preferred_core).map(PathBuf::from);
+    let meta_str = ptr_to_str(meta);
+    let res = with_active_frontend(|core| core.launch_content(path_str, preferred, meta_str));
+    match res {
+        Ok(_) => {
+            frontend.last_error = CString::default();
+            let sys_info = with_active_frontend(|core| core.system_info().cloned());
+            if let Some(info) = sys_info {
+                cache_system_info(frontend, &info);
+            }
             true
         }
         Err(error) => {
@@ -1234,6 +1311,117 @@ pub unsafe extern "C" fn rf_frontend_get_game_info(
     })
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_plan_content_launch(
+    frontend: *mut RfFrontend,
+    path: *const c_char,
+    preferred_core: *const c_char,
+    out: *mut RfLaunchPlan,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    let Some(out) = (unsafe { out.as_mut() }) else {
+        return false;
+    };
+    let Some(path_str) = ptr_to_str(path) else {
+        return false;
+    };
+    let preferred = ptr_to_str(preferred_core).map(PathBuf::from);
+
+    with_active_frontend(|core| {
+        if core.core_info.cores.is_empty() {
+            let dir = core.settings.libretro_directory();
+            core.core_info.scan_directory(&dir);
+        }
+        let content_path = PathBuf::from(path_str);
+        let plan = core.launcher.plan_content_launch(
+            &content_path,
+            &core.core_info,
+            &core.settings,
+            preferred.as_deref(),
+        );
+
+        let content_path_c =
+            CString::new(plan.content_path.to_string_lossy().as_bytes()).unwrap_or_default();
+        let content_extension_c = CString::new(plan.content_extension.as_str()).unwrap_or_default();
+        let selected_core_path_c = CString::new(
+            plan.selected_core
+                .as_ref()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+        )
+        .unwrap_or_default();
+        let reason_c = CString::new(plan.reason.as_str()).unwrap_or_default();
+
+        out.content_path = content_path_c.as_ptr();
+        out.content_extension = content_extension_c.as_ptr();
+        out.decision = match plan.decision {
+            launch::LaunchDecisionKind::NoCore => 0,
+            launch::LaunchDecisionKind::Selected => 1,
+            launch::LaunchDecisionKind::NeedsCoreChoice => 2,
+        };
+        out.selected_core_path = selected_core_path_c.as_ptr();
+        out.candidate_count = plan.candidates.len();
+        out.reason = reason_c.as_ptr();
+
+        frontend.cached_strings.push(content_path_c);
+        frontend.cached_strings.push(content_extension_c);
+        frontend.cached_strings.push(selected_core_path_c);
+        frontend.cached_strings.push(reason_c);
+        true
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_launch_candidate_count(_frontend: *const RfFrontend) -> usize {
+    with_active_frontend(|core| {
+        core.launcher
+            .last_plan
+            .as_ref()
+            .map(|plan| plan.candidates.len())
+            .unwrap_or(0)
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_get_launch_candidate(
+    frontend: *mut RfFrontend,
+    index: usize,
+    out: *mut RfCoreInfo,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    let Some(out) = (unsafe { out.as_mut() }) else {
+        return false;
+    };
+
+    with_active_frontend(|core| {
+        let Some(plan) = core.launcher.last_plan.as_ref() else {
+            return false;
+        };
+        let Some(info) = plan.candidates.get(index) else {
+            return false;
+        };
+        let path_c = CString::new(info.path.to_string_lossy().as_bytes()).unwrap_or_default();
+        let name_c = CString::new(info.display_name.as_str()).unwrap_or_default();
+        let sys_c = CString::new(info.system_name.as_str()).unwrap_or_default();
+        let ext_c = CString::new(info.supported_extensions.join("|").as_str()).unwrap_or_default();
+
+        out.path = path_c.as_ptr();
+        out.display_name = name_c.as_ptr();
+        out.system_name = sys_c.as_ptr();
+        out.supported_extensions = ext_c.as_ptr();
+
+        frontend.cached_strings.push(path_c);
+        frontend.cached_strings.push(name_c);
+        frontend.cached_strings.push(sys_c);
+        frontend.cached_strings.push(ext_c);
+        true
+    })
+}
+
 // Menu Engine API Impl
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_menu_current_list(
@@ -1320,6 +1508,13 @@ pub unsafe extern "C" fn rf_frontend_menu_push_settings(_frontend: *mut RfFronte
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn rf_frontend_menu_push_skin_settings(_frontend: *mut RfFrontend) {
+    with_active_frontend(|core| {
+        core.menu.push_skin_settings(&core.settings);
+    });
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn rf_frontend_menu_pop(_frontend: *mut RfFrontend) -> bool {
     with_active_frontend(|core| core.menu.pop().is_some())
 }
@@ -1348,7 +1543,11 @@ pub unsafe extern "C" fn rf_frontend_set_base_dir(
         return false;
     };
     with_active_frontend(|core| {
-        core.settings.set_base_dir(Path::new(&path_str));
+        let base_dir = PathBuf::from(&path_str);
+        core.settings.set_base_dir(&base_dir);
+        core.settings.set("libretro_directory", &base_dir.join("Cores").to_string_lossy());
+        core.settings.set("libretro_info_path", &base_dir.join("info").to_string_lossy());
+        core.settings.set("core_options_path", &base_dir.join("retroarch-core-options.cfg").to_string_lossy());
         core.configure_from_settings();
     });
     true

@@ -123,11 +123,21 @@ typedef struct RfSettingEntry {
     const char *value;
 } RfSettingEntry;
 
+typedef struct RfLaunchPlan {
+    const char *content_path;
+    const char *content_extension;
+    uint32_t decision;
+    const char *selected_core_path;
+    uintptr_t candidate_count;
+    const char *reason;
+} RfLaunchPlan;
+
 RfFrontend *rf_frontend_create(void);
 void rf_frontend_destroy(RfFrontend *frontend);
 uint32_t rf_frontend_state(const RfFrontend *frontend);
 bool rf_frontend_load_core(RfFrontend *frontend, const char *path);
 bool rf_frontend_load_game(RfFrontend *frontend, const char *path, const char *meta);
+bool rf_frontend_launch_content(RfFrontend *frontend, const char *path, const char *preferred_core, const char *meta);
 bool rf_frontend_run_frame(RfFrontend *frontend);
 void rf_frontend_unload_game(RfFrontend *frontend);
 bool rf_frontend_set_gfx_backend(RfFrontend *frontend, uint32_t backend);
@@ -164,12 +174,16 @@ typedef struct RfGameEntry {
 void rf_frontend_scan_games(RfFrontend *frontend, const char *directory, const char *extensions);
 uintptr_t rf_frontend_games_count(const RfFrontend *frontend);
 bool rf_frontend_get_game_info(RfFrontend *frontend, uintptr_t index, RfGameEntry *out_info);
+bool rf_frontend_plan_content_launch(RfFrontend *frontend, const char *path, const char *preferred_core, RfLaunchPlan *out_plan);
+uintptr_t rf_frontend_launch_candidate_count(const RfFrontend *frontend);
+bool rf_frontend_get_launch_candidate(RfFrontend *frontend, uintptr_t index, RfCoreInfo *out_info);
 
 // Menu Engine API
 bool rf_frontend_menu_current_list(RfFrontend *frontend, RfMenuList *out_list);
 bool rf_frontend_menu_get_entry(RfFrontend *frontend, uintptr_t index, RfMenuEntry *out_entry);
 void rf_frontend_menu_push_core_list(RfFrontend *frontend);
 void rf_frontend_menu_push_settings(RfFrontend *frontend);
+void rf_frontend_menu_push_skin_settings(RfFrontend *frontend);
 bool rf_frontend_menu_pop(RfFrontend *frontend);
 
 // RetroArch-style Settings API

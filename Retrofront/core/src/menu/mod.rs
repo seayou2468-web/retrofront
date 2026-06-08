@@ -24,14 +24,27 @@ pub struct MenuList {
     pub entries: Vec<MenuEntry>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MenuSkin {
+    pub driver: String,
+    pub theme: String,
+    pub assets_directory: String,
+}
+
 pub struct MenuEngine {
     pub history: Vec<MenuList>,
+    pub skin: MenuSkin,
 }
 
 impl MenuEngine {
     pub fn new() -> Self {
         let mut engine = Self {
             history: Vec::new(),
+            skin: MenuSkin {
+                driver: "xmb".to_string(),
+                theme: "monochrome".to_string(),
+                assets_directory: String::new(),
+            },
         };
         engine.push_main_menu();
         engine
@@ -101,6 +114,51 @@ impl MenuEngine {
         });
     }
 
+    pub fn apply_skin_from_settings(&mut self, settings: &Settings) {
+        self.skin = MenuSkin {
+            driver: settings
+                .get("menu_driver")
+                .cloned()
+                .unwrap_or_else(|| "xmb".to_string()),
+            theme: settings
+                .get("menu_xmb_theme")
+                .cloned()
+                .unwrap_or_else(|| "monochrome".to_string()),
+            assets_directory: settings
+                .menu_assets_directory()
+                .to_string_lossy()
+                .into_owned(),
+        };
+    }
+
+    pub fn push_skin_settings(&mut self, settings: &Settings) {
+        self.apply_skin_from_settings(settings);
+        let entries = vec![
+            Self::setting(
+                "Menu Driver",
+                "RetroArch-compatible menu driver id",
+                &self.skin.driver,
+                260,
+            ),
+            Self::setting(
+                "XMB Theme",
+                "Icon and background theme",
+                &self.skin.theme,
+                261,
+            ),
+            Self::setting(
+                "Menu Assets",
+                "XMB/Ozone asset root",
+                &self.skin.assets_directory,
+                262,
+            ),
+        ];
+        self.history.push(MenuList {
+            title: "XMB Theme".to_string(),
+            entries,
+        });
+    }
+
     pub fn push_settings(&mut self, settings: &Settings) {
         let entries = vec![
             Self::setting(
@@ -138,6 +196,27 @@ impl MenuEngine {
                 "Instant save states",
                 settings.savestate_directory().to_string_lossy(),
                 205,
+            ),
+            Self::setting(
+                "Playlist Directory",
+                "Scanned content playlists",
+                settings
+                    .path_value("playlist_directory")
+                    .unwrap_or_default()
+                    .to_string_lossy(),
+                206,
+            ),
+            Self::setting(
+                "Cache Directory",
+                "Temporary extraction and runtime files",
+                settings.cache_directory().to_string_lossy(),
+                207,
+            ),
+            Self::setting(
+                "Thumbnails Directory",
+                "Box art and media thumbnails",
+                settings.thumbnails_directory().to_string_lossy(),
+                208,
             ),
         ];
         self.history.push(MenuList {

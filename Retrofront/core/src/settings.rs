@@ -75,6 +75,9 @@ impl Settings {
 
     pub fn set_base_dir(&mut self, base_dir: &Path) {
         self.base_dir = base_dir.to_path_buf();
+        for key in Self::managed_default_keys() {
+            self.values.remove(*key);
+        }
         self.apply_retroarch_defaults(base_dir);
     }
 
@@ -120,6 +123,45 @@ impl Settings {
             .unwrap_or_else(|| self.base_dir.join("system"))
     }
 
+    pub fn preferred_core_for_extension(&self, extension: &str) -> Option<PathBuf> {
+        let ext = extension.trim_start_matches('.').to_lowercase();
+        if ext.is_empty() {
+            return None;
+        }
+        self.path_value(&format!("content_core_{}", ext))
+    }
+
+    pub fn set_preferred_core_for_extension(&mut self, extension: &str, core_path: &Path) {
+        let ext = extension.trim_start_matches('.').to_lowercase();
+        if !ext.is_empty() {
+            self.set(
+                &format!("content_core_{}", ext),
+                &core_path.to_string_lossy(),
+            );
+        }
+    }
+
+    pub fn runtime_directory(&self) -> PathBuf {
+        self.path_value("runtime_directory")
+            .unwrap_or_else(|| self.base_dir.join("runtime"))
+    }
+
+    pub fn cache_directory(&self) -> PathBuf {
+        self.path_value("cache_directory")
+            .unwrap_or_else(|| self.base_dir.join("cache"))
+    }
+
+    pub fn thumbnails_directory(&self) -> PathBuf {
+        self.path_value("thumbnails_directory")
+            .unwrap_or_else(|| self.base_dir.join("thumbnails"))
+    }
+
+    pub fn menu_assets_directory(&self) -> PathBuf {
+        self.path_value("menu_assets_directory")
+            .or_else(|| self.path_value("assets_directory"))
+            .unwrap_or_else(|| self.base_dir.join("assets"))
+    }
+
     fn apply_retroarch_defaults(&mut self, base_dir: &Path) {
         let defaults = [
             ("libretro_directory", base_dir.join("Cores")),
@@ -135,8 +177,23 @@ impl Settings {
             ("playlist_directory", base_dir.join("playlists")),
             ("core_assets_directory", base_dir.join("downloads")),
             ("assets_directory", base_dir.join("assets")),
+            ("menu_assets_directory", base_dir.join("assets")),
+            ("thumbnails_directory", base_dir.join("thumbnails")),
+            ("runtime_directory", base_dir.join("runtime")),
+            ("cache_directory", base_dir.join("cache")),
+            ("screenshot_directory", base_dir.join("screenshots")),
+            ("input_remapping_directory", base_dir.join("remaps")),
+            ("cheat_database_path", base_dir.join("cheats")),
+            ("overlay_directory", base_dir.join("overlays")),
+            ("joypad_autoconfig_dir", base_dir.join("autoconfig")),
+            ("video_filter_dir", base_dir.join("filters/video")),
+            ("audio_filter_dir", base_dir.join("filters/audio")),
+            ("log_dir", base_dir.join("logs")),
             ("video_driver", PathBuf::from("bgfx")),
-            ("menu_driver", PathBuf::from("rust_ozone")),
+            ("audio_driver", PathBuf::from("swift")),
+            ("input_driver", PathBuf::from("swift")),
+            ("menu_driver", PathBuf::from("xmb")),
+            ("menu_xmb_theme", PathBuf::from("monochrome")),
         ];
         for (key, value) in defaults {
             let value = value.to_string_lossy().into_owned();
@@ -149,8 +206,14 @@ impl Settings {
         }
     }
 
-    fn directory_keys() -> &'static [&'static str] {
+    fn managed_default_keys() -> &'static [&'static str] {
         &[
+            "core_options_path",
+            "video_driver",
+            "audio_driver",
+            "input_driver",
+            "menu_driver",
+            "menu_xmb_theme",
             "libretro_directory",
             "libretro_info_path",
             "content_directory",
@@ -160,7 +223,23 @@ impl Settings {
             "playlist_directory",
             "core_assets_directory",
             "assets_directory",
+            "menu_assets_directory",
+            "thumbnails_directory",
+            "runtime_directory",
+            "cache_directory",
+            "screenshot_directory",
+            "input_remapping_directory",
+            "cheat_database_path",
+            "overlay_directory",
+            "joypad_autoconfig_dir",
+            "video_filter_dir",
+            "audio_filter_dir",
+            "log_dir",
         ]
+    }
+
+    fn directory_keys() -> &'static [&'static str] {
+        &Self::managed_default_keys()[6..]
     }
 
     fn unquote(value: &str) -> String {
@@ -175,6 +254,17 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn set_base_dir_rebases_managed_defaults() {
+        let mut settings = Settings::new();
+        settings.set_base_dir(Path::new("/tmp/RetrofrontA"));
+        settings.set_base_dir(Path::new("/tmp/RetrofrontB"));
+        assert_eq!(
+            settings.libretro_directory(),
+            PathBuf::from("/tmp/RetrofrontB/Cores")
+        );
+    }
 
     #[test]
     fn retroarch_directory_defaults_are_rooted_in_base_dir() {
