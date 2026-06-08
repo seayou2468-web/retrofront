@@ -1,7 +1,9 @@
 use super::{DriverFrame, GfxDriver, PresentStatus};
 use crate::gfx::context::ContextDriver;
 use crate::gfx::frame::VideoFrame;
-use crate::gfx::hardware::{GfxBackendKind, HostRenderHandles};
+use crate::gfx::hardware::{GfxBackendKind, HostRenderHandles, VulkanRenderCommand};
+use crate::gfx::CLEAR_COLOR_RGBA;
+use std::ptr;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VulkanPresentPlan {
@@ -13,6 +15,7 @@ pub struct VulkanPresentPlan {
     pub command_buffer: u64,
     pub image: u64,
     pub uses_moltenvk: bool,
+    pub source_is_hardware: bool,
     pub required_instance_extensions: &'static [&'static str],
     pub required_device_extensions: &'static [&'static str],
 }
@@ -32,9 +35,14 @@ impl VulkanDriver {
         self.last_present_plan.as_ref()
     }
 
-    fn build_plan(&self, width: u32, height: u32) -> Result<VulkanPresentPlan, String> {
+    fn build_plan(
+        &self,
+        width: u32,
+        height: u32,
+        source_is_hardware: bool,
+    ) -> Result<VulkanPresentPlan, String> {
         if !self.handles.has_vulkan() {
-            return Err("Vulkan backend requires MoltenVK/native view, instance, device, queue, command buffer, and image handles".into());
+            return Err("Vulkan backend requires MoltenVK/native view, instance, device, queue, command buffer, image, and render callback handles".into());
         }
         Ok(VulkanPresentPlan {
             extent: [width, height],
@@ -46,15 +54,42 @@ impl VulkanDriver {
             image: self.handles.vulkan_image,
             uses_moltenvk: cfg!(any(target_os = "ios", target_os = "macos"))
                 || self.handles.native_view != 0,
+            source_is_hardware,
             required_instance_extensions: &["VK_KHR_surface", "VK_EXT_metal_surface"],
             required_device_extensions: &["VK_KHR_swapchain"],
         })
+    }
+
+    fn execute(&self, plan: &VulkanPresentPlan, rgba: Option<&[u8]>) -> Result<(), String> {
+        let callback = self
+            .handles
+            .vulkan_render
+            .ok_or_else(|| "Vulkan render callback was not configured".to_string())?;
+        let command = VulkanRenderCommand {
+            native_view: plan.native_view,
+            instance: plan.instance,
+            device: plan.device,
+            queue: plan.queue,
+            command_buffer: plan.command_buffer,
+            image: plan.image,
+            extent: plan.extent,
+            source_is_hardware: plan.source_is_hardware,
+            uses_moltenvk: plan.uses_moltenvk,
+            clear_color: CLEAR_COLOR_RGBA,
+        };
+        let (ptr, len) = rgba.map_or((ptr::null(), 0), |bytes| (bytes.as_ptr(), bytes.len()));
+        let rendered = unsafe { callback(&command, ptr, len, self.handles.user_data) };
+        if rendered {
+            Ok(())
+        } else {
+            Err("Vulkan render callback reported failure".into())
+        }
     }
 }
 
 impl GfxDriver for VulkanDriver {
     fn name(&self) -> &'static str {
-        "vulkan-moltenvk"
+        "vulkan-moltenvk-host"
     }
     fn init(&mut self, context: &ContextDriver, _bootstrap_frame: &VideoFrame) {
         self.configure(context);
@@ -68,17 +103,26 @@ impl GfxDriver for VulkanDriver {
         if !self.initialized {
             self.initialized = true;
         }
-        let (width, height, frame_number) = match frame {
-            DriverFrame::Software(frame) => (frame.width, frame.height, 0),
-            DriverFrame::Hardware(frame) => (frame.width, frame.height, frame.frame_number),
+        let (width, height, frame_number, source_is_hardware, rgba) = match frame {
+            DriverFrame::Software(frame) => (
+                frame.width,
+                frame.height,
+                0,
+                false,
+                Some(frame.rgba.as_slice()),
+            ),
+            DriverFrame::Hardware(frame) => {
+                (frame.width, frame.height, frame.frame_number, true, None)
+            }
         };
-        let plan = self.build_plan(width, height)?;
+        let plan = self.build_plan(width, height, source_is_hardware)?;
+        self.execute(&plan, rgba)?;
         self.last_present_plan = Some(plan);
         Ok(PresentStatus {
             backend: GfxBackendKind::Vulkan,
             frame_number,
             rendered: true,
-            details: format!("Vulkan/MoltenVK present plan prepared for {width}x{height}"),
+            details: format!("Vulkan/MoltenVK rendered {width}x{height} through host callback"),
         })
     }
     fn destroy(&mut self) {

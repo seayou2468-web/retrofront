@@ -20,7 +20,10 @@ pub use drivers::software::SoftwareDriver;
 pub use drivers::vulkan::{VulkanDriver, VulkanPresentPlan};
 use drivers::{DriverFrame, GfxDriver, PresentStatus};
 pub use frame::{convert_frame_to_rgba, PixelFormat, VideoFrame, RETRO_HW_FRAME_BUFFER_VALID};
-pub use hardware::{GfxBackendKind, HardwareFrame, HardwareRenderRequest, HostRenderHandles};
+pub use hardware::{
+    GfxBackendKind, HardwareFrame, HardwareRenderRequest, HostRenderHandles, OpenGlRenderCommand,
+    VulkanRenderCommand,
+};
 use std::os::raw::c_void;
 
 /// Clear color used by all drivers before drawing a frame.
@@ -130,6 +133,10 @@ impl GfxRuntime {
         self.context.clear_request();
     }
 
+    pub fn context_handles(&self) -> HostRenderHandles {
+        self.context.handles()
+    }
+
     pub fn set_host_handles(&mut self, handles: HostRenderHandles) {
         self.context.set_host_handles(handles);
         let context = self.context.clone();
@@ -225,6 +232,56 @@ impl GfxBackendKind {
 mod tests {
     use super::*;
 
+    unsafe extern "C" fn test_gl_render(
+        command: *const OpenGlRenderCommand,
+        _rgba: *const u8,
+        _rgba_len: usize,
+        _user_data: *mut std::os::raw::c_void,
+    ) -> bool {
+        !command.is_null()
+    }
+
+    unsafe extern "C" fn test_vulkan_render(
+        command: *const VulkanRenderCommand,
+        _rgba: *const u8,
+        _rgba_len: usize,
+        _user_data: *mut std::os::raw::c_void,
+    ) -> bool {
+        !command.is_null()
+    }
+
+    unsafe extern "C" fn counting_gl_render(
+        command: *const OpenGlRenderCommand,
+        _rgba: *const u8,
+        rgba_len: usize,
+        user_data: *mut std::os::raw::c_void,
+    ) -> bool {
+        if command.is_null() || user_data.is_null() {
+            return false;
+        }
+        unsafe {
+            assert_eq!((*command).texture_size, [1, 1]);
+            *(user_data.cast::<usize>()) = rgba_len;
+        }
+        true
+    }
+
+    unsafe extern "C" fn counting_vulkan_render(
+        command: *const VulkanRenderCommand,
+        _rgba: *const u8,
+        rgba_len: usize,
+        user_data: *mut std::os::raw::c_void,
+    ) -> bool {
+        if command.is_null() || user_data.is_null() {
+            return false;
+        }
+        unsafe {
+            assert_eq!((*command).extent, [1, 1]);
+            *(user_data.cast::<usize>()) = rgba_len;
+        }
+        true
+    }
+
     #[test]
     fn converts_rgb565_to_rgba() {
         let mut gfx = GfxRuntime::new();
@@ -276,16 +333,65 @@ mod tests {
         gfx.set_host_handles(HostRenderHandles {
             native_view: 7,
             gl_context: 9,
+            gl_framebuffer: 13,
+            opengl_render: Some(test_gl_render),
             vulkan_instance: 0,
             vulkan_device: 0,
             vulkan_queue: 0,
             vulkan_command_buffer: 0,
             vulkan_image: 0,
+            ..HostRenderHandles::default()
         });
         gfx.ingest_hardware_frame(320, 240).expect("hardware frame");
         let call = gfx.opengl_draw_call().expect("draw call");
         assert_eq!(call.viewport, [0, 0, 320, 240]);
+        assert_eq!(call.framebuffer, 13);
         assert!(call.uses_ios_sdk_context);
+    }
+
+    #[test]
+    fn opengl_software_frame_invokes_host_renderer_with_rgba() {
+        let mut gfx = GfxRuntime::new();
+        let mut uploaded_len = 0usize;
+        gfx.set_backend(GfxBackendKind::OpenGl);
+        gfx.set_host_handles(HostRenderHandles {
+            native_view: 1,
+            gl_context: 2,
+            gl_framebuffer: 3,
+            opengl_render: Some(counting_gl_render),
+            user_data: (&mut uploaded_len as *mut usize).cast(),
+            ..HostRenderHandles::default()
+        });
+        gfx.set_pixel_format(PixelFormat::Xrgb8888);
+        let pixel = 0x0001_0203u32.to_ne_bytes();
+        gfx.ingest_software_frame(pixel.as_ptr().cast(), 1, 1, 4)
+            .expect("OpenGL software upload");
+        assert_eq!(uploaded_len, 4);
+        assert_eq!(gfx.opengl_draw_call().expect("draw call").framebuffer, 3);
+    }
+
+    #[test]
+    fn vulkan_software_frame_invokes_host_renderer_with_rgba() {
+        let mut gfx = GfxRuntime::new();
+        let mut uploaded_len = 0usize;
+        gfx.set_backend(GfxBackendKind::Vulkan);
+        gfx.set_host_handles(HostRenderHandles {
+            native_view: 1,
+            vulkan_instance: 2,
+            vulkan_device: 3,
+            vulkan_queue: 4,
+            vulkan_command_buffer: 5,
+            vulkan_image: 6,
+            vulkan_render: Some(counting_vulkan_render),
+            user_data: (&mut uploaded_len as *mut usize).cast(),
+            ..HostRenderHandles::default()
+        });
+        gfx.set_pixel_format(PixelFormat::Xrgb8888);
+        let pixel = 0x0001_0203u32.to_ne_bytes();
+        gfx.ingest_software_frame(pixel.as_ptr().cast(), 1, 1, 4)
+            .expect("Vulkan software upload");
+        assert_eq!(uploaded_len, 4);
+        assert_eq!(gfx.vulkan_present_plan().expect("plan").image, 6);
     }
 
     #[test]
@@ -295,11 +401,14 @@ mod tests {
         gfx.set_host_handles(HostRenderHandles {
             native_view: 11,
             gl_context: 0,
+            gl_framebuffer: 0,
+            vulkan_render: Some(test_vulkan_render),
             vulkan_instance: 1,
             vulkan_device: 2,
             vulkan_queue: 3,
             vulkan_command_buffer: 4,
             vulkan_image: 5,
+            ..HostRenderHandles::default()
         });
         gfx.ingest_hardware_frame(640, 480).expect("hardware frame");
         let plan = gfx.vulkan_present_plan().expect("present plan");

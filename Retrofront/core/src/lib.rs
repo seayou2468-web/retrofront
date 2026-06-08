@@ -10,8 +10,8 @@ pub mod libretro;
 
 use dylib::Library;
 use gfx::{
-    GfxBackendKind, GfxRuntime, HardwareRenderRequest, HostRenderHandles, PixelFormat,
-    RETRO_HW_FRAME_BUFFER_VALID,
+    GfxBackendKind, GfxRuntime, HardwareRenderRequest, HostRenderHandles, OpenGlRenderCommand,
+    PixelFormat, VulkanRenderCommand, RETRO_HW_FRAME_BUFFER_VALID,
 };
 use std::collections::VecDeque;
 use std::ffi::{CStr, CString};
@@ -538,11 +538,21 @@ pub struct RfVideoFrameInfo {
 pub struct RfGfxHostHandles {
     pub native_view: u64,
     pub gl_context: u64,
+    pub gl_framebuffer: usize,
     pub vulkan_instance: u64,
     pub vulkan_device: u64,
     pub vulkan_queue: u64,
     pub vulkan_command_buffer: u64,
     pub vulkan_image: u64,
+    pub opengl_render: Option<
+        unsafe extern "C" fn(*const OpenGlRenderCommand, *const u8, usize, *mut c_void) -> bool,
+    >,
+    pub vulkan_render: Option<
+        unsafe extern "C" fn(*const VulkanRenderCommand, *const u8, usize, *mut c_void) -> bool,
+    >,
+    pub get_proc_address:
+        Option<unsafe extern "C" fn(*const c_char, *mut c_void) -> libretro::retro_proc_address_t>,
+    pub user_data: *mut c_void,
 }
 
 #[repr(C)]
@@ -740,11 +750,16 @@ pub unsafe extern "C" fn rf_frontend_set_gfx_host_handles(
     frontend.inner.gfx.set_host_handles(HostRenderHandles {
         native_view: handles.native_view,
         gl_context: handles.gl_context,
+        gl_framebuffer: handles.gl_framebuffer,
         vulkan_instance: handles.vulkan_instance,
         vulkan_device: handles.vulkan_device,
         vulkan_queue: handles.vulkan_queue,
         vulkan_command_buffer: handles.vulkan_command_buffer,
         vulkan_image: handles.vulkan_image,
+        opengl_render: handles.opengl_render,
+        vulkan_render: handles.vulkan_render,
+        get_proc_address: handles.get_proc_address,
+        user_data: handles.user_data,
     });
     true
 }

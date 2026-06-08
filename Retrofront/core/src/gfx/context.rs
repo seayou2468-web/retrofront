@@ -58,7 +58,8 @@ impl ContextDriver {
 }
 
 unsafe extern "C" fn get_current_framebuffer() -> usize {
-    usize::MAX
+    crate::with_active_frontend(|frontend| frontend.gfx.context_handles().gl_framebuffer)
+        .unwrap_or(usize::MAX)
 }
 
 unsafe extern "C" fn get_proc_address(sym: *const c_char) -> libretro::retro_proc_address_t {
@@ -67,8 +68,13 @@ unsafe extern "C" fn get_proc_address(sym: *const c_char) -> libretro::retro_pro
     }
     let symbol = unsafe { CStr::from_ptr(sym) }.to_bytes();
     if symbol.is_empty() {
-        None
-    } else {
-        None
+        return None;
     }
+    crate::with_active_frontend(|frontend| {
+        let handles = frontend.gfx.context_handles();
+        handles
+            .get_proc_address
+            .and_then(|callback| unsafe { callback(sym, handles.user_data) })
+    })
+    .flatten()
 }

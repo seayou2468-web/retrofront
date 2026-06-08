@@ -1,7 +1,10 @@
 use super::{DriverFrame, GfxDriver, PresentStatus};
 use crate::gfx::context::ContextDriver;
 use crate::gfx::frame::VideoFrame;
-use crate::gfx::hardware::{GfxBackendKind, HostRenderHandles};
+use crate::gfx::hardware::{GfxBackendKind, HostRenderHandles, OpenGlRenderCommand};
+use crate::gfx::CLEAR_COLOR_RGBA;
+use std::ffi::CStr;
+use std::ptr;
 
 pub const OPENGL_VERTEX_SHADER: &str = r#"#version 300 es
 precision mediump float;
@@ -24,6 +27,9 @@ void main() {
 }
 "#;
 
+static OPENGL_VERTEX_SHADER_CSTR: &CStr = c"#version 300 es\nprecision mediump float;\nlayout(location = 0) in vec2 a_position;\nlayout(location = 1) in vec2 a_texcoord;\nout vec2 v_texcoord;\nvoid main() {\n    v_texcoord = a_texcoord;\n    gl_Position = vec4(a_position, 0.0, 1.0);\n}\n";
+static OPENGL_FRAGMENT_SHADER_CSTR: &CStr = c"#version 300 es\nprecision mediump float;\nin vec2 v_texcoord;\nuniform sampler2D u_frame;\nout vec4 color;\nvoid main() {\n    color = texture(u_frame, v_texcoord);\n}\n";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GlDrawCall {
     pub viewport: [i32; 4],
@@ -35,6 +41,7 @@ pub struct GlDrawCall {
     pub fragment_shader: &'static str,
     pub uses_ios_sdk_context: bool,
     pub bottom_left_origin: bool,
+    pub source_is_hardware: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -57,29 +64,58 @@ impl OpenGlDriver {
         width: u32,
         height: u32,
         bottom_left_origin: bool,
+        source_is_hardware: bool,
     ) -> Result<GlDrawCall, String> {
         if !self.handles.has_opengl() {
             return Err(
-                "OpenGL backend requires native_view and iOS SDK GL context handles".into(),
+                "OpenGL backend requires native_view, GL context, and render callback handles"
+                    .into(),
             );
         }
         Ok(GlDrawCall {
             viewport: [0, 0, width as i32, height as i32],
             texture_size: [width, height],
-            framebuffer: usize::MAX,
+            framebuffer: self.handles.gl_framebuffer,
             native_view: self.handles.native_view,
             gl_context: self.handles.gl_context,
             vertex_shader: OPENGL_VERTEX_SHADER,
             fragment_shader: OPENGL_FRAGMENT_SHADER,
             uses_ios_sdk_context: cfg!(target_os = "ios") || self.handles.gl_context != 0,
             bottom_left_origin,
+            source_is_hardware,
         })
+    }
+
+    fn execute(&self, call: &GlDrawCall, rgba: Option<&[u8]>) -> Result<(), String> {
+        let callback = self
+            .handles
+            .opengl_render
+            .ok_or_else(|| "OpenGL render callback was not configured".to_string())?;
+        let command = OpenGlRenderCommand {
+            native_view: call.native_view,
+            gl_context: call.gl_context,
+            framebuffer: call.framebuffer,
+            viewport: call.viewport,
+            texture_size: call.texture_size,
+            source_is_hardware: call.source_is_hardware,
+            bottom_left_origin: call.bottom_left_origin,
+            clear_color: CLEAR_COLOR_RGBA,
+            vertex_shader: OPENGL_VERTEX_SHADER_CSTR.as_ptr(),
+            fragment_shader: OPENGL_FRAGMENT_SHADER_CSTR.as_ptr(),
+        };
+        let (ptr, len) = rgba.map_or((ptr::null(), 0), |bytes| (bytes.as_ptr(), bytes.len()));
+        let rendered = unsafe { callback(&command, ptr, len, self.handles.user_data) };
+        if rendered {
+            Ok(())
+        } else {
+            Err("OpenGL render callback reported failure".into())
+        }
     }
 }
 
 impl GfxDriver for OpenGlDriver {
     fn name(&self) -> &'static str {
-        "opengl-es-ios-sdk"
+        "opengl-es-host"
     }
     fn init(&mut self, context: &ContextDriver, _bootstrap_frame: &VideoFrame) {
         self.configure(context);
@@ -93,24 +129,33 @@ impl GfxDriver for OpenGlDriver {
         if !self.initialized {
             self.initialized = true;
         }
-        let (width, height, frame_number, bottom_left_origin) = match frame {
-            DriverFrame::Software(frame) => (frame.width, frame.height, 0, false),
-            DriverFrame::Hardware(frame) => (
-                frame.width,
-                frame.height,
-                frame.frame_number,
-                frame.request.bottom_left_origin,
-            ),
-        };
-        let call = self.build_call(width, height, bottom_left_origin)?;
+        let (width, height, frame_number, bottom_left_origin, source_is_hardware, rgba) =
+            match frame {
+                DriverFrame::Software(frame) => (
+                    frame.width,
+                    frame.height,
+                    0,
+                    false,
+                    false,
+                    Some(frame.rgba.as_slice()),
+                ),
+                DriverFrame::Hardware(frame) => (
+                    frame.width,
+                    frame.height,
+                    frame.frame_number,
+                    frame.request.bottom_left_origin,
+                    true,
+                    None,
+                ),
+            };
+        let call = self.build_call(width, height, bottom_left_origin, source_is_hardware)?;
+        self.execute(&call, rgba)?;
         self.last_draw_call = Some(call);
         Ok(PresentStatus {
             backend: GfxBackendKind::OpenGl,
             frame_number,
             rendered: true,
-            details: format!(
-                "OpenGL ES draw call prepared for {width}x{height} using iOS SDK context"
-            ),
+            details: format!("OpenGL ES rendered {width}x{height} through host callback"),
         })
     }
     fn destroy(&mut self) {

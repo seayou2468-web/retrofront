@@ -35,6 +35,13 @@ public enum GfxBackend: UInt32, Equatable, Sendable {
   case vulkan = 2
 }
 
+public struct GfxDriverStatus: Equatable, Sendable {
+  public let backend: GfxBackend
+  public let frameNumber: UInt64
+  public let hardwareReady: Bool
+  public let rendered: Bool
+}
+
 public struct VideoFrame: Equatable, Sendable {
   public let width: UInt32
   public let height: UInt32
@@ -104,6 +111,16 @@ public final class Retrofront: @unchecked Sendable {
     guard rf_frontend_set_gfx_backend(handle, backend.rawValue) else {
       throw lastError()
     }
+  }
+
+  public func gfxDriverStatus() -> GfxDriverStatus? {
+    var info = RfGfxDriverInfo()
+    guard rf_frontend_gfx_driver_info(handle, &info) else { return nil }
+    return GfxDriverStatus(
+      backend: GfxBackend(rawValue: info.backend) ?? .software,
+      frameNumber: info.frame_number,
+      hardwareReady: info.hardware_ready,
+      rendered: info.rendered)
   }
 
   public func latestVideoFrame() -> VideoFrame? {
