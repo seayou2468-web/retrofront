@@ -17,6 +17,10 @@ impl Scanner {
         Self { games: Vec::new() }
     }
 
+    pub fn clear(&mut self) {
+        self.games.clear();
+    }
+
     pub fn scan_directory(&mut self, dir: &Path, extensions: &[String]) {
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
@@ -26,11 +30,13 @@ impl Scanner {
                 } else if let Some(ext) = path.extension() {
                     let ext_str = ext.to_string_lossy().to_lowercase();
                     if extensions.iter().any(|e| e.to_lowercase() == ext_str) {
-                        self.games.push(GameEntry {
-                            label: path.file_stem().unwrap().to_string_lossy().into_owned(),
-                            path,
-                            core_path: None,
-                        });
+                        if !self.games.iter().any(|g| g.path == path) {
+                            self.games.push(GameEntry {
+                                label: path.file_stem().unwrap().to_string_lossy().into_owned(),
+                                path,
+                                core_path: None,
+                            });
+                        }
                     }
                 }
             }

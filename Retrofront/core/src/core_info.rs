@@ -36,8 +36,11 @@ impl CoreInfoList {
         self.info_dir = path;
     }
 
-    pub fn scan_directory(&mut self, cores_dir: &Path) {
+    pub fn clear(&mut self) {
         self.cores.clear();
+    }
+
+    pub fn scan_directory(&mut self, cores_dir: &Path) {
         if let Ok(entries) = fs::read_dir(cores_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -50,6 +53,10 @@ impl CoreInfoList {
                 };
 
                 if is_lib {
+                    // Check if already present
+                    if self.cores.iter().any(|c| c.path == path) {
+                        continue;
+                    }
                     let mut info = self.load_info_for_core(&path);
                     info.path = path;
                     self.cores.push(info);
@@ -60,8 +67,8 @@ impl CoreInfoList {
 
     fn load_info_for_core(&self, core_path: &Path) -> CoreInfo {
         let stem = core_path.file_stem().unwrap().to_string_lossy();
-        // RetroArch often removes _libretro from the stem to find the info file
-        let info_stem = stem.replace("_libretro", "");
+        // RetroArch often removes _libretro and platform suffix
+        let info_stem = stem.replace("_libretro", "").replace("_ios", "");
         let info_path = self.info_dir.join(format!("{}.info", info_stem));
 
         let mut info = CoreInfo::default();

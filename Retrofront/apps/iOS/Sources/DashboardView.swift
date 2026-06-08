@@ -5,13 +5,14 @@ import UniformTypeIdentifiers
 struct DashboardView: View {
   @EnvironmentObject private var runtime: EmulatorRuntimeModel
   @State private var selectedTab = 0
+  @State private var isPlayViewActive = false
 
   var body: some View {
     ZStack {
         Color(white: 0.05).ignoresSafeArea()
 
         TabView(selection: $selectedTab) {
-          ModernHomeView()
+          ModernHomeView(isPlayViewActive: $isPlayViewActive)
             .tabItem {
               Label("Home", systemImage: "house.fill")
             }.tag(0)
@@ -28,11 +29,21 @@ struct DashboardView: View {
         }
         .accentColor(.blue)
     }
+    .fullScreenCover(isPresented: $isPlayViewActive) {
+        PlayView()
+    }
+    .onReceive(runtime.$frontendState) { newState in
+        if newState == .gameLoaded {
+            isPlayViewActive = true
+        }
+    }
   }
 }
 
 struct ModernHomeView: View {
     @EnvironmentObject private var runtime: EmulatorRuntimeModel
+    @Binding var isPlayViewActive: Bool
+    @State private var isFilePickerPresented = false
 
     var body: some View {
         NavigationStack {
@@ -44,7 +55,7 @@ struct ModernHomeView: View {
 
                     if let game = runtime.loadedGameURL {
                         Button {
-                            // Go to play
+                            isPlayViewActive = true
                         } label: {
                             HStack {
                                 Image(systemName: "play.circle.fill")
@@ -80,20 +91,78 @@ struct ModernHomeView: View {
                         .padding(.top)
 
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 15) {
-                        ActionCard(title: "Load Core", icon: "cpu", color: .purple) {
-                            // Show Core list
+                        NavigationLink {
+                            CoreListView()
+                        } label: {
+                            ActionCard(title: "Load Core", icon: "cpu", color: .purple) {}
                         }
+
                         ActionCard(title: "Import ROM", icon: "plus.circle", color: .green) {
-                            // File picker
+                            isFilePickerPresented = true
                         }
                     }
                     .padding(.horizontal)
+
+                    if !runtime.availableGames.isEmpty {
+                        Text("Recently Added")
+                            .font(.title2.bold())
+                            .padding(.horizontal)
+                            .padding(.top)
+
+                        ForEach(runtime.availableGames.prefix(5), id: \.path) { game in
+                            Button {
+                                runtime.loadGame(at: URL(fileURLWithPath: game.path))
+                            } label: {
+                                HStack {
+                                    Image(systemName: "doc.fill")
+                                    Text(game.label)
+                                    Spacer()
+                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                                }
+                                .padding()
+                                .background(Color(white: 0.15))
+                                .cornerRadius(10)
+                            }
+                            .padding(.horizontal)
+                            .buttonStyle(.plain)
+                        }
+                    }
                 }
                 .padding(.vertical)
             }
             .navigationTitle("Retrofront")
             .background(Color(white: 0.05))
+            .fileImporter(isPresented: $isFilePickerPresented, allowedContentTypes: [.item]) { result in
+                if case .success(let url) = result {
+                    runtime.importGame(at: url)
+                }
+            }
         }
+    }
+}
+
+struct CoreListView: View {
+    @EnvironmentObject private var runtime: EmulatorRuntimeModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        List {
+            ForEach(runtime.availableCores, id: \.path) { core in
+                Button {
+                    runtime.loadCore(core)
+                    dismiss()
+                } label: {
+                    VStack(alignment: .leading) {
+                        Text(core.displayName)
+                            .font(.headline)
+                        Text(core.systemName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .navigationTitle("Select Core")
     }
 }
 
@@ -132,6 +201,20 @@ struct ModernLibraryView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section("My Games") {
+                    if runtime.availableGames.isEmpty {
+                        Text("No games found in Roms folder").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(runtime.availableGames, id: \.path) { game in
+                            Button {
+                                runtime.loadGame(at: URL(fileURLWithPath: game.path))
+                            } label: {
+                                Text(game.label)
+                            }
+                        }
+                    }
+                }
+
                 Section("Cores") {
                     ForEach(runtime.availableCores, id: \.path) { core in
                         Button {
@@ -161,7 +244,7 @@ struct ModernLibraryView: View {
             .scrollContentBackground(.hidden)
             .fileImporter(isPresented: $isFilePickerPresented, allowedContentTypes: [.item]) { result in
                 if case .success(let url) = result {
-                    runtime.loadGame(at: url)
+                    runtime.importGame(at: url)
                 }
             }
         }
@@ -177,19 +260,24 @@ struct ModernSettingsView: View {
                 if let menu = runtime.currentMenu {
                     Section(menu.title) {
                         ForEach(menu.entries, id: \.actionId) { entry in
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text(entry.label)
-                                    if !entry.sublabel.isEmpty {
-                                        Text(entry.sublabel).font(.caption).foregroundStyle(.secondary)
+                            Button {
+                                // runtime.menuAction(entry.actionId)
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading) {
+                                        Text(entry.label)
+                                            .foregroundStyle(.primary)
+                                        if !entry.sublabel.isEmpty {
+                                            Text(entry.sublabel).font(.caption).foregroundStyle(.secondary)
+                                        }
                                     }
-                                }
-                                Spacer()
-                                if !entry.value.isEmpty {
-                                    Text(entry.value).foregroundStyle(.blue)
-                                }
-                                if entry.kind == .submenu {
-                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                                    Spacer()
+                                    if !entry.value.isEmpty {
+                                        Text(entry.value).foregroundStyle(.blue)
+                                    }
+                                    if entry.kind == .submenu {
+                                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                         }
@@ -274,6 +362,9 @@ struct PlayView: View {
     }
     .navigationTitle(runtime.loadedGameURL?.lastPathComponent ?? "Play")
     .background(Color.black)
+    .onAppear {
+        runtime.play()
+    }
     .onDisappear {
         runtime.stop()
     }
@@ -282,7 +373,6 @@ struct PlayView: View {
 
 struct VirtualController: View {
     var body: some View {
-        // Placeholder for modern customizable virtual controller
         VStack {
             HStack {
                 Dpad()
@@ -297,23 +387,35 @@ struct VirtualController: View {
 struct Dpad: View {
     var body: some View {
         VStack(spacing: 5) {
-            DPadButton(icon: "chevron.up")
+            DPadButton(icon: "chevron.up", button: .up)
             HStack(spacing: 5) {
-                DPadButton(icon: "chevron.left")
+                DPadButton(icon: "chevron.left", button: .left)
                 Circle().frame(width: 40, height: 40).opacity(0.1)
-                DPadButton(icon: "chevron.right")
+                DPadButton(icon: "chevron.right", button: .right)
             }
-            DPadButton(icon: "chevron.down")
+            DPadButton(icon: "chevron.down", button: .down)
         }
     }
 }
 
 struct DPadButton: View {
+    @EnvironmentObject private var runtime: EmulatorRuntimeModel
     let icon: String
+    let button: JoypadButton
+
     var body: some View {
-        Image(systemName: icon)
-            .frame(width: 44, height: 44)
-            .background(Circle().fill(.white.opacity(0.1)))
+        Button {
+            // Visual feedback
+        } label: {
+            Image(systemName: icon)
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(.white.opacity(0.1)))
+        }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in runtime.setJoypadButton(button, pressed: true) }
+                .onEnded { _ in runtime.setJoypadButton(button, pressed: false) }
+        )
     }
 }
 
@@ -321,25 +423,37 @@ struct ActionButtons: View {
     var body: some View {
         VStack(spacing: 10) {
             HStack(spacing: 10) {
-                ActionButton(label: "Y", color: .green)
-                ActionButton(label: "X", color: .blue)
+                ActionButton(label: "Y", color: .green, button: .y)
+                ActionButton(label: "X", color: .blue, button: .x)
             }
             HStack(spacing: 10) {
-                ActionButton(label: "B", color: .red)
-                ActionButton(label: "A", color: .yellow)
+                ActionButton(label: "B", color: .red, button: .b)
+                ActionButton(label: "A", color: .yellow, button: .a)
             }
         }
     }
 }
 
 struct ActionButton: View {
+    @EnvironmentObject private var runtime: EmulatorRuntimeModel
     let label: String
     let color: Color
+    let button: JoypadButton
+
     var body: some View {
-        Text(label)
-            .font(.headline)
-            .frame(width: 50, height: 50)
-            .background(Circle().fill(color.opacity(0.3)))
-            .overlay(Circle().stroke(color, lineWidth: 2))
+        Button {
+            // Visual feedback
+        } label: {
+            Text(label)
+                .font(.headline)
+                .frame(width: 50, height: 50)
+                .background(Circle().fill(color.opacity(0.3)))
+                .overlay(Circle().stroke(color, lineWidth: 2))
+        }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in runtime.setJoypadButton(button, pressed: true) }
+                .onEnded { _ in runtime.setJoypadButton(button, pressed: false) }
+        )
     }
 }

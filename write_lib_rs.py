@@ -1,8 +1,4 @@
 content = r'''//! Retrofront Rust management core.
-//!
-//! This crate is **not** an emulator core. It is the frontend's portable
-//! management layer: it loads libretro cores, owns session state, stores ROM
-//! metadata, and exposes a stable C ABI for Swift UI code on iOS and Linux.
 
 mod dylib;
 mod options;
@@ -28,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::{Mutex, OnceLock};
 
-pub const RETRO_HW_FRAME_BUFFER_VALID: *const u8 = usize::MAX as *const u8;
+pub const RETRO_HW_FRAME_BUFFER_VALID: *const c_void = usize::MAX as *const c_void;
 
 macro_rules! sym {
     ($lib:expr, $name:literal, $ty:ty) => {{
@@ -426,7 +422,9 @@ impl FrontendCore {
         pitch: usize,
     ) {
         with_active_frontend(|core| {
-            let _ = core.gfx.ingest_software_frame(data.cast(), width, height, pitch);
+            if !data.is_null() && data != RETRO_HW_FRAME_BUFFER_VALID {
+                let _ = core.gfx.ingest_software_frame(data.cast(), width, height, pitch);
+            }
             core.events.push_back(FrontendEvent::VideoFrame {
                 width,
                 height,
@@ -471,7 +469,6 @@ impl FrontendCore {
 
 #[repr(C)]
 pub struct RfFrontend {
-    inner: FrontendCore,
     last_error: CString,
     info_name: CString,
     info_version: CString,
@@ -591,7 +588,6 @@ pub struct RfMenuList {
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_create() -> *mut RfFrontend {
     Box::into_raw(Box::new(RfFrontend {
-        inner: FrontendCore::new(),
         last_error: CString::default(),
         info_name: CString::default(),
         info_version: CString::default(),
@@ -612,15 +608,14 @@ pub unsafe extern "C" fn rf_frontend_destroy(frontend: *mut RfFrontend) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rf_frontend_state(frontend: *const RfFrontend) -> u32 {
-    let Some(frontend) = (unsafe { frontend.as_ref() }) else {
-        return 0;
-    };
-    match frontend.inner.state() {
-        SessionState::Empty => 0,
-        SessionState::CoreLoaded => 1,
-        SessionState::GameLoaded => 2,
-    }
+pub unsafe extern "C" fn rf_frontend_state(_frontend: *const RfFrontend) -> u32 {
+    with_active_frontend(|core| {
+        match core.state() {
+            SessionState::Empty => 0,
+            SessionState::CoreLoaded => 1,
+            SessionState::GameLoaded => 2,
+        }
+    })
 }
 
 #[no_mangle]
@@ -634,10 +629,11 @@ pub unsafe extern "C" fn rf_frontend_load_core(
     let Some(path_str) = ptr_to_str(path) else {
         return false;
     };
-    match frontend.inner.load_core(path_str) {
+    let res = with_active_frontend(|core| core.load_core(path_str));
+    match res {
         Ok(()) => {
             frontend.last_error = CString::default();
-            let sys_info = frontend.inner.system_info().cloned();
+            let sys_info = with_active_frontend(|core| core.system_info().cloned());
             if let Some(info) = sys_info {
                 cache_system_info(frontend, &info);
             }
@@ -663,7 +659,8 @@ pub unsafe extern "C" fn rf_frontend_load_game(
         return false;
     };
     let meta_str = ptr_to_str(meta);
-    match frontend.inner.load_game(path_str, meta_str) {
+    let res = with_active_frontend(|core| core.load_game(path_str, meta_str));
+    match res {
         Ok(()) => {
             frontend.last_error = CString::default();
             true
@@ -680,7 +677,8 @@ pub unsafe extern "C" fn rf_frontend_run_frame(frontend: *mut RfFrontend) -> boo
     let Some(frontend) = (unsafe { frontend.as_mut() }) else {
         return false;
     };
-    match frontend.inner.run_frame() {
+    let res = with_active_frontend(|core| core.run_frame());
+    match res {
         Ok(()) => {
             frontend.last_error = CString::default();
             true
@@ -693,74 +691,67 @@ pub unsafe extern "C" fn rf_frontend_run_frame(frontend: *mut RfFrontend) -> boo
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rf_frontend_unload_game(frontend: *mut RfFrontend) {
-    if let Some(frontend) = unsafe { frontend.as_mut() } {
-        frontend.inner.unload_game();
-    }
+pub unsafe extern "C" fn rf_frontend_unload_game(_frontend: *mut RfFrontend) {
+    with_active_frontend(|core| core.unload_game());
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_set_gfx_backend(
-    frontend: *mut RfFrontend,
+    _frontend: *mut RfFrontend,
     backend: u32,
 ) -> bool {
-    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
-        return false;
-    };
     let kind = match backend {
         1 => GfxBackendKind::Bgfx,
         2 => GfxBackendKind::Software,
         _ => return false,
     };
-    frontend.inner.set_gfx_backend(kind);
+    with_active_frontend(|core| core.set_gfx_backend(kind));
     true
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_set_gfx_video_config(
-    frontend: *mut RfFrontend,
+    _frontend: *mut RfFrontend,
     config: *const RfGfxVideoConfig,
 ) -> bool {
-    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
-        return false;
-    };
     let Some(config) = (unsafe { config.as_ref() }) else {
         return false;
     };
-    frontend.inner.gfx.set_video_config(gfx::GfxVideoConfig {
-        base_width: config.base_width,
-        base_height: config.base_height,
-        max_width: config.max_width,
-        max_height: config.max_height,
-        aspect_ratio: config.aspect_ratio,
-        output_width: config.output_width,
-        output_height: config.output_height,
-        scale_mode: gfx::GfxScaleMode::from_code(config.scale_mode).unwrap_or_default(),
-        filter_mode: gfx::GfxFilterMode::from_code(config.filter_mode).unwrap_or_default(),
-        rotation_quarters: config.rotation_quarters,
-        vsync: config.vsync,
+    with_active_frontend(|core| {
+        core.gfx.set_video_config(gfx::GfxVideoConfig {
+            base_width: config.base_width,
+            base_height: config.base_height,
+            max_width: config.max_width,
+            max_height: config.max_height,
+            aspect_ratio: config.aspect_ratio,
+            output_width: config.output_width,
+            output_height: config.output_height,
+            scale_mode: gfx::GfxScaleMode::from_code(config.scale_mode).unwrap_or_default(),
+            filter_mode: gfx::GfxFilterMode::from_code(config.filter_mode).unwrap_or_default(),
+            rotation_quarters: config.rotation_quarters,
+            vsync: config.vsync,
+        });
     });
     true
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_set_gfx_host_handles(
-    frontend: *mut RfFrontend,
+    _frontend: *mut RfFrontend,
     handles: *const RfGfxHostHandles,
 ) -> bool {
-    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
-        return false;
-    };
     let Some(handles) = (unsafe { handles.as_ref() }) else {
         return false;
     };
-    frontend.inner.gfx.set_host_handles(gfx::HostRenderHandles {
-        native_view: handles.native_view,
-        context: handles.context,
-        framebuffer: handles.framebuffer,
-        render_callback: if handles.render_callback.is_null() { None } else { Some(unsafe { std::mem::transmute(handles.render_callback) }) },
-        get_proc_address: if handles.get_proc_address.is_null() { None } else { Some(unsafe { std::mem::transmute(handles.get_proc_address) }) },
-        user_data: handles.user_data,
+    with_active_frontend(|core| {
+        core.gfx.set_host_handles(gfx::HostRenderHandles {
+            native_view: handles.native_view,
+            context: handles.context,
+            framebuffer: handles.framebuffer,
+            render_callback: if handles.render_callback.is_null() { None } else { Some(unsafe { std::mem::transmute(handles.render_callback) }) },
+            get_proc_address: if handles.get_proc_address.is_null() { None } else { Some(unsafe { std::mem::transmute(handles.get_proc_address) }) },
+            user_data: handles.user_data,
+        });
     });
     true
 }
@@ -774,7 +765,8 @@ pub unsafe extern "C" fn rf_frontend_set_joypad_button(
     let Some(frontend) = (unsafe { frontend.as_mut() }) else {
         return false;
     };
-    match frontend.inner.set_joypad_button(button_id, pressed) {
+    let res = with_active_frontend(|core| core.set_joypad_button(button_id, pressed));
+    match res {
         Ok(()) => {
             frontend.last_error = CString::default();
             true
@@ -788,72 +780,69 @@ pub unsafe extern "C" fn rf_frontend_set_joypad_button(
 
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_gfx_driver_info(
-    frontend: *const RfFrontend,
+    _frontend: *const RfFrontend,
     out: *mut RfGfxDriverInfo,
 ) -> bool {
-    let Some(frontend) = (unsafe { frontend.as_ref() }) else {
-        return false;
-    };
     let Some(out) = (unsafe { out.as_mut() }) else {
         return false;
     };
-    let status = frontend.inner.gfx.driver_status();
-    let last_present = status.last_present.as_ref();
-    *out = RfGfxDriverInfo {
-        backend: last_present.map_or(0, |p| p.backend as u32),
-        frame_number: status.frame_counter,
-        hardware_ready: status.hardware_ready,
-        rendered: last_present.is_some_and(|p| p.rendered),
-    };
+    with_active_frontend(|core| {
+        let status = core.gfx.driver_status();
+        let last_present = status.last_present.as_ref();
+        *out = RfGfxDriverInfo {
+            backend: last_present.map_or(0, |p| p.backend as u32),
+            frame_number: status.frame_counter,
+            hardware_ready: status.hardware_ready,
+            rendered: last_present.is_some_and(|p| p.rendered),
+        };
+    });
     true
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_video_frame_info(
-    frontend: *const RfFrontend,
+    _frontend: *const RfFrontend,
     out: *mut RfVideoFrameInfo,
 ) -> bool {
-    let Some(frontend) = (unsafe { frontend.as_ref() }) else {
-        return false;
-    };
     let Some(out) = (unsafe { out.as_mut() }) else {
         return false;
     };
-    let frame = frontend.inner.gfx.last_frame();
-    if frame.width == 0 {
-        return false;
-    }
-    *out = RfVideoFrameInfo {
-        width: frame.width,
-        height: frame.height,
-        pitch: frame.pitch as u64,
-        rgba_len: frame.rgba.len() as u64,
-        pixel_format: frame.source_format.code(),
-        frame_number: frontend.inner.gfx.frame_counter(),
-    };
-    true
+    with_active_frontend(|core| {
+        let frame = core.gfx.last_frame();
+        if frame.width == 0 {
+            return false;
+        }
+        *out = RfVideoFrameInfo {
+            width: frame.width,
+            height: frame.height,
+            pitch: frame.pitch as u64,
+            rgba_len: frame.rgba.len() as u64,
+            pixel_format: frame.source_format.code(),
+            frame_number: core.gfx.frame_counter(),
+        };
+        true
+    })
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_copy_video_frame_rgba(
-    frontend: *const RfFrontend,
+    _frontend: *const RfFrontend,
     out_rgba: *mut u8,
     out_len: usize,
 ) -> usize {
-    let Some(frontend) = (unsafe { frontend.as_ref() }) else {
-        return 0;
-    };
     if out_rgba.is_null() || out_len == 0 {
         return 0;
     }
-    let frame = frontend.inner.gfx.last_frame();
-    if frame.width == 0 {
-        return 0;
-    }
-    let rgba = &frame.rgba;
-    let count = rgba.len().min(out_len);
-    unsafe { ptr::copy_nonoverlapping(rgba.as_ptr(), out_rgba, count) };
-    count
+    with_active_frontend(|core| {
+        let frame = core.gfx.last_frame();
+        if frame.width == 0 {
+            return 0;
+        }
+        let rgba = &frame.rgba;
+        let count = rgba.len().min(out_len);
+        unsafe { ptr::copy_nonoverlapping(rgba.as_ptr(), out_rgba, count) };
+        count
+    })
 }
 
 #[no_mangle]
@@ -867,79 +856,71 @@ pub unsafe extern "C" fn rf_frontend_system_info(
     let Some(out) = (unsafe { out.as_mut() }) else {
         return false;
     };
-    if frontend.inner.system_info().is_none() {
+    let sys_info = with_active_frontend(|core| core.system_info().cloned());
+    if sys_info.is_none() {
         return false;
     }
     *out = RfSystemInfo {
         library_name: frontend.info_name.as_ptr(),
         library_version: frontend.info_version.as_ptr(),
         valid_extensions: frontend.info_extensions.as_ptr(),
-        need_fullpath: frontend
-            .inner
-            .system_info()
-            .map(|i| i.need_fullpath)
-            .unwrap_or(false),
-        block_extract: frontend
-            .inner
-            .system_info()
-            .map(|i| i.block_extract)
-            .unwrap_or(false),
+        need_fullpath: sys_info.as_ref().map(|i| i.need_fullpath).unwrap_or(false),
+        block_extract: sys_info.as_ref().map(|i| i.block_extract).unwrap_or(false),
     };
     true
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_next_event(
-    frontend: *mut RfFrontend,
+    _frontend: *mut RfFrontend,
     out: *mut RfEvent,
 ) -> bool {
-    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
-        return false;
-    };
     let Some(out) = (unsafe { out.as_mut() }) else {
         return false;
     };
-    let Some(event) = frontend.inner.next_event() else {
-        return false;
-    };
-    *out = match event {
-        FrontendEvent::VideoFrame {
-            width,
-            height,
-            pitch,
-            ..
-        } => RfEvent {
-            kind: 1,
-            a: width as u64,
-            b: height as u64,
-            c: pitch as u64,
-        },
-        FrontendEvent::AudioBatch { frames } => RfEvent {
-            kind: 2,
-            a: frames as u64,
-            b: 0,
-            c: 0,
-        },
-        FrontendEvent::AudioSample { left, right } => RfEvent {
-            kind: 3,
-            a: left as i16 as u64,
-            b: right as i16 as u64,
-            c: 0,
-        },
-        FrontendEvent::EnvironmentCommand { command, handled } => RfEvent {
-            kind: 4,
-            a: command as u64,
-            b: handled as u64,
-            c: 0,
-        },
-        FrontendEvent::InputPoll => RfEvent {
-            kind: 5,
-            a: 0,
-            b: 0,
-            c: 0,
-        },
-    };
-    true
+    let event = with_active_frontend(|core| core.next_event());
+    if let Some(event) = event {
+        *out = match event {
+            FrontendEvent::VideoFrame {
+                width,
+                height,
+                pitch,
+                ..
+            } => RfEvent {
+                kind: 1,
+                a: width as u64,
+                b: height as u64,
+                c: pitch as u64,
+            },
+            FrontendEvent::AudioBatch { frames } => RfEvent {
+                kind: 2,
+                a: frames as u64,
+                b: 0,
+                c: 0,
+            },
+            FrontendEvent::AudioSample { left, right } => RfEvent {
+                kind: 3,
+                a: left as i16 as u64,
+                b: right as i16 as u64,
+                c: 0,
+            },
+            FrontendEvent::EnvironmentCommand { command, handled } => RfEvent {
+                kind: 4,
+                a: command as u64,
+                b: handled as u64,
+                c: 0,
+            },
+            FrontendEvent::InputPoll => RfEvent {
+                kind: 5,
+                a: 0,
+                b: 0,
+                c: 0,
+            },
+        };
+        true
+    } else {
+        false
+    }
 }
 
 #[no_mangle]
@@ -952,19 +933,17 @@ pub unsafe extern "C" fn rf_frontend_last_error(frontend: *const RfFrontend) -> 
 
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_set_options_config_path(
-    frontend: *mut RfFrontend,
+    _frontend: *mut RfFrontend,
     path: *const c_char,
 ) -> bool {
-    let Some(frontend) = (unsafe { frontend.as_mut() }) else { return false; };
     let Some(path_str) = ptr_to_str(path) else { return false; };
-    frontend.inner.options.set_config_path(PathBuf::from(path_str));
+    with_active_frontend(|core| core.options.set_config_path(PathBuf::from(path_str)));
     true
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rf_frontend_options_count(frontend: *const RfFrontend) -> usize {
-    let Some(frontend) = (unsafe { frontend.as_ref() }) else { return 0; };
-    frontend.inner.options.definitions().len()
+pub unsafe extern "C" fn rf_frontend_options_count(_frontend: *const RfFrontend) -> usize {
+    with_active_frontend(|core| core.options.definitions().len())
 }
 
 #[no_mangle]
@@ -976,54 +955,55 @@ pub unsafe extern "C" fn rf_frontend_get_option(
     let Some(frontend) = (unsafe { frontend.as_mut() }) else { return false; };
     let Some(out) = (unsafe { out.as_mut() }) else { return false; };
 
-    let defs = frontend.inner.options.definitions();
-    let Some(def) = defs.get(index) else { return false; };
+    with_active_frontend(|core| {
+        let defs = core.options.definitions();
+        let Some(def) = defs.get(index) else { return false; };
 
-    let current_value = frontend.inner.options.get_variable(&def.key).cloned().unwrap_or_else(|| def.default_value.clone());
+        let current_value = core.options.get_variable(&def.key).cloned().unwrap_or_else(|| def.default_value.clone());
 
-    let key_c = CString::new(def.key.as_str()).unwrap_or_default();
-    let desc_c = CString::new(def.desc.as_str()).unwrap_or_default();
-    let info_c = CString::new(def.info.as_str()).unwrap_or_default();
-    let value_c = CString::new(current_value.as_str()).unwrap_or_default();
+        let key_c = CString::new(def.key.as_str()).unwrap_or_default();
+        let desc_c = CString::new(def.desc.as_str()).unwrap_or_default();
+        let info_c = CString::new(def.info.as_str()).unwrap_or_default();
+        let value_c = CString::new(current_value.as_str()).unwrap_or_default();
 
-    let mut values_c = Vec::new();
-    for v in &def.values {
-        let val_c = CString::new(v.value.as_str()).unwrap_or_default();
-        let label_c = CString::new(v.label.as_str()).unwrap_or_default();
-        values_c.push(RfCoreOptionValue {
-            value: val_c.as_ptr(),
-            label: label_c.as_ptr(),
-        });
-        frontend.cached_options.push(val_c);
-        frontend.cached_options.push(label_c);
-    }
+        let mut values_c = Vec::new();
+        for v in &def.values {
+            let val_c = CString::new(v.value.as_str()).unwrap_or_default();
+            let label_c = CString::new(v.label.as_str()).unwrap_or_default();
+            values_c.push(RfCoreOptionValue {
+                value: val_c.as_ptr(),
+                label: label_c.as_ptr(),
+            });
+            frontend.cached_options.push(val_c);
+            frontend.cached_options.push(label_c);
+        }
 
-    out.key = key_c.as_ptr();
-    out.desc = desc_c.as_ptr();
-    out.info = info_c.as_ptr();
-    out.value = value_c.as_ptr();
-    out.values = values_c.as_ptr();
-    out.values_count = values_c.len();
+        out.key = key_c.as_ptr();
+        out.desc = desc_c.as_ptr();
+        out.info = info_c.as_ptr();
+        out.value = value_c.as_ptr();
+        out.values = values_c.as_ptr();
+        out.values_count = values_c.len();
 
-    frontend.cached_options.push(key_c);
-    frontend.cached_options.push(desc_c);
-    frontend.cached_options.push(info_c);
-    frontend.cached_options.push(value_c);
-    frontend.cached_option_values.push(values_c);
+        frontend.cached_options.push(key_c);
+        frontend.cached_options.push(desc_c);
+        frontend.cached_options.push(info_c);
+        frontend.cached_options.push(value_c);
+        frontend.cached_option_values.push(values_c);
 
-    true
+        true
+    })
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_set_option(
-    frontend: *mut RfFrontend,
+    _frontend: *mut RfFrontend,
     key: *const c_char,
     value: *const c_char,
 ) -> bool {
-    let Some(frontend) = (unsafe { frontend.as_mut() }) else { return false; };
     let Some(key_str) = ptr_to_str(key) else { return false; };
     let Some(value_str) = ptr_to_str(value) else { return false; };
-    frontend.inner.options.set_variable(key_str, value_str);
+    with_active_frontend(|core| core.options.set_variable(key_str, value_str));
     true
 }
 
@@ -1037,27 +1017,22 @@ pub unsafe extern "C" fn rf_frontend_clear_options_cache(frontend: *mut RfFronte
 
 // Core Discovery API Impl
 #[no_mangle]
-pub unsafe extern "C" fn rf_frontend_set_info_dir(frontend: *mut RfFrontend, path: *const c_char) {
-    if let Some(frontend) = unsafe { frontend.as_mut() } {
-        if let Some(path_str) = ptr_to_str(path) {
-            frontend.inner.core_info.set_info_dir(PathBuf::from(path_str));
-        }
+pub unsafe extern "C" fn rf_frontend_set_info_dir(_frontend: *mut RfFrontend, path: *const c_char) {
+    if let Some(path_str) = ptr_to_str(path) {
+        with_active_frontend(|core| core.core_info.set_info_dir(PathBuf::from(path_str)));
     }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rf_frontend_scan_cores(frontend: *mut RfFrontend, cores_dir: *const c_char) {
-    if let Some(frontend) = unsafe { frontend.as_mut() } {
-        if let Some(path_str) = ptr_to_str(cores_dir) {
-            frontend.inner.core_info.scan_directory(Path::new(&path_str));
-        }
+pub unsafe extern "C" fn rf_frontend_scan_cores(_frontend: *mut RfFrontend, cores_dir: *const c_char) {
+    if let Some(path_str) = ptr_to_str(cores_dir) {
+        with_active_frontend(|core| core.core_info.scan_directory(Path::new(&path_str)));
     }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rf_frontend_cores_count(frontend: *const RfFrontend) -> usize {
-    let Some(frontend) = (unsafe { frontend.as_ref() }) else { return 0; };
-    frontend.inner.core_info.cores.len()
+pub unsafe extern "C" fn rf_frontend_cores_count(_frontend: *const RfFrontend) -> usize {
+    with_active_frontend(|core| core.core_info.cores.len())
 }
 
 #[no_mangle]
@@ -1069,42 +1044,41 @@ pub unsafe extern "C" fn rf_frontend_get_core_info(
     let Some(frontend) = (unsafe { frontend.as_mut() }) else { return false; };
     let Some(out) = (unsafe { out.as_mut() }) else { return false; };
 
-    let Some(info) = frontend.inner.core_info.cores.get(index) else { return false; };
+    with_active_frontend(|core| {
+        let Some(info) = core.core_info.cores.get(index) else { return false; };
 
-    let path_c = CString::new(info.path.to_string_lossy().as_bytes()).unwrap_or_default();
-    let name_c = CString::new(info.display_name.as_str()).unwrap_or_default();
-    let sys_c = CString::new(info.system_name.as_str()).unwrap_or_default();
-    let ext_c = CString::new(info.supported_extensions.join("|").as_str()).unwrap_or_default();
+        let path_c = CString::new(info.path.to_string_lossy().as_bytes()).unwrap_or_default();
+        let name_c = CString::new(info.display_name.as_str()).unwrap_or_default();
+        let sys_c = CString::new(info.system_name.as_str()).unwrap_or_default();
+        let ext_c = CString::new(info.supported_extensions.join("|").as_str()).unwrap_or_default();
 
-    out.path = path_c.as_ptr();
-    out.display_name = name_c.as_ptr();
-    out.system_name = sys_c.as_ptr();
-    out.supported_extensions = ext_c.as_ptr();
+        out.path = path_c.as_ptr();
+        out.display_name = name_c.as_ptr();
+        out.system_name = sys_c.as_ptr();
+        out.supported_extensions = ext_c.as_ptr();
 
-    frontend.cached_strings.push(path_c);
-    frontend.cached_strings.push(name_c);
-    frontend.cached_strings.push(sys_c);
-    frontend.cached_strings.push(ext_c);
+        frontend.cached_strings.push(path_c);
+        frontend.cached_strings.push(name_c);
+        frontend.cached_strings.push(sys_c);
+        frontend.cached_strings.push(ext_c);
 
-    true
+        true
+    })
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rf_frontend_scan_games(frontend: *mut RfFrontend, directory: *const c_char, extensions: *const c_char) {
-    if let Some(frontend) = unsafe { frontend.as_mut() } {
-        if let Some(dir_str) = ptr_to_str(directory) {
-            if let Some(ext_str) = ptr_to_str(extensions) {
-                let exts: Vec<String> = ext_str.split("|").map(|s| s.to_string()).collect();
-                frontend.inner.scanner.scan_directory(Path::new(&dir_str), &exts);
-            }
+pub unsafe extern "C" fn rf_frontend_scan_games(_frontend: *mut RfFrontend, directory: *const c_char, extensions: *const c_char) {
+    if let Some(dir_str) = ptr_to_str(directory) {
+        if let Some(ext_str) = ptr_to_str(extensions) {
+            let exts: Vec<String> = ext_str.split("|").map(|s| s.to_string()).collect();
+            with_active_frontend(|core| core.scanner.scan_directory(Path::new(&dir_str), &exts));
         }
     }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rf_frontend_games_count(frontend: *const RfFrontend) -> usize {
-    let Some(frontend) = (unsafe { frontend.as_ref() }) else { return 0; };
-    frontend.inner.scanner.games.len()
+pub unsafe extern "C" fn rf_frontend_games_count(_frontend: *const RfFrontend) -> usize {
+    with_active_frontend(|core| core.scanner.games.len())
 }
 
 #[no_mangle]
@@ -1112,18 +1086,20 @@ pub unsafe extern "C" fn rf_frontend_get_game_info(frontend: *mut RfFrontend, in
     let Some(frontend) = (unsafe { frontend.as_mut() }) else { return false; };
     let Some(out) = (unsafe { out.as_mut() }) else { return false; };
 
-    let Some(info) = frontend.inner.scanner.games.get(index) else { return false; };
+    with_active_frontend(|core| {
+        let Some(info) = core.scanner.games.get(index) else { return false; };
 
-    let path_c = CString::new(info.path.to_string_lossy().as_bytes()).unwrap_or_default();
-    let label_c = CString::new(info.label.as_str()).unwrap_or_default();
+        let path_c = CString::new(info.path.to_string_lossy().as_bytes()).unwrap_or_default();
+        let label_c = CString::new(info.label.as_str()).unwrap_or_default();
 
-    out.path = path_c.as_ptr();
-    out.label = label_c.as_ptr();
+        out.path = path_c.as_ptr();
+        out.label = label_c.as_ptr();
 
-    frontend.cached_strings.push(path_c);
-    frontend.cached_strings.push(label_c);
+        frontend.cached_strings.push(path_c);
+        frontend.cached_strings.push(label_c);
 
-    true
+        true
+    })
 }
 
 // Menu Engine API Impl
@@ -1135,15 +1111,17 @@ pub unsafe extern "C" fn rf_frontend_menu_current_list(
     let Some(frontend) = (unsafe { frontend.as_mut() }) else { return false; };
     let Some(out_list) = (unsafe { out_list.as_mut() }) else { return false; };
 
-    if let Some(list) = frontend.inner.menu.current() {
-        let title_c = CString::new(list.title.as_str()).unwrap_or_default();
-        out_list.title = title_c.as_ptr();
-        out_list.entry_count = list.entries.len();
-        frontend.cached_strings.push(title_c);
-        true
-    } else {
-        false
-    }
+    with_active_frontend(|core| {
+        if let Some(list) = core.menu.current() {
+            let title_c = CString::new(list.title.as_str()).unwrap_or_default();
+            out_list.title = title_c.as_ptr();
+            out_list.entry_count = list.entries.len();
+            frontend.cached_strings.push(title_c);
+            true
+        } else {
+            false
+        }
+    })
 }
 
 #[no_mangle]
@@ -1155,47 +1133,48 @@ pub unsafe extern "C" fn rf_frontend_menu_get_entry(
     let Some(frontend) = (unsafe { frontend.as_mut() }) else { return false; };
     let Some(out_entry) = (unsafe { out_entry.as_mut() }) else { return false; };
 
-    if let Some(list) = frontend.inner.menu.current() {
-        if let Some(entry) = list.entries.get(index) {
-            let label_c = CString::new(entry.label.as_str()).unwrap_or_default();
-            let sublabel_c = CString::new(entry.sublabel.as_str()).unwrap_or_default();
-            let value_c = CString::new(entry.value.as_str()).unwrap_or_default();
+    with_active_frontend(|core| {
+        if let Some(list) = core.menu.current() {
+            if let Some(entry) = list.entries.get(index) {
+                let label_c = CString::new(entry.label.as_str()).unwrap_or_default();
+                let sublabel_c = CString::new(entry.sublabel.as_str()).unwrap_or_default();
+                let value_c = CString::new(entry.value.as_str()).unwrap_or_default();
 
-            out_entry.label = label_c.as_ptr();
-            out_entry.sublabel = sublabel_c.as_ptr();
-            out_entry.kind = match entry.kind {
-                menu::MenuEntryKind::Action => 0,
-                menu::MenuEntryKind::Submenu => 1,
-                menu::MenuEntryKind::Toggle => 2,
-                menu::MenuEntryKind::Setting => 3,
-            };
-            out_entry.value = value_c.as_ptr();
-            out_entry.action_id = entry.action_id;
+                out_entry.label = label_c.as_ptr();
+                out_entry.sublabel = sublabel_c.as_ptr();
+                out_entry.kind = match entry.kind {
+                    menu::MenuEntryKind::Action => 0,
+                    menu::MenuEntryKind::Submenu => 1,
+                    menu::MenuEntryKind::Toggle => 2,
+                    menu::MenuEntryKind::Setting => 3,
+                };
+                out_entry.value = value_c.as_ptr();
+                out_entry.action_id = entry.action_id;
 
-            frontend.cached_strings.push(label_c);
-            frontend.cached_strings.push(sublabel_c);
-            frontend.cached_strings.push(value_c);
-            true
+                frontend.cached_strings.push(label_c);
+                frontend.cached_strings.push(sublabel_c);
+                frontend.cached_strings.push(value_c);
+                true
+            } else {
+                false
+            }
         } else {
             false
         }
-    } else {
-        false
-    }
+    })
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rf_frontend_menu_push_core_list(frontend: *mut RfFrontend) {
-    if let Some(frontend) = unsafe { frontend.as_mut() } {
-        let cores = frontend.inner.core_info.cores.clone();
-        frontend.inner.menu.push_core_list(&cores);
-    }
+pub unsafe extern "C" fn rf_frontend_menu_push_core_list(_frontend: *mut RfFrontend) {
+    with_active_frontend(|core| {
+        let cores = core.core_info.cores.clone();
+        core.menu.push_core_list(&cores);
+    });
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rf_frontend_menu_pop(frontend: *mut RfFrontend) -> bool {
-    let Some(frontend) = (unsafe { frontend.as_mut() }) else { return false; };
-    frontend.inner.menu.pop().is_some()
+pub unsafe extern "C" fn rf_frontend_menu_pop(_frontend: *mut RfFrontend) -> bool {
+    with_active_frontend(|core| core.menu.pop().is_some())
 }
 
 fn ptr_to_str(ptr: *const c_char) -> Option<String> {

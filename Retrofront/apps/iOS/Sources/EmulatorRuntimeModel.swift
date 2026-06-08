@@ -12,6 +12,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
   @Published private(set) var displayImage: UIImage?
   @Published private(set) var isRunning = false
   @Published private(set) var availableCores: [CoreInfo] = []
+  @Published private(set) var availableGames: [GameEntrySwift] = []
   @Published private(set) var corePath: String?
   @Published private(set) var loadedGameURL: URL?
   @Published private(set) var currentMenu: MenuList?
@@ -23,6 +24,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
   public init() {
     setupFrontend()
     refreshAvailableCores()
+    refreshGames()
     refreshMenu()
   }
 
@@ -67,6 +69,40 @@ public final class EmulatorRuntimeModel: ObservableObject {
     self.availableCores = frontend.availableCores()
   }
 
+  public func refreshGames() {
+      guard let frontend else { return }
+      let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+      let romsDir = docs.appendingPathComponent("Roms")
+      try? FileManager.default.createDirectory(at: romsDir, withIntermediateDirectories: true)
+
+      // We scan for all common extensions for now
+      let exts = "gba|gb|gbc|sfc|smc|nes|bin|gen|md|sms|gg"
+      frontend.scanGames(in: romsDir.path, extensions: exts)
+      self.availableGames = frontend.availableGames()
+  }
+
+  public func importGame(at url: URL) {
+      let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+      let romsDir = docs.appendingPathComponent("Roms")
+      try? FileManager.default.createDirectory(at: romsDir, withIntermediateDirectories: true)
+
+      let destination = romsDir.appendingPathComponent(url.lastPathComponent)
+
+      let success = url.startAccessingSecurityScopedResource()
+      defer { if success { url.stopAccessingSecurityScopedResource() } }
+
+      do {
+          if FileManager.default.fileExists(atPath: destination.path) {
+              try FileManager.default.removeItem(at: destination)
+          }
+          try FileManager.default.copyItem(at: url, to: destination)
+          statusMessage = "Imported \(url.lastPathComponent)"
+          refreshGames()
+      } catch {
+          statusMessage = "Import failed: \(error)"
+      }
+  }
+
   public func loadCore(_ core: CoreInfo) {
     guard let frontend else { return }
     do {
@@ -82,6 +118,18 @@ public final class EmulatorRuntimeModel: ObservableObject {
 
   public func loadGame(at url: URL) {
     guard let frontend else { return }
+
+    // If no core is loaded, try to find one based on extension
+    if frontendState == .empty {
+        let ext = url.pathExtension.lowercased()
+        if let suitableCore = availableCores.first(where: { $0.supportedExtensions.contains(ext) }) {
+            loadCore(suitableCore)
+        } else {
+            statusMessage = "No suitable core found for .\(ext)"
+            return
+        }
+    }
+
     do {
       try frontend.loadGame(at: url.path)
       loadedGameURL = url
@@ -90,6 +138,10 @@ public final class EmulatorRuntimeModel: ObservableObject {
     } catch {
       statusMessage = "Game load failed: \(error)"
     }
+  }
+
+  public func setJoypadButton(_ button: JoypadButton, pressed: Bool) {
+    try? frontend?.setJoypadButton(button, pressed: pressed)
   }
 
   public func toggleRunning() {
@@ -104,6 +156,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
         autoreleasepool {
             runOneFrame()
         }
+        // Use a more accurate timer if possible, but sleep is okay for now
         try? await Task.sleep(nanoseconds: 16_666_667)
       }
     }

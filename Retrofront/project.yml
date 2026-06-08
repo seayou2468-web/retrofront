@@ -33,6 +33,7 @@ targets:
     platform: iOS
     sources:
       - path: apps/iOS/Sources
+      - path: apps/iOS/Resources
     dependencies:
       - target: RetrofrontSwift
       - framework: ../Externals/MoltenVK/MoltenVK.xcframework
