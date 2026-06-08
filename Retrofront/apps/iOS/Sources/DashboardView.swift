@@ -258,71 +258,168 @@ struct ModernSettingsView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                if let menu = runtime.currentMenu {
-                    Section(menu.title) {
-                        ForEach(menu.entries, id: \.actionId) { entry in
-                            Button {
-                                // runtime.menuAction(entry.actionId)
-                            } label: {
-                                HStack {
-                                    VStack(alignment: .leading) {
-                                        Text(entry.label)
-                                            .foregroundStyle(.primary)
-                                        if !entry.sublabel.isEmpty {
-                                            Text(entry.sublabel).font(.caption).foregroundStyle(.secondary)
-                                        }
-                                    }
-                                    Spacer()
-                                    if !entry.value.isEmpty {
-                                        Text(entry.value).foregroundStyle(.blue)
-                                    }
-                                    if entry.kind == .submenu {
-                                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
-                                    }
+            RustMenuView()
+                .navigationTitle("")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button {
+                            runtime.menuPop()
+                        } label: {
+                            Label("Back", systemImage: "chevron.left")
+                        }
+                    }
+                }
+        }
+    }
+}
+
+struct RustMenuView: View {
+    @EnvironmentObject private var runtime: EmulatorRuntimeModel
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(red: 0.02, green: 0.02, blue: 0.04), Color(red: 0.04, green: 0.10, blue: 0.14)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            Circle()
+                .fill(.cyan.opacity(0.18))
+                .blur(radius: 70)
+                .frame(width: 260, height: 260)
+                .offset(x: -130, y: -220)
+
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(runtime.currentMenu?.title.uppercased() ?? "RETROFRONT")
+                        .font(.system(size: 34, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text("Rust libretro menu engine • XMB/Ozone compatible model")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.62))
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 28)
+
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        if let menu = runtime.currentMenu {
+                            ForEach(menu.entries, id: \.actionId) { entry in
+                                RustMenuRow(entry: entry) {
+                                    runtime.menuAction(entry.actionId)
                                 }
                             }
+                        } else {
+                            Text("Menu unavailable")
+                                .foregroundStyle(.white.opacity(0.7))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(24)
                         }
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 28)
+                }
+
+                Text("MoltenVK / OpenGL ES: bgfx requested, software copy fallback active until host handles are ready")
+                    .font(.caption2)
+                    .foregroundStyle(.cyan.opacity(0.75))
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 12)
+            }
+        }
+    }
+}
+
+struct RustMenuRow: View {
+    let entry: MenuEntry
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 16) {
+                MenuEntryIcon(kind: entry.kind)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(entry.label)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                    if !entry.sublabel.isEmpty {
+                        Text(entry.sublabel)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.58))
+                            .lineLimit(2)
                     }
                 }
 
-                Section("Core Options") {
-                    if runtime.coreOptions.isEmpty {
-                        Text("No core options available").foregroundStyle(.secondary)
-                    } else {
-                        ForEach(runtime.coreOptions, id: \.key) { option in
-                            Picker(option.desc, selection: Binding(
-                                get: { option.value },
-                                set: { runtime.setOption(key: option.key, value: $0) }
-                            )) {
-                                ForEach(option.values, id: \.value) { val in
-                                    Text(val.label).tag(val.value)
-                                }
-                            }
-                        }
-                    }
+                Spacer(minLength: 12)
+
+                if !entry.value.isEmpty {
+                    Text(entry.value)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.cyan)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: 110, alignment: .trailing)
                 }
 
-                Section("Directories") {
-                    ForEach(runtime.settings.filter { $0.key.hasSuffix("_directory") || $0.key.hasSuffix("_path") }, id: \.key) { setting in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(setting.key)
-                            Text(setting.value)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        }
-                    }
-                }
-
-                Section("App Info") {
-                    LabeledContent("Version", value: "0.1.0")
-                    LabeledContent("Engine", value: "Rust/libretro")
+                if entry.kind == .submenu {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.5))
                 }
             }
-            .navigationTitle("Settings")
-            .background(Color(white: 0.05))
-            .scrollContentBackground(.hidden)
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(.white.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(.white.opacity(0.10), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(entry.actionId == 0)
+    }
+}
+
+struct MenuEntryIcon: View {
+    let kind: MenuEntryKind
+
+    var body: some View {
+        Image(systemName: iconName)
+            .font(.system(size: 18, weight: .bold))
+            .foregroundStyle(.black)
+            .frame(width: 42, height: 42)
+            .background(Circle().fill(iconColor))
+    }
+
+    private var iconName: String {
+        switch kind {
+        case .action:
+            return "play.fill"
+        case .submenu:
+            return "rectangle.grid.2x2.fill"
+        case .toggle:
+            return "switch.2"
+        case .setting:
+            return "slider.horizontal.3"
+        }
+    }
+
+    private var iconColor: Color {
+        switch kind {
+        case .action:
+            return .green
+        case .submenu:
+            return .cyan
+        case .toggle:
+            return .orange
+        case .setting:
+            return .purple
         }
     }
 }

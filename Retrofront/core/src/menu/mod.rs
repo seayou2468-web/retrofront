@@ -1,5 +1,8 @@
 use crate::core_info::CoreInfo;
+use crate::gfx::{GfxBackendKind, GfxStatus};
+use crate::scanner::GameEntry;
 use crate::settings::Settings;
+use crate::{GameInfo, SystemInfo};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuEntryKind {
@@ -111,6 +114,101 @@ impl MenuEngine {
         self.history.push(MenuList {
             title: "Load Core".to_string(),
             entries,
+        });
+    }
+
+    pub fn push_content_list(&mut self, games: &[GameEntry]) {
+        let entries = if games.is_empty() {
+            vec![Self::action(
+                "No Content Found",
+                "Import or scan ROMs from the configured content directory",
+                0,
+            )]
+        } else {
+            games
+                .iter()
+                .enumerate()
+                .map(|(i, game)| MenuEntry {
+                    label: game.label.clone(),
+                    sublabel: game.path.to_string_lossy().into_owned(),
+                    kind: MenuEntryKind::Action,
+                    value: game.path.to_string_lossy().into_owned(),
+                    action_id: 300 + i as u32,
+                })
+                .collect()
+        };
+        self.history.push(MenuList {
+            title: "Load Content".to_string(),
+            entries,
+        });
+    }
+
+    pub fn push_information(
+        &mut self,
+        system_info: Option<&SystemInfo>,
+        game_info: Option<&GameInfo>,
+        gfx_status: &GfxStatus,
+    ) {
+        let backend = gfx_status
+            .last_present
+            .as_ref()
+            .map(|status| match status.backend {
+                GfxBackendKind::Software => "software",
+                GfxBackendKind::Bgfx => "bgfx",
+            })
+            .unwrap_or("not rendered yet");
+        let content = game_info
+            .map(|info| info.path.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Not loaded".to_string());
+        let mut entries = vec![
+            Self::setting(
+                "Core",
+                "Loaded libretro core",
+                system_info.map_or("Not loaded", |info| info.library_name.as_str()),
+                400,
+            ),
+            Self::setting(
+                "Core Version",
+                "Version reported by the active core",
+                system_info.map_or("Unknown", |info| info.library_version.as_str()),
+                401,
+            ),
+            Self::setting("Content", "Loaded content path", &content, 402),
+            Self::setting(
+                "Video Backend",
+                "Last presented frame backend",
+                backend,
+                403,
+            ),
+            Self::setting(
+                "Hardware Renderer",
+                "OpenGL ES / Vulkan-MoltenVK host readiness",
+                if gfx_status.hardware_ready {
+                    "Ready"
+                } else {
+                    "Waiting for host handles"
+                },
+                404,
+            ),
+        ];
+        if let Some(present) = gfx_status.last_present.as_ref() {
+            entries.push(Self::setting(
+                "Frame",
+                "Last rendered frame counter",
+                &present.frame_number.to_string(),
+                405,
+            ));
+        }
+        self.history.push(MenuList {
+            title: "Information".to_string(),
+            entries,
+        });
+    }
+
+    pub fn push_status(&mut self, title: &str, message: &str) {
+        self.history.push(MenuList {
+            title: title.to_string(),
+            entries: vec![Self::action(message, "", 0)],
         });
     }
 

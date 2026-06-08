@@ -48,11 +48,10 @@ public final class EmulatorRuntimeModel: ObservableObject {
           }
       }
 
-      // The SwiftUI play view presents copied software frames as UIImage values.
-      // Keep the runtime on the software backend until an iOS host renderer supplies
-      // bgfx host handles; otherwise frame presentation fails before a copyable
-      // image is cached and the screen stays on "No Video".
-      try? frontend.setGfxBackend(.software)
+      // Prefer the hardware-capable bgfx path. Rust automatically falls back to
+      // copyable software frames until an iOS OpenGL ES / MoltenVK host renderer
+      // supplies valid host handles.
+      try? frontend.setGfxBackend(.bgfx)
       frontend.saveSettings()
       refresh()
     } catch {
@@ -245,6 +244,13 @@ runTask = Task.detached(priority: .userInitiated) { [weak self] in
 
   public func refreshMenu() {
       currentMenu = frontend?.currentMenuList()
+  }
+
+  public func menuAction(_ actionId: UInt32) {
+      guard let frontend else { return }
+      if frontend.activateMenuAction(actionId) {
+          refreshMenu()
+      }
   }
 
   public func menuPop() {

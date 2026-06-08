@@ -12,8 +12,7 @@ use drivers::software::SoftwareDriver;
 pub use drivers::{DriverFrame, GfxDriver, PresentStatus};
 pub use frame::{PixelFormat, VideoFrame};
 pub use hardware::{
-    GfxBackendKind, HardwareFrame, HardwareRenderRequest, HostRenderHandles,
-    BgfxRenderCommand,
+    BgfxRenderCommand, GfxBackendKind, HardwareFrame, HardwareRenderRequest, HostRenderHandles,
 };
 
 pub const CLEAR_COLOR_RGBA: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
@@ -61,7 +60,6 @@ impl GfxRuntime {
         self.set_video_config(config);
     }
 
-
     pub fn video_config(&self) -> GfxVideoConfig {
         self.video_config
     }
@@ -94,8 +92,15 @@ impl GfxRuntime {
         height: u32,
         pitch: usize,
     ) -> Result<VideoFrame, String> {
-        let frame = frame::convert_frame_to_rgba(data.cast(), width, height, pitch, self.pixel_format)?;
-        let status = self.driver_mut().present(&DriverFrame::Software(frame.clone()))?;
+        let frame =
+            frame::convert_frame_to_rgba(data.cast(), width, height, pitch, self.pixel_format)?;
+        let status = if self.backend == GfxBackendKind::Bgfx && !self.context.handles().is_valid() {
+            self.software
+                .present(&DriverFrame::Software(frame.clone()))?
+        } else {
+            self.driver_mut()
+                .present(&DriverFrame::Software(frame.clone()))?
+        };
         self.status.last_present = Some(status);
         self.status.frame_counter = self.status.frame_counter.wrapping_add(1);
         Ok(frame)
@@ -241,6 +246,19 @@ mod tests {
         let call = gfx.bgfx_draw_call().expect("draw call");
         assert_eq!(call.viewport, [0, 0, 320, 240]);
         assert_eq!(call.framebuffer, 13);
+    }
+
+    #[test]
+    fn bgfx_without_host_handles_falls_back_to_software_frames() {
+        let mut gfx = GfxRuntime::new();
+        gfx.set_backend(GfxBackendKind::Bgfx);
+        gfx.set_pixel_format(PixelFormat::Xrgb8888);
+        let pixel = 0x0012_3456u32.to_ne_bytes();
+        gfx.ingest_software_frame(pixel.as_ptr().cast(), 1, 1, 4)
+            .expect("software fallback");
+        let status = gfx.driver_status().last_present.as_ref().unwrap();
+        assert_eq!(status.backend, GfxBackendKind::Software);
+        assert_eq!(gfx.last_frame().rgba, vec![0x12, 0x34, 0x56, 0xff]);
     }
 
     #[test]

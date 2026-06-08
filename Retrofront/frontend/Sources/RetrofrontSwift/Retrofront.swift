@@ -548,12 +548,24 @@ public final class Retrofront: @unchecked Sendable {
     rf_frontend_menu_push_core_list(handle)
   }
 
+  public func pushContentList() {
+    rf_frontend_menu_push_content_list(handle)
+  }
+
   public func pushSettingsMenu() {
     rf_frontend_menu_push_settings(handle)
   }
 
+  public func pushInformationMenu() {
+    rf_frontend_menu_push_information(handle)
+  }
+
   public func pushSkinSettingsMenu() {
     rf_frontend_menu_push_skin_settings(handle)
+  }
+
+  public func activateMenuAction(_ actionId: UInt32) -> Bool {
+    return rf_frontend_menu_activate(handle, actionId)
   }
 
   public func menuPop() -> Bool {

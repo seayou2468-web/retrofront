@@ -813,10 +813,8 @@ pub unsafe extern "C" fn rf_frontend_set_gfx_backend(
     _frontend: *mut RfFrontend,
     backend: u32,
 ) -> bool {
-    let kind = match backend {
-        1 => GfxBackendKind::Bgfx,
-        2 => GfxBackendKind::Software,
-        _ => return false,
+    let Some(kind) = GfxBackendKind::from_code(backend) else {
+        return false;
     };
     with_active_frontend(|core| core.set_gfx_backend(kind));
     true
@@ -1505,6 +1503,78 @@ pub unsafe extern "C" fn rf_frontend_menu_push_settings(_frontend: *mut RfFronte
     with_active_frontend(|core| {
         core.menu.push_settings(&core.settings);
     });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_menu_push_content_list(_frontend: *mut RfFrontend) {
+    with_active_frontend(|core| {
+        core.menu.push_content_list(&core.scanner.games);
+    });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_menu_push_information(_frontend: *mut RfFrontend) {
+    with_active_frontend(|core| {
+        let system_info = core.system_info().cloned();
+        let game_info = core.game_info().cloned();
+        let gfx_status = core.gfx.driver_status().clone();
+        core.menu
+            .push_information(system_info.as_ref(), game_info.as_ref(), &gfx_status);
+    });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_menu_activate(
+    _frontend: *mut RfFrontend,
+    action_id: u32,
+) -> bool {
+    with_active_frontend(|core| match action_id {
+        1 => {
+            let cores = core.core_info.cores.clone();
+            core.menu.push_core_list(&cores);
+            true
+        }
+        2 => {
+            core.menu.push_content_list(&core.scanner.games);
+            true
+        }
+        3 => {
+            core.menu.push_status(
+                "Online Updater",
+                "Network updater is not implemented yet in the Rust menu engine.",
+            );
+            true
+        }
+        4 => {
+            core.menu.push_settings(&core.settings);
+            true
+        }
+        5 => {
+            let system_info = core.system_info().cloned();
+            let game_info = core.game_info().cloned();
+            let gfx_status = core.gfx.driver_status().clone();
+            core.menu
+                .push_information(system_info.as_ref(), game_info.as_ref(), &gfx_status);
+            true
+        }
+        13 => {
+            core.menu.push_status(
+                "Shaders",
+                "Shader configuration will be handled by the Rust video menu.",
+            );
+            true
+        }
+        14 => {
+            core.menu
+                .push_status("Save States", "Save-state actions are not implemented yet.");
+            true
+        }
+        260..=262 => {
+            core.menu.push_skin_settings(&core.settings);
+            true
+        }
+        _ => false,
+    })
 }
 
 #[no_mangle]

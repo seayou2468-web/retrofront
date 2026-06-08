@@ -182,8 +182,11 @@ bool rf_frontend_get_launch_candidate(RfFrontend *frontend, uintptr_t index, RfC
 bool rf_frontend_menu_current_list(RfFrontend *frontend, RfMenuList *out_list);
 bool rf_frontend_menu_get_entry(RfFrontend *frontend, uintptr_t index, RfMenuEntry *out_entry);
 void rf_frontend_menu_push_core_list(RfFrontend *frontend);
+void rf_frontend_menu_push_content_list(RfFrontend *frontend);
 void rf_frontend_menu_push_settings(RfFrontend *frontend);
+void rf_frontend_menu_push_information(RfFrontend *frontend);
 void rf_frontend_menu_push_skin_settings(RfFrontend *frontend);
+bool rf_frontend_menu_activate(RfFrontend *frontend, uint32_t action_id);
 bool rf_frontend_menu_pop(RfFrontend *frontend);
 
 // RetroArch-style Settings API
