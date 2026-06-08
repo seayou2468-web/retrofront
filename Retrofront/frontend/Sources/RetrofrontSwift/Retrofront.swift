@@ -162,6 +162,11 @@ public struct MenuList: Sendable {
   public let entries: [MenuEntry]
 }
 
+public struct RetrofrontSetting: Equatable, Sendable {
+  public let key: String
+  public let value: String
+}
+
 public final class Retrofront: @unchecked Sendable {
   private let handle: OpaquePointer
 
@@ -399,6 +404,15 @@ public final class Retrofront: @unchecked Sendable {
     directory.withCString { rf_frontend_scan_cores(handle, $0) }
   }
 
+  public func scanConfiguredCores() {
+    rf_frontend_scan_configured_cores(handle)
+  }
+
+  public func allSupportedExtensions() -> [String] {
+    guard let pointer = rf_frontend_all_extensions(handle) else { return [] }
+    return String(cString: pointer).split(separator: "|").map(String.init)
+  }
+
   public func scanGames(in directory: String, extensions: String) {
     directory.withCString { d in
       extensions.withCString { e in
@@ -463,8 +477,53 @@ public final class Retrofront: @unchecked Sendable {
     rf_frontend_menu_push_core_list(handle)
   }
 
+  public func pushSettingsMenu() {
+    rf_frontend_menu_push_settings(handle)
+  }
+
   public func menuPop() -> Bool {
     return rf_frontend_menu_pop(handle)
+  }
+
+  public func loadSettings(at path: String) throws {
+    guard path.withCString({ rf_frontend_load_settings(handle, $0) }) else {
+      throw lastError()
+    }
+  }
+
+  public func setBaseDirectory(_ path: String) throws {
+    guard path.withCString({ rf_frontend_set_base_dir(handle, $0) }) else {
+      throw lastError()
+    }
+  }
+
+  public func saveSettings() {
+    rf_frontend_save_settings(handle)
+  }
+
+  public func setting(_ key: String) -> String? {
+    key.withCString { cKey in
+      guard let pointer = rf_frontend_get_setting(handle, cKey) else { return nil }
+      return String(cString: pointer)
+    }
+  }
+
+  public func setSetting(key: String, value: String) throws {
+    guard key.withCString({ cKey in value.withCString({ cValue in rf_frontend_set_setting(handle, cKey, cValue) }) }) else {
+      throw lastError()
+    }
+  }
+
+  public func settings() -> [RetrofrontSetting] {
+    let count = rf_frontend_settings_count(handle)
+    var settings: [RetrofrontSetting] = []
+    for i in 0..<count {
+      var raw = RfSettingEntry()
+      if rf_frontend_get_setting_at(handle, UInt(i), &raw) {
+        settings.append(RetrofrontSetting(key: String(cString: raw.key), value: String(cString: raw.value)))
+      }
+    }
+    return settings
   }
 
   private func lastError() -> RetrofrontError {

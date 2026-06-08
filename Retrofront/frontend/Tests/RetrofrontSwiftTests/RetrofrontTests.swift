@@ -13,4 +13,11 @@ final class RetrofrontTests: XCTestCase {
     try frontend.setJoypadButton(.a, pressed: true)
     try frontend.setJoypadButton(.a, pressed: false)
   }
+
+  func testRetroArchStyleSettingsAreExposed() throws {
+    let frontend = try Retrofront()
+    try frontend.setBaseDirectory("/tmp/RetrofrontTests")
+    XCTAssertEqual(frontend.setting("libretro_directory"), "/tmp/RetrofrontTests/Cores")
+    XCTAssertTrue(frontend.settings().contains { $0.key == "core_options_path" })
+  }
 }

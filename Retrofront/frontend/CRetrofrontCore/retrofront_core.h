@@ -118,6 +118,11 @@ typedef struct RfMenuList {
     uintptr_t entry_count;
 } RfMenuList;
 
+typedef struct RfSettingEntry {
+    const char *key;
+    const char *value;
+} RfSettingEntry;
+
 RfFrontend *rf_frontend_create(void);
 void rf_frontend_destroy(RfFrontend *frontend);
 uint32_t rf_frontend_state(const RfFrontend *frontend);
@@ -126,6 +131,7 @@ bool rf_frontend_load_game(RfFrontend *frontend, const char *path, const char *m
 bool rf_frontend_run_frame(RfFrontend *frontend);
 void rf_frontend_unload_game(RfFrontend *frontend);
 bool rf_frontend_set_gfx_backend(RfFrontend *frontend, uint32_t backend);
+bool rf_frontend_get_gfx_video_config(const RfFrontend *frontend, RfGfxVideoConfig *out_config);
 bool rf_frontend_set_gfx_video_config(RfFrontend *frontend, const RfGfxVideoConfig *config);
 bool rf_frontend_set_joypad_button(RfFrontend *frontend, uint32_t button_id, bool pressed);
 bool rf_frontend_set_gfx_host_handles(RfFrontend *frontend, const RfGfxHostHandles *handles);
@@ -146,6 +152,8 @@ void rf_frontend_clear_options_cache(RfFrontend *frontend);
 // Core Discovery API
 void rf_frontend_set_info_dir(RfFrontend *frontend, const char *path);
 void rf_frontend_scan_cores(RfFrontend *frontend, const char *cores_dir);
+void rf_frontend_scan_configured_cores(RfFrontend *frontend);
+const char *rf_frontend_all_extensions(RfFrontend *frontend);
 uintptr_t rf_frontend_cores_count(const RfFrontend *frontend);
 bool rf_frontend_get_core_info(RfFrontend *frontend, uintptr_t index, RfCoreInfo *out_info);
 typedef struct RfGameEntry {
@@ -161,7 +169,17 @@ bool rf_frontend_get_game_info(RfFrontend *frontend, uintptr_t index, RfGameEntr
 bool rf_frontend_menu_current_list(RfFrontend *frontend, RfMenuList *out_list);
 bool rf_frontend_menu_get_entry(RfFrontend *frontend, uintptr_t index, RfMenuEntry *out_entry);
 void rf_frontend_menu_push_core_list(RfFrontend *frontend);
+void rf_frontend_menu_push_settings(RfFrontend *frontend);
 bool rf_frontend_menu_pop(RfFrontend *frontend);
+
+// RetroArch-style Settings API
+bool rf_frontend_load_settings(RfFrontend *frontend, const char *path);
+bool rf_frontend_set_base_dir(RfFrontend *frontend, const char *path);
+void rf_frontend_save_settings(RfFrontend *frontend);
+const char *rf_frontend_get_setting(RfFrontend *frontend, const char *key);
+bool rf_frontend_set_setting(RfFrontend *frontend, const char *key, const char *value);
+uintptr_t rf_frontend_settings_count(const RfFrontend *frontend);
+bool rf_frontend_get_setting_at(RfFrontend *frontend, uintptr_t index, RfSettingEntry *out_setting);
 
 #ifdef __cplusplus
 }

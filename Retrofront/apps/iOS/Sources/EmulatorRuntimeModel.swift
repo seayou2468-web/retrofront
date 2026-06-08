@@ -17,6 +17,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
   @Published private(set) var corePath: String?
   @Published private(set) var loadedGameURL: URL?
   @Published private(set) var currentMenu: MenuList?
+  @Published private(set) var settings: [RetrofrontSetting] = []
   @Published var statusMessage = "Ready"
 
   private var frontend: Retrofront?
@@ -36,14 +37,19 @@ public final class EmulatorRuntimeModel: ObservableObject {
       self.frontend = frontend
 
       let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-      let configPath = docs.appendingPathComponent("retrofront-core-options.cfg").path
-      try? frontend.setOptionsConfigPath(configPath)
+      let configPath = docs.appendingPathComponent("retroarch.cfg").path
+      try? frontend.setBaseDirectory(docs.path)
+      try? frontend.loadSettings(at: configPath)
 
       if let resourceURL = Bundle.main.resourceURL {
-          frontend.setInfoDir(resourceURL.appendingPathComponent("info").path)
+          let bundledInfo = resourceURL.appendingPathComponent("info")
+          if FileManager.default.fileExists(atPath: bundledInfo.path) {
+              frontend.setInfoDir(bundledInfo.path)
+          }
       }
 
       try? frontend.setGfxBackend(.bgfx)
+      frontend.saveSettings()
       refresh()
     } catch {
       statusMessage = "Initialization failed: \(error)"
@@ -58,26 +64,33 @@ public final class EmulatorRuntimeModel: ObservableObject {
     if let resourceURL = Bundle.main.resourceURL {
         frontend.scanCores(in: resourceURL.path)
     }
-    let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-    let coresDir = docs.appendingPathComponent("Cores")
-    try? FileManager.default.createDirectory(at: coresDir, withIntermediateDirectories: true)
-    frontend.scanCores(in: coresDir.path)
+    frontend.scanConfiguredCores()
     self.availableCores = frontend.availableCores()
   }
 
   public func refreshGames() {
       guard let frontend else { return }
       let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-      let romsDir = docs.appendingPathComponent("Roms")
+      let romsDir = URL(fileURLWithPath: frontend.setting("content_directory") ?? docs.appendingPathComponent("Roms").path)
       try? FileManager.default.createDirectory(at: romsDir, withIntermediateDirectories: true)
-      let exts = "gba|gb|gbc|sfc|smc|nes|bin|gen|md|sms|gg"
+      let detectedExtensions = frontend.allSupportedExtensions()
+      let exts = detectedExtensions.isEmpty ? "gba|gb|gbc|sfc|smc|nes|bin|gen|md|sms|gg" : detectedExtensions.joined(separator: "|")
       frontend.scanGames(in: romsDir.path, extensions: exts)
       self.availableGames = frontend.availableGames()
   }
 
+  public func importFile(at url: URL) {
+      if url.pathExtension.lowercased() == "dylib" {
+          importCore(at: url)
+      } else {
+          importGame(at: url)
+      }
+  }
+
   public func importGame(at url: URL) {
+      guard let frontend else { return }
       let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-      let romsDir = docs.appendingPathComponent("Roms")
+      let romsDir = URL(fileURLWithPath: frontend.setting("content_directory") ?? docs.appendingPathComponent("Roms").path)
       try? FileManager.default.createDirectory(at: romsDir, withIntermediateDirectories: true)
       let destination = romsDir.appendingPathComponent(url.lastPathComponent)
       let success = url.startAccessingSecurityScopedResource()
@@ -91,6 +104,28 @@ public final class EmulatorRuntimeModel: ObservableObject {
           refreshGames()
       } catch {
           statusMessage = "Import failed: \(error)"
+      }
+  }
+
+  public func importCore(at url: URL) {
+      guard let frontend else { return }
+      let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+      let coresDir = URL(fileURLWithPath: frontend.setting("libretro_directory") ?? docs.appendingPathComponent("Cores").path)
+      try? FileManager.default.createDirectory(at: coresDir, withIntermediateDirectories: true)
+      let destination = coresDir.appendingPathComponent(url.lastPathComponent)
+      let success = url.startAccessingSecurityScopedResource()
+      defer { if success { url.stopAccessingSecurityScopedResource() } }
+      do {
+          if FileManager.default.fileExists(atPath: destination.path) {
+              try FileManager.default.removeItem(at: destination)
+          }
+          try FileManager.default.copyItem(at: url, to: destination)
+          try? frontend.setSetting(key: "libretro_directory", value: coresDir.path)
+          frontend.saveSettings()
+          refreshAvailableCores()
+          statusMessage = "Imported core: \(url.lastPathComponent)"
+      } catch {
+          statusMessage = "Core import failed: \(error)"
       }
   }
 
@@ -192,6 +227,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
     guard let frontend else { return }
     frontendState = frontend.state
     coreOptions = frontend.coreOptions()
+    settings = frontend.settings()
     if let config = frontend.gfxVideoConfig() {
         if config.aspectRatio > 0 {
             aspectRatio = Double(config.aspectRatio)

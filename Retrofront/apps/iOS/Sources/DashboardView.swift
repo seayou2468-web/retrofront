@@ -28,14 +28,14 @@ struct DashboardView: View {
                         Label("Settings", systemImage: "gearshape.2.fill")
                     }.tag(2)
             }
-            .accentColor(.blue)
+            .tint(.cyan)
         }
         .fullScreenCover(isPresented: $isPlayViewActive) {
             PlayView()
         }
         .fileImporter(isPresented: $isFilePickerPresented, allowedContentTypes: [.item]) { result in
             if case .success(let url) = result {
-                runtime.importGame(at: url)
+                runtime.importFile(at: url)
             }
         }
         .onReceive(runtime.$frontendState) { newState in
@@ -184,12 +184,15 @@ struct ActionCard: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 20)
-            .background(Color(white: 0.15))
-            .cornerRadius(16)
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(color.opacity(0.3), lineWidth: 1)
+            .background(
+                LinearGradient(colors: [color.opacity(0.22), Color.white.opacity(0.06)], startPoint: .topLeading, endPoint: .bottomTrailing)
             )
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(color.opacity(0.45), lineWidth: 1)
+            )
+            .shadow(color: color.opacity(0.18), radius: 16, x: 0, y: 8)
         }
         .buttonStyle(.plain)
     }
@@ -236,8 +239,11 @@ struct ModernLibraryView: View {
                     Button {
                         isFilePickerPresented = true
                     } label: {
-                        Label("Add Content", systemImage: "doc.badge.plus")
+                        Label("Add Content or Core", systemImage: "square.and.arrow.down")
                     }
+                    Text(".dylib files are copied into the configured Cores directory; other files go to the content directory.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             .navigationTitle("Library")
@@ -293,6 +299,18 @@ struct ModernSettingsView: View {
                                     Text(val.label).tag(val.value)
                                 }
                             }
+                        }
+                    }
+                }
+
+                Section("Directories") {
+                    ForEach(runtime.settings.filter { $0.key.hasSuffix("_directory") || $0.key.hasSuffix("_path") }, id: \.key) { setting in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(setting.key)
+                            Text(setting.value)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
                         }
                     }
                 }

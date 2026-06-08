@@ -1,29 +1,26 @@
 //! Retrofront Rust management core.
 
-mod dylib;
-mod options;
 mod core_info;
-mod settings;
-mod menu;
-mod scanner;
-mod playlist;
+mod dylib;
 pub mod gfx;
 pub mod libretro;
+mod menu;
+mod options;
+mod playlist;
+mod scanner;
+mod settings;
 
 use dylib::Library;
+use gfx::{GfxBackendKind, GfxRuntime, HardwareRenderRequest, PixelFormat};
 use options::CoreOptionsManager;
 pub use options::{CoreOptionDefinition, CoreOptionValue};
-use gfx::{
-    GfxBackendKind, GfxRuntime, HardwareRenderRequest,
-    PixelFormat,
-};
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_uint, c_void};
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::{Mutex, OnceLock};
-use std::cell::RefCell;
 
 pub const RETRO_HW_FRAME_BUFFER_VALID: *const c_void = usize::MAX as *const c_void;
 
@@ -237,6 +234,17 @@ impl FrontendCore {
         self.gfx.set_backend(backend);
     }
 
+    pub fn configure_from_settings(&mut self) {
+        self.settings.ensure_directories();
+        self.core_info
+            .set_info_dir(self.settings.libretro_info_path());
+        self.options.set_config_path(
+            self.settings
+                .path_value("core_options_path")
+                .unwrap_or_else(|| self.settings.base_dir.join("retroarch-core-options.cfg")),
+        );
+    }
+
     pub fn load_core(&mut self, path: impl AsRef<Path>) -> Result<(), String> {
         self.unload_game();
         if let Some(api) = self.api.as_ref() {
@@ -285,7 +293,11 @@ impl FrontendCore {
         Ok(())
     }
 
-    pub fn load_game(&mut self, path: impl AsRef<Path>, meta: Option<String>) -> Result<(), String> {
+    pub fn load_game(
+        &mut self,
+        path: impl AsRef<Path>,
+        meta: Option<String>,
+    ) -> Result<(), String> {
         let path_buf = path.as_ref().to_path_buf();
         let c_path = CString::new(path_buf.to_string_lossy().as_bytes()).unwrap();
 
@@ -374,7 +386,7 @@ impl FrontendCore {
                 libretro::RETRO_ENVIRONMENT_SET_PIXEL_FORMAT => {
                     let format = unsafe { *(data as *const libretro::retro_pixel_format) };
                     if let Some(p) = PixelFormat::from_libretro(format) {
-                         core.gfx.set_pixel_format(p);
+                        core.gfx.set_pixel_format(p);
                     }
                     true
                 }
@@ -386,28 +398,26 @@ impl FrontendCore {
                     !val_ptr.is_null()
                 }
                 libretro::RETRO_ENVIRONMENT_SET_VARIABLES => {
-                    core.options.set_definitions_v0(data as *const libretro::retro_variable);
+                    core.options
+                        .set_definitions_v0(data as *const libretro::retro_variable);
                     true
                 }
                 libretro::RETRO_ENVIRONMENT_SET_CORE_OPTIONS => {
-                    core.options.set_definitions_v1(data as *const libretro::retro_core_option_definition);
+                    core.options
+                        .set_definitions_v1(data as *const libretro::retro_core_option_definition);
                     true
                 }
                 libretro::RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2 => {
                     let v2 = unsafe { &*(data as *const libretro::retro_core_options_v2) };
-                    core.options.set_definitions_v2(
-                        v2.definitions,
-                        v2.categories,
-                    );
+                    core.options
+                        .set_definitions_v2(v2.definitions, v2.categories);
                     true
                 }
                 libretro::RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2_INTL => {
                     let intl = unsafe { &*(data as *const libretro::retro_core_options_v2_intl) };
                     let us = unsafe { &*intl.us };
-                    core.options.set_definitions_v2(
-                        us.definitions,
-                        us.categories,
-                    );
+                    core.options
+                        .set_definitions_v2(us.definitions, us.categories);
                     true
                 }
                 libretro::RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE => {
@@ -416,7 +426,8 @@ impl FrontendCore {
                 }
                 libretro::RETRO_ENVIRONMENT_SET_HW_RENDER => {
                     let req = unsafe { &*(data as *const libretro::retro_hw_render_callback) };
-                    core.gfx.set_hardware_render_request(HardwareRenderRequest::from_libretro(req));
+                    core.gfx
+                        .set_hardware_render_request(HardwareRenderRequest::from_libretro(req));
                     true
                 }
                 libretro::RETRO_ENVIRONMENT_GET_CAN_DUPE => {
@@ -441,7 +452,9 @@ impl FrontendCore {
     ) {
         with_active_frontend(|core| {
             if !data.is_null() && data != RETRO_HW_FRAME_BUFFER_VALID {
-                let _ = core.gfx.ingest_software_frame(data.cast(), width, height, pitch);
+                let _ = core
+                    .gfx
+                    .ingest_software_frame(data.cast(), width, height, pitch);
             }
             core.events.push_back(FrontendEvent::VideoFrame {
                 width,
@@ -455,7 +468,8 @@ impl FrontendCore {
 
     unsafe extern "C" fn retro_audio_sample_callback(left: i16, right: i16) {
         with_active_frontend(|core| {
-            core.events.push_back(FrontendEvent::AudioSample { left, right });
+            core.events
+                .push_back(FrontendEvent::AudioSample { left, right });
         });
     }
 
@@ -603,6 +617,12 @@ pub struct RfMenuList {
     pub entry_count: usize,
 }
 
+#[repr(C)]
+pub struct RfSettingEntry {
+    pub key: *const c_char,
+    pub value: *const c_char,
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_create() -> *mut RfFrontend {
     Box::into_raw(Box::new(RfFrontend {
@@ -627,12 +647,10 @@ pub unsafe extern "C" fn rf_frontend_destroy(frontend: *mut RfFrontend) {
 
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_state(_frontend: *const RfFrontend) -> u32 {
-    with_active_frontend(|core| {
-        match core.state() {
-            SessionState::Empty => 0,
-            SessionState::CoreLoaded => 1,
-            SessionState::GameLoaded => 2,
-        }
+    with_active_frontend(|core| match core.state() {
+        SessionState::Empty => 0,
+        SessionState::CoreLoaded => 1,
+        SessionState::GameLoaded => 2,
     })
 }
 
@@ -732,7 +750,9 @@ pub unsafe extern "C" fn rf_frontend_get_gfx_video_config(
     _frontend: *const RfFrontend,
     out_config: *mut RfGfxVideoConfig,
 ) -> bool {
-    let Some(out_config) = (unsafe { out_config.as_mut() }) else { return false; };
+    let Some(out_config) = (unsafe { out_config.as_mut() }) else {
+        return false;
+    };
     with_active_frontend(|core| {
         let config = core.gfx.video_config();
         out_config.base_width = config.base_width;
@@ -789,8 +809,16 @@ pub unsafe extern "C" fn rf_frontend_set_gfx_host_handles(
             native_view: handles.native_view,
             context: handles.context,
             framebuffer: handles.framebuffer,
-            render_callback: if handles.render_callback.is_null() { None } else { Some(unsafe { std::mem::transmute(handles.render_callback) }) },
-            get_proc_address: if handles.get_proc_address.is_null() { None } else { Some(unsafe { std::mem::transmute(handles.get_proc_address) }) },
+            render_callback: if handles.render_callback.is_null() {
+                None
+            } else {
+                Some(unsafe { std::mem::transmute(handles.render_callback) })
+            },
+            get_proc_address: if handles.get_proc_address.is_null() {
+                None
+            } else {
+                Some(unsafe { std::mem::transmute(handles.get_proc_address) })
+            },
             user_data: handles.user_data,
         });
     });
@@ -977,7 +1005,9 @@ pub unsafe extern "C" fn rf_frontend_set_options_config_path(
     _frontend: *mut RfFrontend,
     path: *const c_char,
 ) -> bool {
-    let Some(path_str) = ptr_to_str(path) else { return false; };
+    let Some(path_str) = ptr_to_str(path) else {
+        return false;
+    };
     with_active_frontend(|core| core.options.set_config_path(PathBuf::from(path_str)));
     true
 }
@@ -993,14 +1023,24 @@ pub unsafe extern "C" fn rf_frontend_get_option(
     index: usize,
     out: *mut RfCoreOption,
 ) -> bool {
-    let Some(frontend) = (unsafe { frontend.as_mut() }) else { return false; };
-    let Some(out) = (unsafe { out.as_mut() }) else { return false; };
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    let Some(out) = (unsafe { out.as_mut() }) else {
+        return false;
+    };
 
     with_active_frontend(|core| {
         let defs = core.options.definitions();
-        let Some(def) = defs.get(index) else { return false; };
+        let Some(def) = defs.get(index) else {
+            return false;
+        };
 
-        let current_value = core.options.get_variable(&def.key).cloned().unwrap_or_else(|| def.default_value.clone());
+        let current_value = core
+            .options
+            .get_variable(&def.key)
+            .cloned()
+            .unwrap_or_else(|| def.default_value.clone());
 
         let key_c = CString::new(def.key.as_str()).unwrap_or_default();
         let desc_c = CString::new(def.desc.as_str()).unwrap_or_default();
@@ -1042,8 +1082,12 @@ pub unsafe extern "C" fn rf_frontend_set_option(
     key: *const c_char,
     value: *const c_char,
 ) -> bool {
-    let Some(key_str) = ptr_to_str(key) else { return false; };
-    let Some(value_str) = ptr_to_str(value) else { return false; };
+    let Some(key_str) = ptr_to_str(key) else {
+        return false;
+    };
+    let Some(value_str) = ptr_to_str(value) else {
+        return false;
+    };
     with_active_frontend(|core| core.options.set_variable(key_str, value_str));
     true
 }
@@ -1060,15 +1104,42 @@ pub unsafe extern "C" fn rf_frontend_clear_options_cache(frontend: *mut RfFronte
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_set_info_dir(_frontend: *mut RfFrontend, path: *const c_char) {
     if let Some(path_str) = ptr_to_str(path) {
-        with_active_frontend(|core| core.core_info.set_info_dir(PathBuf::from(path_str)));
+        with_active_frontend(|core| {
+            core.settings.set("libretro_info_path", &path_str);
+            core.core_info.set_info_dir(PathBuf::from(path_str));
+        });
     }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rf_frontend_scan_cores(_frontend: *mut RfFrontend, cores_dir: *const c_char) {
+pub unsafe extern "C" fn rf_frontend_scan_cores(
+    _frontend: *mut RfFrontend,
+    cores_dir: *const c_char,
+) {
     if let Some(path_str) = ptr_to_str(cores_dir) {
         with_active_frontend(|core| core.core_info.scan_directory(Path::new(&path_str)));
     }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_scan_configured_cores(_frontend: *mut RfFrontend) {
+    with_active_frontend(|core| {
+        let dir = core.settings.libretro_directory();
+        core.core_info.scan_directory(&dir);
+    });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_all_extensions(frontend: *mut RfFrontend) -> *const c_char {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return ptr::null();
+    };
+    with_active_frontend(|core| {
+        let extensions = CString::new(core.core_info.all_extensions.join("|")).unwrap_or_default();
+        let ptr = extensions.as_ptr();
+        frontend.cached_strings.push(extensions);
+        ptr
+    })
 }
 
 #[no_mangle]
@@ -1082,11 +1153,17 @@ pub unsafe extern "C" fn rf_frontend_get_core_info(
     index: usize,
     out: *mut RfCoreInfo,
 ) -> bool {
-    let Some(frontend) = (unsafe { frontend.as_mut() }) else { return false; };
-    let Some(out) = (unsafe { out.as_mut() }) else { return false; };
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    let Some(out) = (unsafe { out.as_mut() }) else {
+        return false;
+    };
 
     with_active_frontend(|core| {
-        let Some(info) = core.core_info.cores.get(index) else { return false; };
+        let Some(info) = core.core_info.cores.get(index) else {
+            return false;
+        };
 
         let path_c = CString::new(info.path.to_string_lossy().as_bytes()).unwrap_or_default();
         let name_c = CString::new(info.display_name.as_str()).unwrap_or_default();
@@ -1108,7 +1185,11 @@ pub unsafe extern "C" fn rf_frontend_get_core_info(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rf_frontend_scan_games(_frontend: *mut RfFrontend, directory: *const c_char, extensions: *const c_char) {
+pub unsafe extern "C" fn rf_frontend_scan_games(
+    _frontend: *mut RfFrontend,
+    directory: *const c_char,
+    extensions: *const c_char,
+) {
     if let Some(dir_str) = ptr_to_str(directory) {
         if let Some(ext_str) = ptr_to_str(extensions) {
             let exts: Vec<String> = ext_str.split("|").map(|s| s.to_string()).collect();
@@ -1123,12 +1204,22 @@ pub unsafe extern "C" fn rf_frontend_games_count(_frontend: *const RfFrontend) -
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn rf_frontend_get_game_info(frontend: *mut RfFrontend, index: usize, out: *mut RfGameEntry) -> bool {
-    let Some(frontend) = (unsafe { frontend.as_mut() }) else { return false; };
-    let Some(out) = (unsafe { out.as_mut() }) else { return false; };
+pub unsafe extern "C" fn rf_frontend_get_game_info(
+    frontend: *mut RfFrontend,
+    index: usize,
+    out: *mut RfGameEntry,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    let Some(out) = (unsafe { out.as_mut() }) else {
+        return false;
+    };
 
     with_active_frontend(|core| {
-        let Some(info) = core.scanner.games.get(index) else { return false; };
+        let Some(info) = core.scanner.games.get(index) else {
+            return false;
+        };
 
         let path_c = CString::new(info.path.to_string_lossy().as_bytes()).unwrap_or_default();
         let label_c = CString::new(info.label.as_str()).unwrap_or_default();
@@ -1149,8 +1240,12 @@ pub unsafe extern "C" fn rf_frontend_menu_current_list(
     frontend: *mut RfFrontend,
     out_list: *mut RfMenuList,
 ) -> bool {
-    let Some(frontend) = (unsafe { frontend.as_mut() }) else { return false; };
-    let Some(out_list) = (unsafe { out_list.as_mut() }) else { return false; };
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    let Some(out_list) = (unsafe { out_list.as_mut() }) else {
+        return false;
+    };
 
     with_active_frontend(|core| {
         if let Some(list) = core.menu.current() {
@@ -1171,8 +1266,12 @@ pub unsafe extern "C" fn rf_frontend_menu_get_entry(
     index: usize,
     out_entry: *mut RfMenuEntry,
 ) -> bool {
-    let Some(frontend) = (unsafe { frontend.as_mut() }) else { return false; };
-    let Some(out_entry) = (unsafe { out_entry.as_mut() }) else { return false; };
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    let Some(out_entry) = (unsafe { out_entry.as_mut() }) else {
+        return false;
+    };
 
     with_active_frontend(|core| {
         if let Some(list) = core.menu.current() {
@@ -1214,8 +1313,122 @@ pub unsafe extern "C" fn rf_frontend_menu_push_core_list(_frontend: *mut RfFront
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn rf_frontend_menu_push_settings(_frontend: *mut RfFrontend) {
+    with_active_frontend(|core| {
+        core.menu.push_settings(&core.settings);
+    });
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn rf_frontend_menu_pop(_frontend: *mut RfFrontend) -> bool {
     with_active_frontend(|core| core.menu.pop().is_some())
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_load_settings(
+    _frontend: *mut RfFrontend,
+    path: *const c_char,
+) -> bool {
+    let Some(path_str) = ptr_to_str(path) else {
+        return false;
+    };
+    with_active_frontend(|core| {
+        core.settings.load(Path::new(&path_str));
+        core.configure_from_settings();
+    });
+    true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_set_base_dir(
+    _frontend: *mut RfFrontend,
+    path: *const c_char,
+) -> bool {
+    let Some(path_str) = ptr_to_str(path) else {
+        return false;
+    };
+    with_active_frontend(|core| {
+        core.settings.set_base_dir(Path::new(&path_str));
+        core.configure_from_settings();
+    });
+    true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_save_settings(_frontend: *mut RfFrontend) {
+    with_active_frontend(|core| core.settings.save());
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_get_setting(
+    frontend: *mut RfFrontend,
+    key: *const c_char,
+) -> *const c_char {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return ptr::null();
+    };
+    let Some(key_str) = ptr_to_str(key) else {
+        return ptr::null();
+    };
+    with_active_frontend(|core| {
+        let value = core.settings.get(&key_str).cloned().unwrap_or_default();
+        let value_c = CString::new(value).unwrap_or_default();
+        let ptr = value_c.as_ptr();
+        frontend.cached_strings.push(value_c);
+        ptr
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_set_setting(
+    _frontend: *mut RfFrontend,
+    key: *const c_char,
+    value: *const c_char,
+) -> bool {
+    let Some(key_str) = ptr_to_str(key) else {
+        return false;
+    };
+    let Some(value_str) = ptr_to_str(value) else {
+        return false;
+    };
+    with_active_frontend(|core| {
+        core.settings.set(&key_str, &value_str);
+        core.configure_from_settings();
+    });
+    true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_settings_count(_frontend: *const RfFrontend) -> usize {
+    with_active_frontend(|core| core.settings.values.len())
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_get_setting_at(
+    frontend: *mut RfFrontend,
+    index: usize,
+    out: *mut RfSettingEntry,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    let Some(out) = (unsafe { out.as_mut() }) else {
+        return false;
+    };
+    with_active_frontend(|core| {
+        let mut entries: Vec<_> = core.settings.values.iter().collect();
+        entries.sort_by(|a, b| a.0.cmp(b.0));
+        let Some((key, value)) = entries.get(index) else {
+            return false;
+        };
+        let key_c = CString::new(key.as_str()).unwrap_or_default();
+        let value_c = CString::new(value.as_str()).unwrap_or_default();
+        out.key = key_c.as_ptr();
+        out.value = value_c.as_ptr();
+        frontend.cached_strings.push(key_c);
+        frontend.cached_strings.push(value_c);
+        true
+    })
 }
 
 fn ptr_to_str(ptr: *const c_char) -> Option<String> {
