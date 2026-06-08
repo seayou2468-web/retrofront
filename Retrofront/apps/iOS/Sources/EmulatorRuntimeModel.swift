@@ -48,7 +48,11 @@ public final class EmulatorRuntimeModel: ObservableObject {
           }
       }
 
-      try? frontend.setGfxBackend(.bgfx)
+      // The SwiftUI play view presents copied software frames as UIImage values.
+      // Keep the runtime on the software backend until an iOS host renderer supplies
+      // bgfx host handles; otherwise frame presentation fails before a copyable
+      // image is cached and the screen stays on "No Video".
+      try? frontend.setGfxBackend(.software)
       frontend.saveSettings()
       refresh()
     } catch {
@@ -206,16 +210,12 @@ runTask = Task.detached(priority: .userInitiated) { [weak self] in
         if pixelBuffer == nil || pixelBuffer?.count != Int(info.rgbaLen) {
           pixelBuffer = Data(count: Int(info.rgbaLen))
         }
-        pixelBuffer?.withUnsafeMutableBytes { buffer in
-          if let base = buffer.baseAddress {
-            _ = frontend.copyLatestVideoFrame(to: base, length: buffer.count)
-          }
-        }
-        if let data = pixelBuffer {
-          let image = Self.imageFromData(data, width: Int(info.width), height: Int(info.height))
-          Task { @MainActor in
-              self.displayImage = image
-          }
+        let copied = pixelBuffer?.withUnsafeMutableBytes { buffer -> Int in
+          guard let base = buffer.baseAddress else { return 0 }
+          return frontend.copyLatestVideoFrame(to: base, length: buffer.count)
+        } ?? 0
+        if copied == Int(info.rgbaLen), let data = pixelBuffer {
+          displayImage = Self.imageFromData(data, width: Int(info.width), height: Int(info.height))
         }
       }
       return false
@@ -269,7 +269,9 @@ runTask = Task.detached(priority: .userInitiated) { [weak self] in
       bitsPerPixel: 32,
       bytesPerRow: width * 4,
       space: CGColorSpaceCreateDeviceRGB(),
-      bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
+      bitmapInfo: CGBitmapInfo.byteOrder32Big.union(
+        CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+      ),
       provider: provider,
       decode: nil,
       shouldInterpolate: false,
