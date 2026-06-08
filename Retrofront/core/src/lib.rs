@@ -23,6 +23,7 @@ use std::os::raw::{c_char, c_uint, c_void};
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::{Mutex, OnceLock};
+use std::cell::RefCell;
 
 pub const RETRO_HW_FRAME_BUFFER_VALID: *const c_void = usize::MAX as *const c_void;
 
@@ -162,13 +163,30 @@ pub struct FrontendCore {
 
 static CORE_INSTANCE: OnceLock<Mutex<FrontendCore>> = OnceLock::new();
 
+thread_local! {
+    static ACTIVE_CORE: RefCell<*mut FrontendCore> = RefCell::new(ptr::null_mut());
+}
+
 pub fn with_active_frontend<F, R>(f: F) -> R
 where
     F: FnOnce(&mut FrontendCore) -> R,
 {
-    let mutex = CORE_INSTANCE.get_or_init(|| Mutex::new(FrontendCore::new()));
-    let mut core = mutex.lock().unwrap();
-    f(&mut core)
+    ACTIVE_CORE.with(|active| {
+        let current_ptr = *active.borrow();
+        if !current_ptr.is_null() {
+            // Safety: current_ptr is only set while the CORE_INSTANCE mutex is held on this thread.
+            return f(unsafe { &mut *current_ptr });
+        }
+
+        let mutex = CORE_INSTANCE.get_or_init(|| Mutex::new(FrontendCore::new()));
+        let mut core = mutex.lock().unwrap();
+
+        let core_ptr = &mut *core as *mut FrontendCore;
+        *active.borrow_mut() = core_ptr;
+        let res = f(&mut core);
+        *active.borrow_mut() = ptr::null_mut();
+        res
+    })
 }
 
 impl FrontendCore {
@@ -707,6 +725,29 @@ pub unsafe extern "C" fn rf_frontend_set_gfx_backend(
     };
     with_active_frontend(|core| core.set_gfx_backend(kind));
     true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_get_gfx_video_config(
+    _frontend: *const RfFrontend,
+    out_config: *mut RfGfxVideoConfig,
+) -> bool {
+    let Some(out_config) = (unsafe { out_config.as_mut() }) else { return false; };
+    with_active_frontend(|core| {
+        let config = core.gfx.video_config();
+        out_config.base_width = config.base_width;
+        out_config.base_height = config.base_height;
+        out_config.max_width = config.max_width;
+        out_config.max_height = config.max_height;
+        out_config.aspect_ratio = config.aspect_ratio;
+        out_config.output_width = config.output_width;
+        out_config.output_height = config.output_height;
+        out_config.scale_mode = config.scale_mode as u32;
+        out_config.filter_mode = config.filter_mode as u32;
+        out_config.rotation_quarters = config.rotation_quarters;
+        out_config.vsync = config.vsync;
+        true
+    })
 }
 
 #[no_mangle]

@@ -3,47 +3,53 @@ import RetrofrontSwift
 import UniformTypeIdentifiers
 
 struct DashboardView: View {
-  @EnvironmentObject private var runtime: EmulatorRuntimeModel
-  @State private var selectedTab = 0
-  @State private var isPlayViewActive = false
+    @EnvironmentObject private var runtime: EmulatorRuntimeModel
+    @State private var selectedTab = 0
+    @State private var isPlayViewActive = false
+    @State private var isFilePickerPresented = false
 
-  var body: some View {
-    ZStack {
-        Color(white: 0.05).ignoresSafeArea()
+    var body: some View {
+        ZStack {
+            Color(white: 0.05).ignoresSafeArea()
 
-        TabView(selection: $selectedTab) {
-          ModernHomeView(isPlayViewActive: $isPlayViewActive)
-            .tabItem {
-              Label("Home", systemImage: "house.fill")
-            }.tag(0)
+            TabView(selection: $selectedTab) {
+                ModernHomeView(isPlayViewActive: $isPlayViewActive, isFilePickerPresented: $isFilePickerPresented)
+                    .tabItem {
+                        Label("Home", systemImage: "house.fill")
+                    }.tag(0)
 
-          ModernLibraryView()
-            .tabItem {
-              Label("Library", systemImage: "gamecontroller.fill")
-            }.tag(1)
+                ModernLibraryView(isFilePickerPresented: $isFilePickerPresented)
+                    .tabItem {
+                        Label("Library", systemImage: "gamecontroller.fill")
+                    }.tag(1)
 
-          ModernSettingsView()
-            .tabItem {
-              Label("Settings", systemImage: "gearshape.2.fill")
-            }.tag(2)
+                ModernSettingsView()
+                    .tabItem {
+                        Label("Settings", systemImage: "gearshape.2.fill")
+                    }.tag(2)
+            }
+            .accentColor(.blue)
         }
-        .accentColor(.blue)
-    }
-    .fullScreenCover(isPresented: $isPlayViewActive) {
-        PlayView()
-    }
-    .onReceive(runtime.$frontendState) { newState in
-        if newState == .gameLoaded {
-            isPlayViewActive = true
+        .fullScreenCover(isPresented: $isPlayViewActive) {
+            PlayView()
+        }
+        .fileImporter(isPresented: $isFilePickerPresented, allowedContentTypes: [.item]) { result in
+            if case .success(let url) = result {
+                runtime.importGame(at: url)
+            }
+        }
+        .onReceive(runtime.$frontendState) { newState in
+            if newState == .gameLoaded {
+                isPlayViewActive = true
+            }
         }
     }
-  }
 }
 
 struct ModernHomeView: View {
     @EnvironmentObject private var runtime: EmulatorRuntimeModel
     @Binding var isPlayViewActive: Bool
-    @State private var isFilePickerPresented = false
+    @Binding var isFilePickerPresented: Bool
 
     var body: some View {
         NavigationStack {
@@ -132,11 +138,6 @@ struct ModernHomeView: View {
             }
             .navigationTitle("Retrofront")
             .background(Color(white: 0.05))
-            .fileImporter(isPresented: $isFilePickerPresented, allowedContentTypes: [.item]) { result in
-                if case .success(let url) = result {
-                    runtime.importGame(at: url)
-                }
-            }
         }
     }
 }
@@ -196,7 +197,7 @@ struct ActionCard: View {
 
 struct ModernLibraryView: View {
     @EnvironmentObject private var runtime: EmulatorRuntimeModel
-    @State private var isFilePickerPresented = false
+    @Binding var isFilePickerPresented: Bool
 
     var body: some View {
         NavigationStack {
@@ -242,11 +243,6 @@ struct ModernLibraryView: View {
             .navigationTitle("Library")
             .background(Color(white: 0.05))
             .scrollContentBackground(.hidden)
-            .fileImporter(isPresented: $isFilePickerPresented, allowedContentTypes: [.item]) { result in
-                if case .success(let url) = result {
-                    runtime.importGame(at: url)
-                }
-            }
         }
     }
 }
@@ -314,61 +310,61 @@ struct ModernSettingsView: View {
 }
 
 struct PlayView: View {
-  @EnvironmentObject private var runtime: EmulatorRuntimeModel
-  @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var runtime: EmulatorRuntimeModel
+    @Environment(\.dismiss) private var dismiss
 
-  var body: some View {
-    VStack {
-      ZStack {
-        Color.black
-        if let image = runtime.displayImage {
-          Image(uiImage: image)
-            .resizable()
-            .interpolation(.none)
-            .scaledToFit()
-        } else {
-          VStack {
-            Image(systemName: "gamecontroller").font(.system(size: 50))
-            Text("No Video").font(.headline)
-          }.foregroundStyle(.white)
+    var body: some View {
+        VStack {
+            ZStack {
+                Color.black
+                if let image = runtime.displayImage {
+                    Image(uiImage: image)
+                        .resizable()
+                        .interpolation(.none)
+                        .scaledToFit()
+                } else {
+                    VStack {
+                        Image(systemName: "gamecontroller").font(.system(size: 50))
+                        Text("No Video").font(.headline)
+                    }.foregroundStyle(.white)
+                }
+            }
+            .aspectRatio(runtime.aspectRatio, contentMode: .fit)
+            .cornerRadius(12)
+            .padding()
+
+            Spacer()
+
+            VirtualController()
+
+            HStack(spacing: 40) {
+                Button {
+                    runtime.toggleRunning()
+                } label: {
+                    Image(systemName: runtime.isRunning ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.system(size: 60))
+                }
+
+                Button {
+                    runtime.stop()
+                    dismiss()
+                } label: {
+                    Image(systemName: "stop.circle.fill")
+                        .font(.system(size: 60))
+                        .foregroundStyle(.red)
+                }
+            }
+            .padding(.bottom, 30)
         }
-      }
-      .aspectRatio(4/3, contentMode: .fit)
-      .cornerRadius(12)
-      .padding()
-
-      Spacer()
-
-      VirtualController()
-
-      HStack(spacing: 40) {
-        Button {
-          runtime.toggleRunning()
-        } label: {
-          Image(systemName: runtime.isRunning ? "pause.circle.fill" : "play.circle.fill")
-            .font(.system(size: 60))
+        .navigationTitle(runtime.loadedGameURL?.lastPathComponent ?? "Play")
+        .background(Color.black)
+        .onAppear {
+            runtime.play()
         }
-
-        Button {
-          runtime.stop()
-          dismiss()
-        } label: {
-          Image(systemName: "stop.circle.fill")
-            .font(.system(size: 60))
-            .foregroundStyle(.red)
+        .onDisappear {
+            runtime.stop()
         }
-      }
-      .padding(.bottom, 30)
     }
-    .navigationTitle(runtime.loadedGameURL?.lastPathComponent ?? "Play")
-    .background(Color.black)
-    .onAppear {
-        runtime.play()
-    }
-    .onDisappear {
-        runtime.stop()
-    }
-  }
 }
 
 struct VirtualController: View {

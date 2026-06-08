@@ -223,6 +223,25 @@ public final class Retrofront: @unchecked Sendable {
     }
   }
 
+
+  public func gfxVideoConfig() -> GfxVideoConfig? {
+    var raw = RfGfxVideoConfig()
+    guard rf_frontend_get_gfx_video_config(handle, &raw) else { return nil }
+    return GfxVideoConfig(
+      baseWidth: raw.base_width,
+      baseHeight: raw.base_height,
+      maxWidth: raw.max_width,
+      maxHeight: raw.max_height,
+      aspectRatio: raw.aspect_ratio,
+      outputWidth: raw.output_width,
+      outputHeight: raw.output_height,
+      scaleMode: GfxScaleMode(rawValue: raw.scale_mode) ?? .keepAspect,
+      filterMode: GfxFilterMode(rawValue: raw.filter_mode) ?? .nearest,
+      rotationQuarters: raw.rotation_quarters,
+      vsync: raw.vsync
+    )
+  }
+
   public func setGfxVideoConfig(_ config: GfxVideoConfig) throws {
     var raw = RfGfxVideoConfig(
       base_width: config.baseWidth,
@@ -256,6 +275,33 @@ public final class Retrofront: @unchecked Sendable {
       frameNumber: info.frame_number,
       hardwareReady: info.hardware_ready,
       rendered: info.rendered)
+  }
+
+
+  public struct VideoFrameInfo {
+    public let width: UInt32
+    public let height: UInt32
+    public let pitch: UInt64
+    public let pixelFormat: UInt32
+    public let frameNumber: UInt64
+    public let rgbaLen: UInt64
+  }
+
+  public func latestVideoFrameInfo() -> VideoFrameInfo? {
+    var info = RfVideoFrameInfo()
+    guard rf_frontend_video_frame_info(handle, &info) else { return nil }
+    return VideoFrameInfo(
+      width: info.width,
+      height: info.height,
+      pitch: info.pitch,
+      pixelFormat: info.pixel_format,
+      frameNumber: info.frame_number,
+      rgbaLen: info.rgba_len
+    )
+  }
+
+  public func copyLatestVideoFrame(to buffer: UnsafeMutableRawPointer, length: Int) -> Int {
+    return Int(rf_frontend_copy_video_frame_rgba(handle, buffer, UInt(length)))
   }
 
   public func latestVideoFrame() -> VideoFrame? {

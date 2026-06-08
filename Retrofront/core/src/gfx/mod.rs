@@ -61,6 +61,10 @@ impl GfxRuntime {
         self.set_video_config(config);
     }
 
+
+    pub fn video_config(&self) -> GfxVideoConfig {
+        self.video_config
+    }
     pub fn set_video_config(&mut self, config: GfxVideoConfig) {
         self.video_config = config;
         self.software.set_video_config(config);

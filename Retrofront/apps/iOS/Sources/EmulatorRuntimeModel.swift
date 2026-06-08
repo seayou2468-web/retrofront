@@ -10,6 +10,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
   @Published private(set) var systemInfo: LibretroSystemInfo?
   @Published private(set) var coreOptions: [CoreOption] = []
   @Published private(set) var displayImage: UIImage?
+  @Published private(set) var aspectRatio: Double = 4.0/3.0
   @Published private(set) var isRunning = false
   @Published private(set) var availableCores: [CoreInfo] = []
   @Published private(set) var availableGames: [GameEntrySwift] = []
@@ -20,6 +21,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
 
   private var frontend: Retrofront?
   private var runTask: Task<Void, Never>?
+  private var pixelBuffer: Data?
 
   public init() {
     setupFrontend()
@@ -37,7 +39,6 @@ public final class EmulatorRuntimeModel: ObservableObject {
       let configPath = docs.appendingPathComponent("retrofront-core-options.cfg").path
       try? frontend.setOptionsConfigPath(configPath)
 
-      // Setup Info Dir
       if let resourceURL = Bundle.main.resourceURL {
           frontend.setInfoDir(resourceURL.appendingPathComponent("info").path)
       }
@@ -51,21 +52,16 @@ public final class EmulatorRuntimeModel: ObservableObject {
 
   public func refreshAvailableCores() {
     guard let frontend else { return }
-
-    // Scan Bundled cores
     if let frameworksURL = Bundle.main.privateFrameworksURL {
         frontend.scanCores(in: frameworksURL.path)
     }
     if let resourceURL = Bundle.main.resourceURL {
         frontend.scanCores(in: resourceURL.path)
     }
-
-    // Scan Imported cores
     let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     let coresDir = docs.appendingPathComponent("Cores")
     try? FileManager.default.createDirectory(at: coresDir, withIntermediateDirectories: true)
     frontend.scanCores(in: coresDir.path)
-
     self.availableCores = frontend.availableCores()
   }
 
@@ -74,8 +70,6 @@ public final class EmulatorRuntimeModel: ObservableObject {
       let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
       let romsDir = docs.appendingPathComponent("Roms")
       try? FileManager.default.createDirectory(at: romsDir, withIntermediateDirectories: true)
-
-      // We scan for all common extensions for now
       let exts = "gba|gb|gbc|sfc|smc|nes|bin|gen|md|sms|gg"
       frontend.scanGames(in: romsDir.path, extensions: exts)
       self.availableGames = frontend.availableGames()
@@ -85,12 +79,9 @@ public final class EmulatorRuntimeModel: ObservableObject {
       let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
       let romsDir = docs.appendingPathComponent("Roms")
       try? FileManager.default.createDirectory(at: romsDir, withIntermediateDirectories: true)
-
       let destination = romsDir.appendingPathComponent(url.lastPathComponent)
-
       let success = url.startAccessingSecurityScopedResource()
       defer { if success { url.stopAccessingSecurityScopedResource() } }
-
       do {
           if FileManager.default.fileExists(atPath: destination.path) {
               try FileManager.default.removeItem(at: destination)
@@ -118,8 +109,6 @@ public final class EmulatorRuntimeModel: ObservableObject {
 
   public func loadGame(at url: URL) {
     guard let frontend else { return }
-
-    // If no core is loaded, try to find one based on extension
     if frontendState == .empty {
         let ext = url.pathExtension.lowercased()
         if let suitableCore = availableCores.first(where: { $0.supportedExtensions.contains(ext) }) {
@@ -129,7 +118,6 @@ public final class EmulatorRuntimeModel: ObservableObject {
             return
         }
     }
-
     do {
       try frontend.loadGame(at: url.path)
       loadedGameURL = url
@@ -151,12 +139,13 @@ public final class EmulatorRuntimeModel: ObservableObject {
   public func play() {
     guard frontendState == .gameLoaded, !isRunning else { return }
     isRunning = true
-    runTask = Task {
+    runTask = Task.detached(priority: .userInitiated) { [weak self] in
       while !Task.isCancelled {
-        autoreleasepool {
-            runOneFrame()
+        guard let self = self else { break }
+        let shouldStop: Bool = await autoreleasepool {
+            return self.runOneFrame()
         }
-        // Use a more accurate timer if possible, but sleep is okay for now
+        if shouldStop { break }
         try? await Task.sleep(nanoseconds: 16_666_667)
       }
     }
@@ -168,16 +157,34 @@ public final class EmulatorRuntimeModel: ObservableObject {
     runTask = nil
   }
 
-  private func runOneFrame() {
-    guard let frontend else { return }
+  @discardableResult
+  private func runOneFrame() -> Bool {
+    guard let frontend else { return true }
     do {
       _ = try frontend.runFrame()
-      if let frame = frontend.latestVideoFrame() {
-        displayImage = Self.image(from: frame)
+      if let info = frontend.latestVideoFrameInfo() {
+        if pixelBuffer == nil || pixelBuffer?.count != Int(info.rgbaLen) {
+          pixelBuffer = Data(count: Int(info.rgbaLen))
+        }
+        pixelBuffer?.withUnsafeMutableBytes { buffer in
+          if let base = buffer.baseAddress {
+            _ = frontend.copyLatestVideoFrame(to: base, length: buffer.count)
+          }
+        }
+        if let data = pixelBuffer {
+          let image = Self.imageFromData(data, width: Int(info.width), height: Int(info.height))
+          Task { @MainActor in
+              self.displayImage = image
+          }
+        }
       }
+      return false
     } catch {
-      stop()
-      statusMessage = "Run error: \(error)"
+      Task { @MainActor in
+          self.stop()
+          self.statusMessage = "Run error: \(error)"
+      }
+      return true
     }
   }
 
@@ -185,6 +192,13 @@ public final class EmulatorRuntimeModel: ObservableObject {
     guard let frontend else { return }
     frontendState = frontend.state
     coreOptions = frontend.coreOptions()
+    if let config = frontend.gfxVideoConfig() {
+        if config.aspectRatio > 0 {
+            aspectRatio = Double(config.aspectRatio)
+        } else if config.baseHeight > 0 {
+            aspectRatio = Double(config.baseWidth) / Double(config.baseHeight)
+        }
+    }
     refreshMenu()
   }
 
@@ -204,16 +218,15 @@ public final class EmulatorRuntimeModel: ObservableObject {
     refresh()
   }
 
-  private static func image(from frame: VideoFrame) -> UIImage? {
-    guard frame.width > 0, frame.height > 0, !frame.rgba.isEmpty else { return nil }
-    let data = Data(frame.rgba)
+  private static func imageFromData(_ data: Data, width: Int, height: Int) -> UIImage? {
+    guard width > 0, height > 0 else { return nil }
     guard let provider = CGDataProvider(data: data as CFData) else { return nil }
     guard let cgImage = CGImage(
-      width: Int(frame.width),
-      height: Int(frame.height),
+      width: width,
+      height: height,
       bitsPerComponent: 8,
       bitsPerPixel: 32,
-      bytesPerRow: Int(frame.width) * 4,
+      bytesPerRow: width * 4,
       space: CGColorSpaceCreateDeviceRGB(),
       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
       provider: provider,
