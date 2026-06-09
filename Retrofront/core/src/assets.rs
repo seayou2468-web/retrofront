@@ -54,7 +54,12 @@ pub fn install_assets_zip(
 
 fn normalize_assets_zip_path(path: &Path) -> PathBuf {
     let mut components = path.components();
-    if matches!(components.next(), Some(Component::Normal(part)) if part == "assets") {
+    let mut stripped = false;
+    while matches!(components.clone().next(), Some(Component::Normal(part)) if part == "assets") {
+        components.next();
+        stripped = true;
+    }
+    if stripped {
         components.as_path().to_path_buf()
     } else {
         path.to_path_buf()
@@ -104,6 +109,10 @@ mod tests {
         assert_eq!(
             normalize_assets_zip_path(Path::new("assets/info/mgba_libretro.info")),
             PathBuf::from("info/mgba_libretro.info")
+        );
+        assert_eq!(
+            normalize_assets_zip_path(Path::new("assets/assets/info/azahar_libretro.info")),
+            PathBuf::from("info/azahar_libretro.info")
         );
         assert_eq!(
             normalize_assets_zip_path(Path::new("overlays/gamepads/flat/retropad.cfg")),

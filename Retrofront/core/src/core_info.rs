@@ -371,6 +371,9 @@ impl CoreInfoList {
         Self::push_unique_path(&mut dirs, self.info_dir.clone());
         Self::push_unique_path(&mut dirs, self.info_dir.join("info"));
         Self::push_unique_path(&mut dirs, self.info_dir.join("assets/info"));
+        if let Some(parent) = self.info_dir.parent() {
+            Self::push_unique_path(&mut dirs, parent.join("assets/info"));
+        }
         dirs
     }
 
@@ -379,48 +382,71 @@ impl CoreInfoList {
             return Vec::new();
         };
 
-        let mut candidates = Vec::new();
-        Self::push_unique(&mut candidates, stem.to_string());
-
-        Self::push_platform_normalized_candidates(&mut candidates, stem);
+        let mut bases = Vec::new();
+        Self::push_unique(&mut bases, stem.to_string());
 
         if let Some(stripped) = stem.strip_prefix("lib") {
-            Self::push_unique(&mut candidates, stripped.to_string());
-            Self::push_platform_normalized_candidates(&mut candidates, stripped);
+            Self::push_unique(&mut bases, stripped.to_string());
         }
 
-        let underscored = stem.replace('-', "_");
-        if underscored != stem {
-            Self::push_unique(&mut candidates, underscored.clone());
-            Self::push_platform_normalized_candidates(&mut candidates, &underscored);
+        let separators_normalized = [stem.replace('-', "_"), stem.replace('.', "_")];
+        for normalized in separators_normalized {
+            if normalized != stem {
+                Self::push_unique(&mut bases, normalized);
+            }
         }
 
-        let hyphenated = stem.replace('_', "-");
-        if hyphenated != stem {
-            Self::push_unique(&mut candidates, hyphenated.clone());
-            Self::push_platform_normalized_candidates(&mut candidates, &hyphenated);
+        let initial_bases = bases.clone();
+        for base in initial_bases {
+            Self::push_platform_normalized_bases(&mut bases, &base);
         }
 
+        let mut candidates = Vec::new();
+        for base in bases {
+            Self::push_info_name_variants(&mut candidates, &base);
+        }
         candidates
     }
 
-    fn push_platform_normalized_candidates(candidates: &mut Vec<String>, name: &str) {
+    fn push_platform_normalized_bases(bases: &mut Vec<String>, name: &str) {
         for platform_suffix in ["_ios", "_macos", "_android"] {
             if let Some(base) = name.strip_suffix(platform_suffix) {
-                Self::push_unique(candidates, base.to_string());
+                Self::push_unique(bases, base.to_string());
                 if let Some(core_name) = base.strip_suffix("_libretro") {
-                    Self::push_unique(candidates, core_name.to_string());
-                    Self::push_unique(candidates, format!("{core_name}_libretro"));
+                    Self::push_unique(bases, core_name.to_string());
+                    Self::push_unique(bases, format!("{core_name}_libretro"));
+                }
+                if let Some(core_name) = base.strip_suffix(".libretro") {
+                    Self::push_unique(bases, core_name.to_string());
+                    Self::push_unique(bases, format!("{core_name}_libretro"));
                 }
             }
         }
 
         if let Some(core_name) = name.strip_suffix("_libretro") {
-            Self::push_unique(candidates, core_name.to_string());
+            Self::push_unique(bases, core_name.to_string());
         }
 
         if let Some(core_name) = name.strip_suffix(".libretro") {
-            Self::push_unique(candidates, core_name.to_string());
+            Self::push_unique(bases, core_name.to_string());
+            Self::push_unique(bases, format!("{core_name}_libretro"));
+        }
+    }
+
+    fn push_info_name_variants(candidates: &mut Vec<String>, name: &str) {
+        let lower = name.to_lowercase();
+        let underscore = lower.replace(['-', '.'], "_");
+        let dotted = lower.replace(['-', '_'], ".");
+        let hyphenated = lower.replace(['_', '.'], "-");
+
+        for variant in [name.to_string(), lower, underscore, dotted, hyphenated] {
+            Self::push_unique(candidates, variant.clone());
+            if !variant.ends_with("_libretro")
+                && !variant.ends_with(".libretro")
+                && !variant.ends_with("-libretro")
+            {
+                Self::push_unique(candidates, format!("{variant}_libretro"));
+            }
         }
     }
 
@@ -524,7 +550,40 @@ mod tests {
         let candidates =
             CoreInfoList::info_name_candidates(Path::new("/cores/azahar.libretro.framework"));
         assert!(candidates.contains(&"azahar.libretro".to_string()));
+        assert!(candidates.contains(&"azahar_libretro".to_string()));
         assert!(candidates.contains(&"azahar".to_string()));
+    }
+
+    #[test]
+    fn derives_lowercase_libretro_info_candidates_for_plain_framework_names() {
+        let candidates = CoreInfoList::info_name_candidates(Path::new("/cores/Citra.framework"));
+        assert!(candidates.contains(&"Citra".to_string()));
+        assert!(candidates.contains(&"citra".to_string()));
+        assert!(candidates.contains(&"citra_libretro".to_string()));
+    }
+
+    #[test]
+    fn finds_nested_assets_info_dir_from_configured_info_dir() {
+        let dir = std::env::temp_dir().join(format!(
+            "retrofront-nested-info-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(dir.join("assets/info")).unwrap();
+        fs::write(
+            dir.join("assets/info/azahar_libretro.info"),
+            "display_name = \"Azahar\"\nsupported_extensions = \"3ds|3dsx|cci|cxi|app\"\n",
+        )
+        .unwrap();
+        let mut list = CoreInfoList::new();
+        list.set_info_dir(dir.join("info"));
+        let info = list.load_info_for_core(Path::new("/cores/azahar.libretro.framework"));
+        assert_eq!(info.display_name, "Azahar");
+        assert!(info.supported_extensions.contains(&"3ds".to_string()));
+        assert!(info.supported_extensions.contains(&"cci".to_string()));
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
