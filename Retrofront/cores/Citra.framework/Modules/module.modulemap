@@ -1,3 +1,6 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:0d6469c905d795faf4bceb0efd65f4c21673c77c84889087bcfff633ad53feeb
-size 91
+framework module Citra {
+  umbrella header "Citra.h"
+  export *
+
+  module * { export * }
+}
