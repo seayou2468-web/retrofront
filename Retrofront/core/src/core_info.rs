@@ -378,21 +378,32 @@ impl CoreInfoList {
     }
 
     fn info_name_candidates(core_path: &Path) -> Vec<String> {
-        let Some(stem) = core_path.file_stem().and_then(|stem| stem.to_str()) else {
+        let mut stems = Vec::new();
+        if let Some(stem) = core_path.file_stem().and_then(|stem| stem.to_str()) {
+            Self::push_unique(&mut stems, stem.to_string());
+        }
+        if Self::is_framework_dir(core_path) {
+            if let Some(executable) = Self::framework_info_plist_executable(core_path) {
+                Self::push_unique(&mut stems, executable);
+            }
+        }
+        if stems.is_empty() {
             return Vec::new();
-        };
-
-        let mut bases = Vec::new();
-        Self::push_unique(&mut bases, stem.to_string());
-
-        if let Some(stripped) = stem.strip_prefix("lib") {
-            Self::push_unique(&mut bases, stripped.to_string());
         }
 
-        let separators_normalized = [stem.replace('-', "_"), stem.replace('.', "_")];
-        for normalized in separators_normalized {
-            if normalized != stem {
-                Self::push_unique(&mut bases, normalized);
+        let mut bases = Vec::new();
+        for stem in stems {
+            Self::push_unique(&mut bases, stem.clone());
+
+            if let Some(stripped) = stem.strip_prefix("lib") {
+                Self::push_unique(&mut bases, stripped.to_string());
+            }
+
+            let separators_normalized = [stem.replace('-', "_"), stem.replace('.', "_")];
+            for normalized in separators_normalized {
+                if normalized != stem {
+                    Self::push_unique(&mut bases, normalized);
+                }
             }
         }
 
@@ -406,6 +417,30 @@ impl CoreInfoList {
             Self::push_info_name_variants(&mut candidates, &base);
         }
         candidates
+    }
+
+    fn framework_info_plist_executable(core_path: &Path) -> Option<String> {
+        let content = fs::read_to_string(core_path.join("Info.plist")).ok()?;
+        let key_pos = content.find("<key>CFBundleExecutable</key>")?;
+        let after_key = &content[key_pos..];
+        let string_start = after_key.find("<string>")? + "<string>".len();
+        let after_start = &after_key[string_start..];
+        let string_end = after_start.find("</string>")?;
+        let value = Self::decode_minimal_xml_entities(after_start[..string_end].trim());
+        if value.is_empty() {
+            None
+        } else {
+            Some(value)
+        }
+    }
+
+    fn decode_minimal_xml_entities(value: &str) -> String {
+        value
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&")
     }
 
     fn push_platform_normalized_bases(bases: &mut Vec<String>, name: &str) {
@@ -560,6 +595,34 @@ mod tests {
         assert!(candidates.contains(&"Citra".to_string()));
         assert!(candidates.contains(&"citra".to_string()));
         assert!(candidates.contains(&"citra_libretro".to_string()));
+    }
+
+    #[test]
+    fn derives_info_candidates_from_framework_info_plist_executable() {
+        let dir = std::env::temp_dir().join(format!(
+            "retrofront-framework-info-candidates-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let framework = dir.join("ExampleBundle.framework");
+        fs::create_dir_all(&framework).unwrap();
+        fs::write(
+            framework.join("Info.plist"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>actual_core_libretro</string>
+</dict></plist>"#,
+        )
+        .unwrap();
+
+        let candidates = CoreInfoList::info_name_candidates(&framework);
+
+        assert!(candidates.contains(&"ExampleBundle".to_string()));
+        assert!(candidates.contains(&"actual_core_libretro".to_string()));
+        assert!(candidates.contains(&"actual_core".to_string()));
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
