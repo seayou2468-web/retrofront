@@ -43,7 +43,7 @@ targets:
       - name: Copy libretro cores
         script: |
           set -eu
-          CORES_SRC="${SRCROOT}/dylibs"
+          CORES_SRC="${SRCROOT}/cores"
           CORES_DST="${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks"
           mkdir -p "${CORES_DST}"
           if [ -d "${CORES_SRC}" ]; then
