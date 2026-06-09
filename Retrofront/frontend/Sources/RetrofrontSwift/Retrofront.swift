@@ -29,7 +29,6 @@ public struct LibretroSystemInfo: Equatable, Sendable {
   public let blocksExtraction: Bool
 }
 
-
 public enum JoypadButton: UInt32, CaseIterable, Sendable {
   case b = 0
   case y = 1
@@ -50,54 +49,18 @@ public enum JoypadButton: UInt32, CaseIterable, Sendable {
 }
 
 public enum GfxBackend: UInt32, Equatable, Sendable {
-  case software = 0
-  case bgfx = 1
+  case unspecified = 0
+  case software = 1
+  case bgfx = 2
 }
 
-public enum GfxScaleMode: UInt32, Equatable, Sendable {
-  case stretch = 0
-  case keepAspect = 1
-  case integer = 2
-}
-
-public enum GfxFilterMode: UInt32, Equatable, Sendable {
-  case nearest = 0
-  case linear = 1
-}
-
-public struct GfxVideoConfig: Equatable, Sendable {
-  public let baseWidth: UInt32
-  public let baseHeight: UInt32
-  public let maxWidth: UInt32
-  public let maxHeight: UInt32
-  public let aspectRatio: Float
-  public let outputWidth: UInt32
-  public let outputHeight: UInt32
-  public let scaleMode: GfxScaleMode
-  public let filterMode: GfxFilterMode
-  public let rotationQuarters: UInt32
-  public let vsync: Bool
-
-  public init(baseWidth: UInt32, baseHeight: UInt32, maxWidth: UInt32 = 0, maxHeight: UInt32 = 0, aspectRatio: Float = 0, outputWidth: UInt32 = 0, outputHeight: UInt32 = 0, scaleMode: GfxScaleMode = .keepAspect, filterMode: GfxFilterMode = .nearest, rotationQuarters: UInt32 = 0, vsync: Bool = true) {
-    self.baseWidth = baseWidth
-    self.baseHeight = baseHeight
-    self.maxWidth = maxWidth
-    self.maxHeight = maxHeight
-    self.aspectRatio = aspectRatio
-    self.outputWidth = outputWidth
-    self.outputHeight = outputHeight
-    self.scaleMode = scaleMode
-    self.filterMode = filterMode
-    self.rotationQuarters = rotationQuarters
-    self.vsync = vsync
-  }
-}
-
-public struct GfxDriverStatus: Equatable, Sendable {
-  public let backend: GfxBackend
+public struct VideoFrameInfo: Equatable, Sendable {
+  public let width: UInt32
+  public let height: UInt32
+  public let pitch: UInt64
+  public let pixelFormat: UInt32
   public let frameNumber: UInt64
-  public let hardwareReady: Bool
-  public let rendered: Bool
+  public let rgbaLen: UInt64
 }
 
 public struct VideoFrame: Equatable, Sendable {
@@ -107,32 +70,6 @@ public struct VideoFrame: Equatable, Sendable {
   public let pixelFormat: UInt32
   public let frameNumber: UInt64
   public let rgba: [UInt8]
-}
-
-public enum FrontendEvent: Equatable, Sendable {
-  case videoFrame(width: UInt32, height: UInt32, pitch: UInt64)
-  case audioBatch(frames: UInt64)
-  case audioSample(left: Int16, right: Int16)
-  case environmentCommand(command: UInt32, handled: Bool)
-  case inputPoll
-}
-
-public struct CoreOptionValue: Equatable, Sendable {
-  public let value: String
-  public let label: String
-}
-
-public struct CoreOption: Equatable, Sendable {
-  public let key: String
-  public let desc: String
-  public let info: String
-  public let value: String
-  public let values: [CoreOptionValue]
-}
-
-public struct GameEntrySwift: Equatable, Sendable {
-  public let path: String
-  public let label: String
 }
 
 public enum LaunchDecision: UInt32, Equatable, Sendable {
@@ -150,21 +87,28 @@ public struct LaunchPlan: Equatable, Sendable {
   public let reason: String
 }
 
-public struct CoreInfo: Equatable, Sendable {
+public struct CoreInfo: Equatable, Identifiable, Sendable {
+  public var id: String { path }
   public let path: String
   public let displayName: String
   public let systemName: String
   public let supportedExtensions: [String]
 }
 
-public enum MenuEntryKind: UInt32, Sendable {
+public struct GameEntrySwift: Equatable, Identifiable, Sendable {
+  public var id: String { path }
+  public let path: String
+  public let label: String
+}
+
+public enum MenuEntryKind: UInt32, Equatable, Sendable {
   case action = 0
   case submenu = 1
   case toggle = 2
   case setting = 3
 }
 
-public struct MenuEntry: Sendable {
+public struct MenuEntry: Equatable, Sendable {
   public let label: String
   public let sublabel: String
   public let kind: MenuEntryKind
@@ -172,7 +116,7 @@ public struct MenuEntry: Sendable {
   public let actionId: UInt32
 }
 
-public struct MenuList: Sendable {
+public struct MenuList: Equatable, Sendable {
   public let title: String
   public let entries: [MenuEntry]
 }
@@ -182,8 +126,30 @@ public struct RetrofrontSetting: Equatable, Sendable {
   public let value: String
 }
 
-public final class Retrofront: @unchecked Sendable {
-  private let handle: OpaquePointer
+public enum FrontendEvent: Equatable, Sendable {
+  case videoFrame(width: UInt32, height: UInt32, pitch: UInt64)
+  case audioBatch(frames: UInt64)
+  case audioSample(left: Int16, right: Int16)
+  case environmentCommand(command: UInt32, handled: Bool)
+  case inputPoll
+  case requestExtractAssets
+}
+
+public struct CoreOptionValue: Equatable, Sendable {
+  public let value: String
+  public let label: String
+}
+
+public struct CoreOption: Equatable, Sendable {
+  public let key: String
+  public let desc: String
+  public let info: String
+  public let value: String
+  public let values: [CoreOptionValue]
+}
+
+public final class Retrofront {
+  private let handle: UnsafeMutablePointer<RfFrontend>
 
   public init() throws {
     guard let handle = rf_frontend_create() else {
@@ -200,59 +166,42 @@ public final class Retrofront: @unchecked Sendable {
     FrontendState(rawValue: rf_frontend_state(handle)) ?? .empty
   }
 
-  @discardableResult
   public func loadCore(at path: String) throws -> LibretroSystemInfo {
-    let ok = path.withCString { rf_frontend_load_core(handle, $0) }
-    guard ok else { throw lastError() }
+    guard path.withCString({ rf_frontend_load_core(handle, -bash) }) else {
+      throw lastError()
+    }
     return try systemInfo()
   }
 
-  public func loadGame(at path: String, metadata: String? = nil) throws {
-    let ok = path.withCString { cPath in
-      if let metadata {
-        return metadata.withCString { cMeta in
-          rf_frontend_load_game(handle, cPath, cMeta)
-        }
-      }
-      return rf_frontend_load_game(handle, cPath, nil)
+  public func loadGame(at path: String, meta: String = "") throws {
+    guard path.withCString({ p in meta.withCString({ m in rf_frontend_load_game(handle, p, m) }) }) else {
+      throw lastError()
     }
-    guard ok else { throw lastError() }
   }
 
-  public func launchContent(at path: String, preferredCore: String? = nil, metadata: String? = nil) throws {
-    let ok = path.withCString { cPath in
-      if let preferredCore {
-        return preferredCore.withCString { cCore in
-          if let metadata {
-            return metadata.withCString { cMeta in rf_frontend_launch_content(handle, cPath, cCore, cMeta) }
+  public func launchContent(path: String, preferredCore: String? = nil, meta: String = "") throws {
+      let ok = path.withCString { cPath in
+          meta.withCString { cMeta in
+              if let preferredCore {
+                  return preferredCore.withCString { cCore in
+                      rf_frontend_launch_content(handle, cPath, cCore, cMeta)
+                  }
+              }
+              return rf_frontend_launch_content(handle, cPath, nil, cMeta)
           }
-          return rf_frontend_launch_content(handle, cPath, cCore, nil)
-        }
       }
-      if let metadata {
-        return metadata.withCString { cMeta in rf_frontend_launch_content(handle, cPath, nil, cMeta) }
-      }
-      return rf_frontend_launch_content(handle, cPath, nil, nil)
-    }
-    guard ok else { throw lastError() }
+      if !ok { throw lastError() }
   }
 
-  public func runFrame() throws -> [FrontendEvent] {
+  public func runFrame() throws -> Bool {
     guard rf_frontend_run_frame(handle) else {
       throw lastError()
     }
-    return drainEvents()
+    return true
   }
 
   public func unloadGame() {
     rf_frontend_unload_game(handle)
-  }
-
-
-  public func setJoypadButton(_ button: JoypadButton, pressed: Bool) throws {
-    guard rf_frontend_set_joypad_button(handle, button.rawValue, pressed) else {
-      throw lastError()
-    }
   }
 
   public func setGfxBackend(_ backend: GfxBackend) throws {
@@ -261,68 +210,36 @@ public final class Retrofront: @unchecked Sendable {
     }
   }
 
-
-  public func gfxVideoConfig() -> GfxVideoConfig? {
-    var raw = RfGfxVideoConfig()
-    guard rf_frontend_get_gfx_video_config(handle, &raw) else { return nil }
-    return GfxVideoConfig(
-      baseWidth: raw.base_width,
-      baseHeight: raw.base_height,
-      maxWidth: raw.max_width,
-      maxHeight: raw.max_height,
-      aspectRatio: raw.aspect_ratio,
-      outputWidth: raw.output_width,
-      outputHeight: raw.output_height,
-      scaleMode: GfxScaleMode(rawValue: raw.scale_mode) ?? .keepAspect,
-      filterMode: GfxFilterMode(rawValue: raw.filter_mode) ?? .nearest,
-      rotationQuarters: raw.rotation_quarters,
-      vsync: raw.vsync
-    )
+  public func gfxVideoConfig() -> RfGfxVideoConfig? {
+    var config = RfGfxVideoConfig()
+    guard rf_frontend_get_gfx_video_config(handle, &config) else { return nil }
+    return config
   }
 
-  public func setGfxVideoConfig(_ config: GfxVideoConfig) throws {
-    var raw = RfGfxVideoConfig(
-      base_width: config.baseWidth,
-      base_height: config.baseHeight,
-      max_width: config.maxWidth,
-      max_height: config.maxHeight,
-      aspect_ratio: config.aspectRatio,
-      output_width: config.outputWidth,
-      output_height: config.outputHeight,
-      scale_mode: config.scaleMode.rawValue,
-      filter_mode: config.filterMode.rawValue,
-      rotation_quarters: config.rotationQuarters,
-      vsync: config.vsync)
-    guard rf_frontend_set_gfx_video_config(handle, &raw) else {
+  public func setGfxVideoConfig(_ config: RfGfxVideoConfig) throws {
+    var copy = config
+    guard rf_frontend_set_gfx_video_config(handle, &copy) else {
+      throw lastError()
+    }
+  }
+
+  public func setJoypadButton(_ button: JoypadButton, pressed: Bool) throws {
+    guard rf_frontend_set_joypad_button(handle, button.rawValue, pressed) else {
       throw lastError()
     }
   }
 
   public func setGfxHostHandles(_ handles: RfGfxHostHandles) throws {
-    var raw = handles
-    guard rf_frontend_set_gfx_host_handles(handle, &raw) else {
+    var copy = handles
+    guard rf_frontend_set_gfx_host_handles(handle, &copy) else {
       throw lastError()
     }
   }
 
-  public func gfxDriverStatus() -> GfxDriverStatus? {
+  public func gfxDriverInfo() -> RfGfxDriverInfo? {
     var info = RfGfxDriverInfo()
     guard rf_frontend_gfx_driver_info(handle, &info) else { return nil }
-    return GfxDriverStatus(
-      backend: GfxBackend(rawValue: info.backend) ?? .software,
-      frameNumber: info.frame_number,
-      hardwareReady: info.hardware_ready,
-      rendered: info.rendered)
-  }
-
-
-  public struct VideoFrameInfo {
-    public let width: UInt32
-    public let height: UInt32
-    public let pitch: UInt64
-    public let pixelFormat: UInt32
-    public let frameNumber: UInt64
-    public let rgbaLen: UInt64
+    return info
   }
 
   public func latestVideoFrameInfo() -> VideoFrameInfo? {
@@ -340,23 +257,6 @@ public final class Retrofront: @unchecked Sendable {
 
   public func copyLatestVideoFrame(to buffer: UnsafeMutableRawPointer, length: Int) -> Int {
     return Int(rf_frontend_copy_video_frame_rgba(handle, buffer, UInt(length)))
-  }
-
-  public func latestVideoFrame() -> VideoFrame? {
-    var info = RfVideoFrameInfo()
-    guard rf_frontend_video_frame_info(handle, &info) else { return nil }
-    var rgba = [UInt8](repeating: 0, count: Int(info.rgba_len))
-    let copied = rgba.withUnsafeMutableBufferPointer { buffer in
-      rf_frontend_copy_video_frame_rgba(handle, buffer.baseAddress, UInt(buffer.count))
-    }
-    guard UInt64(copied) == info.rgba_len else { return nil }
-    return VideoFrame(
-      width: info.width,
-      height: info.height,
-      sourcePitch: info.pitch,
-      pixelFormat: info.pixel_format,
-      frameNumber: info.frame_number,
-      rgba: rgba)
   }
 
   public func systemInfo() throws -> LibretroSystemInfo {
@@ -386,7 +286,7 @@ public final class Retrofront: @unchecked Sendable {
   }
 
   public func setOptionsConfigPath(_ path: String) throws {
-    guard path.withCString({ rf_frontend_set_options_config_path(handle, $0) }) else {
+    guard path.withCString({ rf_frontend_set_options_config_path(handle, -bash) }) else {
       throw lastError()
     }
   }
@@ -430,11 +330,11 @@ public final class Retrofront: @unchecked Sendable {
 
   // Core Discovery
   public func setInfoDir(_ path: String) {
-    path.withCString { rf_frontend_set_info_dir(handle, $0) }
+    path.withCString { rf_frontend_set_info_dir(handle, -bash) }
   }
 
   public func scanCores(in directory: String) {
-    directory.withCString { rf_frontend_scan_cores(handle, $0) }
+    directory.withCString { rf_frontend_scan_cores(handle, -bash) }
   }
 
   public func scanConfiguredCores() {
@@ -453,7 +353,6 @@ public final class Retrofront: @unchecked Sendable {
       }
     }
   }
-
 
   public func planContentLaunch(path: String, preferredCore: String? = nil) -> LaunchPlan? {
     var raw = RfLaunchPlan()
@@ -573,13 +472,13 @@ public final class Retrofront: @unchecked Sendable {
   }
 
   public func loadSettings(at path: String) throws {
-    guard path.withCString({ rf_frontend_load_settings(handle, $0) }) else {
+    guard path.withCString({ rf_frontend_load_settings(handle, -bash) }) else {
       throw lastError()
     }
   }
 
   public func setBaseDirectory(_ path: String) throws {
-    guard path.withCString({ rf_frontend_set_base_dir(handle, $0) }) else {
+    guard path.withCString({ rf_frontend_set_base_dir(handle, -bash) }) else {
       throw lastError()
     }
   }
@@ -637,6 +536,8 @@ extension FrontendEvent {
       self = .environmentCommand(command: UInt32(raw.a), handled: raw.b != 0)
     case 5:
       self = .inputPoll
+    case 6:
+      self = .requestExtractAssets
     default:
       return nil
     }

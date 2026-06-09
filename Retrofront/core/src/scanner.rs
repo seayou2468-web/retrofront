@@ -1,13 +1,13 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct GameEntry {
     pub path: PathBuf,
     pub label: String,
-    pub core_path: Option<PathBuf>,
 }
 
+#[derive(Debug, Default)]
 pub struct Scanner {
     pub games: Vec<GameEntry>,
 }
@@ -17,29 +17,29 @@ impl Scanner {
         Self { games: Vec::new() }
     }
 
-    pub fn clear(&mut self) {
+    pub fn scan_directory(&mut self, dir: &Path, extensions: &str) {
         self.games.clear();
-    }
-
-    pub fn scan_directory(&mut self, dir: &Path, extensions: &[String]) {
+        let exts: Vec<&str> = extensions.split('|').collect();
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.is_dir() {
-                    self.scan_directory(&path, extensions);
-                } else if let Some(ext) = path.extension() {
-                    let ext_str = ext.to_string_lossy().to_lowercase();
-                    if extensions.iter().any(|e| e.to_lowercase() == ext_str) {
-                        if !self.games.iter().any(|g| g.path == path) {
-                            self.games.push(GameEntry {
-                                label: path.file_stem().unwrap().to_string_lossy().into_owned(),
-                                path,
-                                core_path: None,
-                            });
-                        }
+                if path.is_file() {
+                    let ext = path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or_default()
+                        .to_lowercase();
+                    if exts.contains(&ext.as_str()) {
+                        let label = path
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("Unknown")
+                            .to_string();
+                        self.games.push(GameEntry { path, label });
                     }
                 }
             }
         }
+        self.games.sort_by(|a, b| a.label.cmp(&b.label));
     }
 }

@@ -1,425 +1,361 @@
 import SwiftUI
 import RetrofrontSwift
-import UniformTypeIdentifiers
 
 struct DashboardView: View {
     @EnvironmentObject private var runtime: EmulatorRuntimeModel
     @State private var selectedTab = 0
-    @State private var isPlayViewActive = false
-    @State private var isFilePickerPresented = false
 
     var body: some View {
         ZStack {
-            Color(white: 0.05).ignoresSafeArea()
+            Color.black.ignoresSafeArea()
 
-            TabView(selection: $selectedTab) {
-                ModernHomeView(isPlayViewActive: $isPlayViewActive, isFilePickerPresented: $isFilePickerPresented)
-                    .tabItem {
-                        Label("Home", systemImage: "house.fill")
-                    }.tag(0)
+            VStack(spacing: 0) {
+                switch selectedTab {
+                case 0:
+                    LibraryView()
+                case 1:
+                    SettingsView()
+                default:
+                    EmptyView()
+                }
 
-                ModernLibraryView(isFilePickerPresented: $isFilePickerPresented)
-                    .tabItem {
-                        Label("Library", systemImage: "gamecontroller.fill")
-                    }.tag(1)
+                Spacer()
 
-                ModernSettingsView()
-                    .tabItem {
-                        Label("Settings", systemImage: "gearshape.2.fill")
-                    }.tag(2)
+                OneUITabBar(selectedTab: $selectedTab)
             }
-            .tint(.cyan)
         }
-        .fullScreenCover(isPresented: $isPlayViewActive) {
+        .fullScreenCover(isPresented: Binding(
+            get: { runtime.frontendState == .gameLoaded },
+            set: { _ in }
+        )) {
             PlayView()
         }
-        .fileImporter(isPresented: $isFilePickerPresented, allowedContentTypes: [.item]) { result in
-            if case .success(let url) = result {
-                runtime.importFile(at: url)
-            }
-        }
-        .onReceive(runtime.$frontendState) { newState in
-            if newState == .gameLoaded {
-                isPlayViewActive = true
-            }
+        .sheet(isPresented: Binding(
+            get: { !runtime.candidateCores.isEmpty },
+            set: { _ in }
+        )) {
+            CoreSelectionSheet()
         }
     }
 }
 
-struct ModernHomeView: View {
-    @EnvironmentObject private var runtime: EmulatorRuntimeModel
-    @Binding var isPlayViewActive: Bool
-    @Binding var isFilePickerPresented: Bool
+struct OneUIHeader: View {
+    let title: String
+    var subtitle: String? = nil
 
     var body: some View {
-        NavigationStack {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 34, weight: .bold))
+                .foregroundColor(.white)
+            if let subtitle = subtitle {
+                Text(subtitle)
+                    .font(.system(size: 16))
+                    .foregroundColor(.gray)
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 60)
+        .padding(.bottom, 20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct LibraryView: View {
+    @EnvironmentObject private var runtime: EmulatorRuntimeModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            OneUIHeader(title: "Library", subtitle: "\(runtime.availableGames.count) Games Available")
+
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("Continue Playing")
-                        .font(.title2.bold())
-                        .padding(.horizontal)
-
-                    if let game = runtime.loadedGameURL {
-                        Button {
-                            isPlayViewActive = true
-                        } label: {
-                            HStack {
-                                Image(systemName: "play.circle.fill")
-                                    .font(.largeTitle)
-                                VStack(alignment: .leading) {
-                                    Text(game.lastPathComponent)
-                                        .font(.headline)
-                                    Text(runtime.systemInfo?.libraryName ?? "Unknown Core")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                            }
-                            .padding()
-                            .background(Color(white: 0.15))
-                            .cornerRadius(12)
-                        }
-                        .padding(.horizontal)
-                        .buttonStyle(.plain)
-                    } else {
-                        Text("No game loaded")
-                            .foregroundStyle(.secondary)
-                            .padding()
-                            .frame(maxWidth: .infinity)
-                            .background(Color(white: 0.1))
-                            .cornerRadius(12)
-                            .padding(.horizontal)
-                    }
-
-                    Text("Quick Actions")
-                        .font(.title2.bold())
-                        .padding(.horizontal)
-                        .padding(.top)
-
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 15) {
-                        NavigationLink {
-                            CoreListView()
-                        } label: {
-                            ActionCard(title: "Load Core", icon: "cpu", color: .purple) {}
-                        }
-
-                        ActionCard(title: "Import ROM", icon: "plus.circle", color: .green) {
-                            isFilePickerPresented = true
-                        }
-                    }
-                    .padding(.horizontal)
-
-                    if !runtime.availableGames.isEmpty {
-                        Text("Recently Added")
-                            .font(.title2.bold())
-                            .padding(.horizontal)
-                            .padding(.top)
-
-                        ForEach(runtime.availableGames.prefix(5), id: \.path) { game in
+                LazyVStack(spacing: 12) {
+                    ForEach(runtime.availableGames) { game in
+                        OneUICard {
                             Button {
                                 runtime.loadGame(at: URL(fileURLWithPath: game.path))
                             } label: {
-                                HStack {
-                                    Image(systemName: "doc.fill")
-                                    Text(game.label)
+                                HStack(spacing: 16) {
+                                    Image(systemName: "gamecontroller.fill")
+                                        .foregroundColor(.blue)
+                                        .font(.title2)
+
+                                    VStack(alignment: .leading) {
+                                        Text(game.label)
+                                            .font(.headline)
+                                            .foregroundColor(.white)
+                                        Text(URL(fileURLWithPath: game.path).pathExtension.uppercased())
+                                            .font(.caption)
+                                            .foregroundColor(.gray)
+                                    }
                                     Spacer()
-                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                                    Image(systemName: "play.circle.fill")
+                                        .foregroundColor(.blue)
                                 }
-                                .padding()
-                                .background(Color(white: 0.15))
-                                .cornerRadius(10)
+                                .padding(16)
                             }
-                            .padding(.horizontal)
-                            .buttonStyle(.plain)
                         }
                     }
+                    if runtime.availableGames.isEmpty {
+                        Text("No games found in 'roms' directory.")
+                            .foregroundColor(.gray)
+                            .padding(.top, 40)
+                    }
                 }
-                .padding(.vertical)
+                .padding(.horizontal, 16)
             }
-            .navigationTitle("Retrofront")
-            .background(Color(white: 0.05))
         }
     }
 }
 
-struct CoreListView: View {
+struct SettingsView: View {
+    @EnvironmentObject private var runtime: EmulatorRuntimeModel
+    @State private var showingDetails = false
+    @State private var detailTitle = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            OneUIHeader(title: "Settings")
+
+            ScrollView {
+                VStack(spacing: 24) {
+                    OneUIGroup(title: "General") {
+                        OneUIRow(icon: "archivebox.fill", title: "Extract Assets", color: .orange) {
+                            runtime.menuAction(21) // ACTION_EXTRACT_ASSETS
+                        }
+                        OneUIRow(icon: "arrow.clockwise", title: "Refresh Games", color: .green) {
+                            runtime.refreshGames()
+                        }
+                    }
+
+                    OneUIGroup(title: "System") {
+                        OneUIRow(icon: "cpu", title: "Cores", color: .blue) {
+                             detailTitle = "Cores"
+                             showingDetails = true
+                        }
+                        OneUIRow(icon: "folder.fill", title: "Directories", color: .gray) {
+                             detailTitle = "Directories"
+                             showingDetails = true
+                        }
+                    }
+
+                    OneUIGroup(title: "Personalization") {
+                        OneUIRow(icon: "paintbrush.fill", title: "Skins & Themes", color: .pink) {
+                             detailTitle = "Skins"
+                             showingDetails = true
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+        }
+        .sheet(isPresented: $showingDetails) {
+            SettingsDetailView(title: detailTitle)
+        }
+    }
+}
+
+struct SettingsDetailView: View {
+    let title: String
     @EnvironmentObject private var runtime: EmulatorRuntimeModel
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        List {
-            ForEach(runtime.availableCores, id: \.path) { core in
-                Button {
-                    runtime.loadCore(core)
-                    dismiss()
-                } label: {
-                    VStack(alignment: .leading) {
-                        Text(core.displayName)
-                            .font(.headline)
-                        Text(core.systemName)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+        ZStack {
+            Color(white: 0.05).ignoresSafeArea()
+            VStack(spacing: 0) {
+                OneUIHeader(title: title)
+
+                ScrollView {
+                    VStack(spacing: 12) {
+                        if title == "Cores" {
+                            ForEach(runtime.availableCores) { core in
+                                OneUICard {
+                                    HStack {
+                                        VStack(alignment: .leading) {
+                                            Text(core.displayName).foregroundColor(.white).font(.headline)
+                                            Text(core.systemName).foregroundColor(.gray).font(.subheadline)
+                                        }
+                                        Spacer()
+                                    }.padding(16)
+                                }
+                            }
+                        } else if title == "Skins" {
+                             OneUICard {
+                                 VStack(alignment: .leading) {
+                                     Text("Active Theme").font(.caption2.bold()).foregroundColor(.pink)
+                                     Text("OneUI Dark").foregroundColor(.white).font(.headline)
+                                 }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                             }
+                             OneUICard {
+                                 VStack(alignment: .leading) {
+                                     Text("Icon Pack").font(.caption2.bold()).foregroundColor(.pink)
+                                     Text("Modern (SF Symbols)").foregroundColor(.white).font(.headline)
+                                 }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                             }
+                        } else {
+                            ForEach(runtime.settings.filter { $0.key.contains("directory") }, id: \.key) { setting in
+                                OneUICard {
+                                    VStack(alignment: .leading) {
+                                        Text(setting.key.replacingOccurrences(of: "_", with: " ").uppercased())
+                                            .font(.caption2.bold()).foregroundColor(.blue)
+                                        Text(setting.value).foregroundColor(.white).font(.system(size: 14, design: .monospaced))
+                                    }.padding(16)
+                                }
+                            }
+                        }
+                    }.padding(16)
                 }
+
+                Button("Close") { dismiss() }
+                    .padding()
+                    .foregroundColor(.blue)
             }
         }
-        .navigationTitle("Select Core")
     }
 }
 
-struct ActionCard: View {
+struct OneUICard<Content: View>: View {
+    let content: Content
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .background(Color(white: 0.12))
+            .cornerRadius(24)
+    }
+}
+
+struct OneUIGroup<Content: View>: View {
     let title: String
+    let content: Content
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title.uppercased())
+                .font(.caption2.bold())
+                .foregroundColor(.gray)
+                .padding(.leading, 16)
+
+            VStack(spacing: 0) {
+                content
+            }
+            .background(Color(white: 0.12))
+            .cornerRadius(24)
+        }
+    }
+}
+
+struct OneUIRow: View {
     let icon: String
+    let title: String
     let color: Color
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 12) {
+            HStack(spacing: 16) {
                 Image(systemName: icon)
-                    .font(.system(size: 30))
-                    .foregroundStyle(color)
+                    .frame(width: 32, height: 32)
+                    .background(color.opacity(0.2))
+                    .foregroundColor(color)
+                    .cornerRadius(8)
+
                 Text(title)
-                    .font(.headline)
+                    .foregroundColor(.white)
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundColor(.gray)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
-            .background(
-                LinearGradient(colors: [color.opacity(0.22), Color.white.opacity(0.06)], startPoint: .topLeading, endPoint: .bottomTrailing)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(color.opacity(0.45), lineWidth: 1)
-            )
-            .shadow(color: color.opacity(0.18), radius: 16, x: 0, y: 8)
+            .padding(16)
         }
-        .buttonStyle(.plain)
     }
 }
 
-struct ModernLibraryView: View {
-    @EnvironmentObject private var runtime: EmulatorRuntimeModel
-    @Binding var isFilePickerPresented: Bool
+struct OneUITabBar: View {
+    @Binding var selectedTab: Int
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section("My Games") {
-                    if runtime.availableGames.isEmpty {
-                        Text("No games found in Roms folder").foregroundStyle(.secondary)
-                    } else {
-                        ForEach(runtime.availableGames, id: \.path) { game in
-                            Button {
-                                runtime.loadGame(at: URL(fileURLWithPath: game.path))
-                            } label: {
-                                Text(game.label)
-                            }
-                        }
-                    }
-                }
-
-                Section("Cores") {
-                    ForEach(runtime.availableCores, id: \.path) { core in
-                        Button {
-                            runtime.loadCore(core)
-                        } label: {
-                            VStack(alignment: .leading) {
-                                Text(core.displayName)
-                                    .font(.headline)
-                                Text(core.systemName)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-
-                Section("Import") {
-                    Button {
-                        isFilePickerPresented = true
-                    } label: {
-                        Label("Add Content or Core", systemImage: "square.and.arrow.down")
-                    }
-                    Text(".dylib files are copied into the configured Cores directory; other files go to the content directory.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("Library")
-            .background(Color(white: 0.05))
-            .scrollContentBackground(.hidden)
+        HStack {
+            TabButton(icon: "square.grid.2x2.fill", label: "Library", index: 0, selection: $selectedTab)
+            Spacer()
+            TabButton(icon: "gearshape.fill", label: "Settings", index: 1, selection: $selectedTab)
         }
+        .padding(.horizontal, 60)
+        .padding(.vertical, 12)
+        .background(Color.black)
     }
 }
 
-struct ModernSettingsView: View {
-    @EnvironmentObject private var runtime: EmulatorRuntimeModel
+struct TabButton: View {
+    let icon: String
+    let label: String
+    let index: Int
+    @Binding var selection: Int
 
     var body: some View {
-        NavigationStack {
-            RustMenuView()
-                .navigationTitle("")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button {
-                            runtime.menuPop()
-                        } label: {
-                            Label("Back", systemImage: "chevron.left")
-                        }
-                    }
-                }
+        Button {
+            selection = index
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 20))
+                Text(label)
+                    .font(.caption2)
+            }
+            .foregroundColor(selection == index ? .blue : .gray)
         }
     }
 }
 
-struct RustMenuView: View {
+struct CoreSelectionSheet: View {
     @EnvironmentObject private var runtime: EmulatorRuntimeModel
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color(red: 0.02, green: 0.02, blue: 0.04), Color(red: 0.04, green: 0.10, blue: 0.14)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-
-            Circle()
-                .fill(.cyan.opacity(0.18))
-                .blur(radius: 70)
-                .frame(width: 260, height: 260)
-                .offset(x: -130, y: -220)
-
-            VStack(alignment: .leading, spacing: 24) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(runtime.currentMenu?.title.uppercased() ?? "RETROFRONT")
-                        .font(.system(size: 34, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
-                    Text("Rust libretro menu engine • XMB/Ozone compatible model")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.62))
-                }
-                .padding(.horizontal, 24)
-                .padding(.top, 28)
+            Color(white: 0.05).ignoresSafeArea()
+            VStack(spacing: 0) {
+                OneUIHeader(title: "Select Core", subtitle: "Multiple cores support this game")
 
                 ScrollView {
-                    LazyVStack(spacing: 12) {
-                        if let menu = runtime.currentMenu {
-                            ForEach(menu.entries, id: \.actionId) { entry in
-                                RustMenuRow(entry: entry) {
-                                    runtime.menuAction(entry.actionId)
+                    VStack(spacing: 12) {
+                        ForEach(runtime.candidateCores) { core in
+                            OneUICard {
+                                Button {
+                                    runtime.selectCoreAndLaunch(core)
+                                    dismiss()
+                                } label: {
+                                    HStack {
+                                        VStack(alignment: .leading) {
+                                            Text(core.displayName)
+                                                .font(.headline)
+                                                .foregroundColor(.white)
+                                            Text(core.systemName)
+                                                .font(.subheadline)
+                                                .foregroundColor(.gray)
+                                        }
+                                        Spacer()
+                                        Image(systemName: "cpu.fill")
+                                            .foregroundColor(.blue)
+                                    }
+                                    .padding(16)
                                 }
                             }
-                        } else {
-                            Text("Menu unavailable")
-                                .foregroundStyle(.white.opacity(0.7))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(24)
                         }
                     }
-                    .padding(.horizontal, 18)
-                    .padding(.bottom, 28)
-                }
-
-                Text("MoltenVK / OpenGL ES: bgfx requested, software copy fallback active until host handles are ready")
-                    .font(.caption2)
-                    .foregroundStyle(.cyan.opacity(0.75))
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 12)
-            }
-        }
-    }
-}
-
-struct RustMenuRow: View {
-    let entry: MenuEntry
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 16) {
-                MenuEntryIcon(kind: entry.kind)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(entry.label)
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                    if !entry.sublabel.isEmpty {
-                        Text(entry.sublabel)
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.58))
-                            .lineLimit(2)
-                    }
-                }
-
-                Spacer(minLength: 12)
-
-                if !entry.value.isEmpty {
-                    Text(entry.value)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.cyan)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: 110, alignment: .trailing)
-                }
-
-                if entry.kind == .submenu {
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.white.opacity(0.5))
+                    .padding(16)
                 }
             }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(.white.opacity(0.08))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(.white.opacity(0.10), lineWidth: 1)
-                    )
-            )
-        }
-        .buttonStyle(.plain)
-        .disabled(entry.actionId == 0)
-    }
-}
-
-struct MenuEntryIcon: View {
-    let kind: MenuEntryKind
-
-    var body: some View {
-        Image(systemName: iconName)
-            .font(.system(size: 18, weight: .bold))
-            .foregroundStyle(.black)
-            .frame(width: 42, height: 42)
-            .background(Circle().fill(iconColor))
-    }
-
-    private var iconName: String {
-        switch kind {
-        case .action:
-            return "play.fill"
-        case .submenu:
-            return "rectangle.grid.2x2.fill"
-        case .toggle:
-            return "switch.2"
-        case .setting:
-            return "slider.horizontal.3"
-        }
-    }
-
-    private var iconColor: Color {
-        switch kind {
-        case .action:
-            return .green
-        case .submenu:
-            return .cyan
-        case .toggle:
-            return .orange
-        case .setting:
-            return .purple
         }
     }
 }
@@ -427,57 +363,126 @@ struct MenuEntryIcon: View {
 struct PlayView: View {
     @EnvironmentObject private var runtime: EmulatorRuntimeModel
     @Environment(\.dismiss) private var dismiss
+    @State private var showQuickMenu = false
 
     var body: some View {
-        VStack {
+        GeometryReader { proxy in
             ZStack {
-                Color.black
-                if let image = runtime.displayImage {
-                    Image(uiImage: image)
-                        .resizable()
-                        .interpolation(.none)
-                        .scaledToFit()
-                } else {
-                    VStack {
-                        Image(systemName: "gamecontroller").font(.system(size: 50))
-                        Text("No Video").font(.headline)
-                    }.foregroundStyle(.white)
+                Color.black.ignoresSafeArea()
+
+                VStack {
+                    ZStack {
+                        if let image = runtime.displayImage {
+                            Image(uiImage: image)
+                                .resizable()
+                                .interpolation(.none)
+                                .scaledToFit()
+                        } else {
+                            ProgressView()
+                                .tint(.white)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    if proxy.size.height > proxy.size.width {
+                        VirtualController()
+                            .padding(.bottom, 20)
+                    }
+                }
+
+                VStack {
+                    HStack {
+                        Button {
+                            showQuickMenu = true
+                        } label: {
+                            Image(systemName: "line.3.horizontal")
+                                .font(.title)
+                                .padding()
+                                .background(Circle().fill(.black.opacity(0.5)))
+                                .foregroundColor(.white)
+                        }
+                        Spacer()
+                    }
+                    Spacer()
+                }
+                .padding()
+            }
+        }
+        .onAppear { runtime.play() }
+        .onDisappear { runtime.stop() }
+        .sheet(isPresented: $showQuickMenu) {
+            QuickMenuView(isPresented: $showQuickMenu)
+        }
+    }
+}
+
+struct QuickMenuView: View {
+    @EnvironmentObject private var runtime: EmulatorRuntimeModel
+    @Binding var isPresented: Bool
+    @State private var showingOptions = false
+
+    var body: some View {
+        ZStack {
+            Color(white: 0.05).ignoresSafeArea()
+            VStack(spacing: 0) {
+                OneUIHeader(title: "Quick Menu")
+
+                ScrollView {
+                    VStack(spacing: 20) {
+                        OneUIGroup(title: "Game Control") {
+                            OneUIRow(icon: "play.fill", title: "Resume", color: .blue) {
+                                isPresented = false
+                            }
+                            OneUIRow(icon: "arrow.counterclockwise", title: "Restart", color: .orange) {
+                                runtime.menuAction(9) // ACTION_RESTART_CONTENT
+                                isPresented = false
+                            }
+                            OneUIRow(icon: "xmark.circle.fill", title: "Close Content", color: .red) {
+                                runtime.stop()
+                                runtime.unloadGame()
+                                isPresented = false
+                            }
+                        }
+
+                        OneUIGroup(title: "Settings") {
+                            OneUIRow(icon: "slider.horizontal.3", title: "Core Options", color: .purple) {
+                                showingOptions = true
+                            }
+                        }
+                    }
+                    .padding(16)
                 }
             }
-            .aspectRatio(runtime.aspectRatio, contentMode: .fit)
-            .cornerRadius(12)
-            .padding()
+        }
+        .sheet(isPresented: $showingOptions) {
+            CoreOptionsView()
+        }
+    }
+}
 
-            Spacer()
+struct CoreOptionsView: View {
+    @EnvironmentObject private var runtime: EmulatorRuntimeModel
+    @Environment(\.dismiss) private var dismiss
 
-            VirtualController()
-
-            HStack(spacing: 40) {
-                Button {
-                    runtime.toggleRunning()
-                } label: {
-                    Image(systemName: runtime.isRunning ? "pause.circle.fill" : "play.circle.fill")
-                        .font(.system(size: 60))
+    var body: some View {
+        ZStack {
+            Color(white: 0.05).ignoresSafeArea()
+            VStack(spacing: 0) {
+                OneUIHeader(title: "Core Options")
+                ScrollView {
+                    VStack(spacing: 12) {
+                        ForEach(runtime.coreOptions, id: \.key) { opt in
+                            OneUICard {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(opt.desc).foregroundColor(.white).font(.headline)
+                                    Text(opt.value).foregroundColor(.blue).font(.subheadline)
+                                }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }.padding(16)
                 }
-
-                Button {
-                    runtime.stop()
-                    dismiss()
-                } label: {
-                    Image(systemName: "stop.circle.fill")
-                        .font(.system(size: 60))
-                        .foregroundStyle(.red)
-                }
+                Button("Done") { dismiss() }.padding()
             }
-            .padding(.bottom, 30)
-        }
-        .navigationTitle(runtime.loadedGameURL?.lastPathComponent ?? "Play")
-        .background(Color.black)
-        .onAppear {
-            runtime.play()
-        }
-        .onDisappear {
-            runtime.stop()
         }
     }
 }
@@ -485,26 +490,43 @@ struct PlayView: View {
 struct VirtualController: View {
     var body: some View {
         VStack {
+            Spacer()
             HStack {
-                Dpad()
+                Dpad_OneUI()
                 Spacer()
-                ActionButtons()
+                ActionButtons_OneUI()
             }
-            .padding(40)
+            .padding(.horizontal, 30)
+            .padding(.bottom, 50)
         }
     }
 }
 
-struct Dpad: View {
+struct Dpad_OneUI: View {
     var body: some View {
-        VStack(spacing: 5) {
+        VStack(spacing: 8) {
             DPadButton(icon: "chevron.up", button: .up)
-            HStack(spacing: 5) {
+            HStack(spacing: 8) {
                 DPadButton(icon: "chevron.left", button: .left)
-                Circle().frame(width: 40, height: 40).opacity(0.1)
+                Circle().frame(width: 48, height: 48).foregroundColor(.white.opacity(0.05))
                 DPadButton(icon: "chevron.right", button: .right)
             }
             DPadButton(icon: "chevron.down", button: .down)
+        }
+    }
+}
+
+struct ActionButtons_OneUI: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                ActionButton(label: "Y", color: .green, button: .y)
+                ActionButton(label: "X", color: .blue, button: .x)
+            }
+            HStack(spacing: 12) {
+                ActionButton(label: "B", color: .red, button: .b)
+                ActionButton(label: "A", color: .yellow, button: .a)
+            }
         }
     }
 }
@@ -515,33 +537,16 @@ struct DPadButton: View {
     let button: JoypadButton
 
     var body: some View {
-        Button {
-            // Visual feedback
-        } label: {
-            Image(systemName: icon)
-                .frame(width: 44, height: 44)
-                .background(Circle().fill(.white.opacity(0.1)))
-        }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in runtime.setJoypadButton(button, pressed: true) }
-                .onEnded { _ in runtime.setJoypadButton(button, pressed: false) }
-        )
-    }
-}
-
-struct ActionButtons: View {
-    var body: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                ActionButton(label: "Y", color: .green, button: .y)
-                ActionButton(label: "X", color: .blue, button: .x)
-            }
-            HStack(spacing: 10) {
-                ActionButton(label: "B", color: .red, button: .b)
-                ActionButton(label: "A", color: .yellow, button: .a)
-            }
-        }
+        Image(systemName: icon)
+            .font(.title2.bold())
+            .frame(width: 56, height: 56)
+            .background(Circle().fill(Color.white.opacity(0.12)))
+            .foregroundColor(.white)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in runtime.setJoypadButton(button, pressed: true) }
+                    .onEnded { _ in runtime.setJoypadButton(button, pressed: false) }
+            )
     }
 }
 
@@ -552,19 +557,16 @@ struct ActionButton: View {
     let button: JoypadButton
 
     var body: some View {
-        Button {
-            // Visual feedback
-        } label: {
-            Text(label)
-                .font(.headline)
-                .frame(width: 50, height: 50)
-                .background(Circle().fill(color.opacity(0.3)))
-                .overlay(Circle().stroke(color, lineWidth: 2))
-        }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in runtime.setJoypadButton(button, pressed: true) }
-                .onEnded { _ in runtime.setJoypadButton(button, pressed: false) }
-        )
+        Text(label)
+            .font(.title.bold())
+            .frame(width: 64, height: 64)
+            .background(Circle().fill(color.opacity(0.2)))
+            .overlay(Circle().stroke(color, lineWidth: 3))
+            .foregroundColor(color)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in runtime.setJoypadButton(button, pressed: true) }
+                    .onEnded { _ in runtime.setJoypadButton(button, pressed: false) }
+            )
     }
 }

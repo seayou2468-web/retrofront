@@ -14,6 +14,8 @@ public final class EmulatorRuntimeModel: ObservableObject {
   @Published private(set) var isRunning = false
   @Published private(set) var availableCores: [CoreInfo] = []
   @Published private(set) var availableGames: [GameEntrySwift] = []
+  @Published private(set) var launchPlan: LaunchPlan? = nil
+  @Published private(set) var candidateCores: [CoreInfo] = []
   @Published private(set) var corePath: String?
   @Published private(set) var loadedGameURL: URL?
   @Published private(set) var currentMenu: MenuList?
@@ -48,9 +50,6 @@ public final class EmulatorRuntimeModel: ObservableObject {
           }
       }
 
-      // Prefer the hardware-capable bgfx path. Rust automatically falls back to
-      // copyable software frames until an iOS OpenGL ES / MoltenVK host renderer
-      // supplies valid host handles.
       try? frontend.setGfxBackend(.bgfx)
       frontend.saveSettings()
       refresh()
@@ -74,7 +73,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
   public func refreshGames() {
       guard let frontend else { return }
       let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-      let romsDir = URL(fileURLWithPath: frontend.setting("content_directory") ?? docs.appendingPathComponent("Roms").path)
+      let romsDir = URL(fileURLWithPath: frontend.setting("content_directory") ?? docs.appendingPathComponent("roms").path)
       try? FileManager.default.createDirectory(at: romsDir, withIntermediateDirectories: true)
       let detectedExtensions = frontend.allSupportedExtensions()
       let exts = detectedExtensions.isEmpty ? "gba|gb|gbc|sfc|smc|nes|bin|gen|md|sms|gg" : detectedExtensions.joined(separator: "|")
@@ -82,87 +81,44 @@ public final class EmulatorRuntimeModel: ObservableObject {
       self.availableGames = frontend.availableGames()
   }
 
-  public func importFile(at url: URL) {
-      if url.pathExtension.lowercased() == "dylib" {
-          importCore(at: url)
-      } else {
-          importGame(at: url)
-      }
+  public func loadGame(at url: URL) {
+    guard let frontend else { return }
+    self.loadedGameURL = url
+
+    if let plan = frontend.planContentLaunch(path: url.path) {
+        self.launchPlan = plan
+        switch plan.decision {
+        case .selected:
+            if let corePath = plan.selectedCorePath {
+                executeLaunch(corePath: corePath, gamePath: url.path)
+            }
+        case .needsCoreChoice:
+            self.candidateCores = frontend.launchCandidates()
+            self.statusMessage = "Select a core for \(url.lastPathComponent)"
+        case .noCore:
+            self.statusMessage = "No suitable core found for .\(plan.contentExtension)"
+        }
+    }
   }
 
-  public func importGame(at url: URL) {
-      guard let frontend else { return }
-      let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-      let romsDir = URL(fileURLWithPath: frontend.setting("content_directory") ?? docs.appendingPathComponent("Roms").path)
-      try? FileManager.default.createDirectory(at: romsDir, withIntermediateDirectories: true)
-      let destination = romsDir.appendingPathComponent(url.lastPathComponent)
-      let success = url.startAccessingSecurityScopedResource()
-      defer { if success { url.stopAccessingSecurityScopedResource() } }
-      do {
-          if FileManager.default.fileExists(atPath: destination.path) {
-              try FileManager.default.removeItem(at: destination)
-          }
-          try FileManager.default.copyItem(at: url, to: destination)
-          statusMessage = "Imported \(url.lastPathComponent)"
-          refreshGames()
-      } catch {
-          statusMessage = "Import failed: \(error)"
-      }
+  public func selectCoreAndLaunch(_ core: CoreInfo) {
+    guard let url = loadedGameURL else { return }
+    executeLaunch(corePath: core.path, gamePath: url.path)
+    self.candidateCores = []
+    self.launchPlan = nil
   }
 
-  public func importCore(at url: URL) {
-      guard let frontend else { return }
-      let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-      let coresDir = URL(fileURLWithPath: frontend.setting("libretro_directory") ?? docs.appendingPathComponent("Cores").path)
-      try? FileManager.default.createDirectory(at: coresDir, withIntermediateDirectories: true)
-      let destination = coresDir.appendingPathComponent(url.lastPathComponent)
-      let success = url.startAccessingSecurityScopedResource()
-      defer { if success { url.stopAccessingSecurityScopedResource() } }
-      do {
-          if FileManager.default.fileExists(atPath: destination.path) {
-              try FileManager.default.removeItem(at: destination)
-          }
-          try FileManager.default.copyItem(at: url, to: destination)
-          try? frontend.setSetting(key: "libretro_directory", value: coresDir.path)
-          frontend.saveSettings()
-          refreshAvailableCores()
-          statusMessage = "Imported core: \(url.lastPathComponent)"
-      } catch {
-          statusMessage = "Core import failed: \(error)"
-      }
-  }
-
-  public func loadCore(_ core: CoreInfo) {
+  private func executeLaunch(corePath: String, gamePath: String) {
     guard let frontend else { return }
     do {
       stop()
-      systemInfo = try frontend.loadCore(at: core.path)
-      corePath = core.path
+      systemInfo = try frontend.loadCore(at: corePath)
+      self.corePath = corePath
+      try frontend.loadGame(at: gamePath)
       refresh()
-      statusMessage = "Loaded core: \(systemInfo?.libraryName ?? "Unknown")"
+      statusMessage = "Playing \(URL(fileURLWithPath: gamePath).lastPathComponent)"
     } catch {
-      statusMessage = "Core load failed: \(error)"
-    }
-  }
-
-  public func loadGame(at url: URL) {
-    guard let frontend else { return }
-    if frontendState == .empty {
-        let ext = url.pathExtension.lowercased()
-        if let suitableCore = availableCores.first(where: { $0.supportedExtensions.contains(ext) }) {
-            loadCore(suitableCore)
-        } else {
-            statusMessage = "No suitable core found for .\(ext)"
-            return
-        }
-    }
-    do {
-      try frontend.loadGame(at: url.path)
-      loadedGameURL = url
-      refresh()
-      statusMessage = "Loaded game: \(url.lastPathComponent)"
-    } catch {
-      statusMessage = "Game load failed: \(error)"
+      statusMessage = "Launch failed: \(error)"
     }
   }
 
@@ -177,27 +133,25 @@ public final class EmulatorRuntimeModel: ObservableObject {
   public func play() {
     guard frontendState == .gameLoaded, !isRunning else { return }
     isRunning = true
-runTask = Task.detached(priority: .userInitiated) { [weak self] in
-  while !Task.isCancelled {
-    guard let self = self else { break }
-
-    let shouldStop = await MainActor.run {
-      self.runOneFrame()
+    runTask = Task.detached(priority: .userInitiated) { [weak self] in
+      while !Task.isCancelled {
+        guard let self = self else { break }
+        let shouldStop = await MainActor.run { self.runOneFrame() }
+        if shouldStop { break }
+        try? await Task.sleep(nanoseconds: 16_666_667)
+      }
     }
-
-    if shouldStop {
-      break
-    }
-
-    try? await Task.sleep(nanoseconds: 16_666_667)
-  }
-}
   }
 
   public func stop() {
     isRunning = false
     runTask?.cancel()
     runTask = nil
+  }
+
+  public func unloadGame() {
+      frontend?.unloadGame()
+      refresh()
   }
 
   @discardableResult
@@ -270,18 +224,10 @@ runTask = Task.detached(priority: .userInitiated) { [weak self] in
     guard let provider = CGDataProvider(data: data as CFData) else { return nil }
     guard let cgImage = CGImage(
       width: width,
-      height: height,
-      bitsPerComponent: 8,
-      bitsPerPixel: 32,
-      bytesPerRow: width * 4,
+      height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
       space: CGColorSpaceCreateDeviceRGB(),
-      bitmapInfo: CGBitmapInfo.byteOrder32Big.union(
-        CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
-      ),
-      provider: provider,
-      decode: nil,
-      shouldInterpolate: false,
-      intent: .defaultIntent
+      bitmapInfo: CGBitmapInfo.byteOrder32Big.union(CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)),
+      provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent
     ) else { return nil }
     return UIImage(cgImage: cgImage)
   }

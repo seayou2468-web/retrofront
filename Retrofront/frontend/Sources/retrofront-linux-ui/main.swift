@@ -1,27 +1,54 @@
 import Foundation
 import RetrofrontSwift
 
-struct TerminalDashboard {
-  let frontend: Retrofront
+struct LinuxOneUI {
+    let frontend: Retrofront
 
-  func render() {
-    print("""
-    ┌────────────────────────────────────────────┐
-    │ Retrofront Linux                           │
-    │ Empty frontend UI connected to Rust runtime │
-    └────────────────────────────────────────────┘
-    """)
-    print("Runtime state : \(frontend.state)")
-    print("Emulator core : not loaded")
-    print("Game content  : not loaded")
-    print("Next step     : pass a libretro core to future loader UI")
-  }
+    func start() {
+        print("\n\u{1B}[1m--- RETROFRONT (OneUI Linux) ---\u{1B}[0m")
+        print("Status: \(frontend.state)")
+        print("\n[1] Library")
+        print("[2] Settings")
+        print("[Q] Quit")
+
+        // Mocking interaction for CLI
+        while let input = readLine()?.lowercased() {
+            switch input {
+            case "1": showLibrary()
+            case "2": showSettings()
+            case "q": return
+            default: print("Unknown command")
+            }
+        }
+    }
+
+    func showLibrary() {
+        print("\n\u{1B}[1mLIBRARY\u{1B}[0m")
+        let games = frontend.availableGames()
+        if games.isEmpty {
+            print("No games found. Check your 'roms' directory.")
+        } else {
+            for (i, game) in games.enumerated() {
+                print("[\(i)] \(game.label)")
+            }
+        }
+    }
+
+    func showSettings() {
+        print("\n\u{1B}[1mSETTINGS\u{1B}[0m")
+        print("[E] Extract Assets")
+        print("[B] Back")
+        if let choice = readLine()?.lowercased(), choice == "e" {
+            _ = frontend.activateMenuAction(21) // ACTION_EXTRACT_ASSETS
+            print("Extraction requested.")
+        }
+    }
 }
 
 do {
-  let frontend = try Retrofront()
-  TerminalDashboard(frontend: frontend).render()
+    let frontend = try Retrofront()
+    let ui = LinuxOneUI(frontend: frontend)
+    ui.start()
 } catch {
-  fputs("Retrofront Linux UI failed to start: \(error)\n", stderr)
-  exit(1)
+    print("Failed to start Retrofront: \(error)")
 }
