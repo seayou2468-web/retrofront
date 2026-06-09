@@ -100,6 +100,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
       frontend.scanCores(in: resourceURL.path)
       frontend.scanCores(in: resourceURL.appendingPathComponent("dylibs").path)
     }
+    frontend.scanCores(in: retroArchRoot.appendingPathComponent("Cores", isDirectory: true).path)
     frontend.scanConfiguredCores()
     availableCores = frontend.availableCores()
   }
@@ -123,6 +124,37 @@ public final class EmulatorRuntimeModel: ObservableObject {
 
   public func importFile(at url: URL) {
     importGame(at: url)
+  }
+
+  public func importCore(at url: URL) {
+    guard let frontend else { return }
+    let coreDir = retroArchRoot.appendingPathComponent("Cores", isDirectory: true)
+    do {
+      try FileManager.default.createDirectory(at: coreDir, withIntermediateDirectories: true)
+    } catch {
+      statusMessage = "Core directory failed: \(error)"
+      return
+    }
+
+    let securityScoped = url.startAccessingSecurityScopedResource()
+    defer { if securityScoped { url.stopAccessingSecurityScopedResource() } }
+
+    let destination = coreDir.appendingPathComponent(url.lastPathComponent)
+    do {
+      if FileManager.default.fileExists(atPath: destination.path) {
+        try FileManager.default.removeItem(at: destination)
+      }
+      try FileManager.default.copyItem(at: url, to: destination)
+      try? frontend.setSetting(key: "manual_core_directory", value: coreDir.path)
+      frontend.scanCores(in: coreDir.path)
+      systemInfo = try frontend.loadCore(at: destination.path)
+      corePath = destination.path
+      refreshAvailableCores()
+      refresh()
+      statusMessage = "Loaded manual core: \(systemInfo?.libraryName ?? destination.deletingPathExtension().lastPathComponent)"
+    } catch {
+      statusMessage = "Manual core load failed: \(error)"
+    }
   }
 
   public func importGame(at url: URL) {
@@ -199,7 +231,11 @@ public final class EmulatorRuntimeModel: ObservableObject {
       return
     }
     guard let plan = frontend.planContentLaunch(path: url.path) else {
-      statusMessage = "Could not create launch plan"
+      if let corePath {
+        doLaunch(url, preferredCore: corePath)
+      } else {
+        statusMessage = "Could not create launch plan"
+      }
       return
     }
     switch plan.decision {
@@ -210,7 +246,12 @@ public final class EmulatorRuntimeModel: ObservableObject {
       pendingCoreChoices = frontend.launchCandidates()
       statusMessage = "Select a core for .\(plan.contentExtension)"
     case .noCore:
-      statusMessage = "No compatible core found for .\(plan.contentExtension)"
+      if let corePath {
+        statusMessage = "No info match for .\(plan.contentExtension); trying current core"
+        doLaunch(url, preferredCore: corePath)
+      } else {
+        statusMessage = "No compatible core found for .\(plan.contentExtension)"
+      }
     }
   }
 
@@ -390,7 +431,54 @@ public final class EmulatorRuntimeModel: ObservableObject {
 
   public func menuAction(_ actionId: UInt32) {
     guard let frontend else { return }
+    if handleMenuSettingAction(actionId) {
+      refreshMenu()
+      return
+    }
     if frontend.activateMenuAction(actionId) { refreshMenu() }
+  }
+
+  private func handleMenuSettingAction(_ actionId: UInt32) -> Bool {
+    switch actionId {
+    case 621, 694:
+      cycleVideoScaleMode()
+    case 622:
+      toggleVideoFilter()
+    case 623:
+      setVsyncEnabled(!vsyncEnabled)
+    case 641:
+      setAudioEnabled(!audioEnabledSetting)
+    case 642:
+      setAudioSync(!audioSyncSetting)
+    case 650:
+      cycleAudioLatency()
+    case 664:
+      setOverlayEnabledSetting(!overlayEnabledSetting)
+    case 665:
+      setHapticsEnabled(!hapticsEnabledSetting)
+    case 690:
+      cycleSetting(key: "play_screen_orientation", values: ["auto", "portrait", "landscape"])
+      statusMessage = "Play orientation: \(settingValue("play_screen_orientation"))"
+    case 715:
+      cycleLibrarySort()
+    case 716:
+      setLibraryCoreBadgesEnabled(!libraryCoreBadgesEnabled)
+    case 717:
+      setLibraryFileDetailsEnabled(!libraryFileDetailsEnabled)
+    case 718:
+      setLibraryAutoScanEnabled(!libraryAutoScanEnabled)
+    case 725:
+      let enabled = settingValue("savestate_auto_save") != "true"
+      setSetting(key: "savestate_auto_save", value: enabled ? "true" : "false")
+      statusMessage = enabled ? "Auto save state enabled" : "Auto save state disabled"
+    case 726:
+      let enabled = settingValue("savestate_auto_load") != "true"
+      setSetting(key: "savestate_auto_load", value: enabled ? "true" : "false")
+      statusMessage = enabled ? "Auto load state enabled" : "Auto load state disabled"
+    default:
+      return false
+    }
+    return true
   }
 
   public func openQuickMenu() {

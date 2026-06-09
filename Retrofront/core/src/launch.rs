@@ -52,13 +52,7 @@ impl LaunchManager {
     ) -> LaunchPlan {
         let content_extension = extension_for_content(content_path);
         let candidates = if let Some(core_path) = requested_core {
-            core_info
-                .cores
-                .iter()
-                .find(|core| paths_equal(&core.path, core_path))
-                .cloned()
-                .into_iter()
-                .collect()
+            core_info.core_for_path(core_path).into_iter().collect()
         } else {
             core_info.compatible_cores_for_content_path(content_path)
         };

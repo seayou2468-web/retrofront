@@ -8,6 +8,7 @@ struct DashboardView: View {
     @State private var selectedTab = 0
     @State private var isPlayViewActive = false
     @State private var isFilePickerPresented = false
+    @State private var isCorePickerPresented = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -19,7 +20,7 @@ struct DashboardView: View {
                 .tabItem { Label("Play", systemImage: "play.fill") }
                 .tag(1)
 
-            SettingsView()
+            SettingsView(isCorePickerPresented: $isCorePickerPresented)
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
                 .tag(2)
         }
@@ -31,6 +32,9 @@ struct DashboardView: View {
         .fullScreenCover(isPresented: $isPlayViewActive) { PlayView() }
         .fileImporter(isPresented: $isFilePickerPresented, allowedContentTypes: [.item]) { result in
             if case .success(let url) = result { runtime.importFile(at: url) }
+        }
+        .fileImporter(isPresented: $isCorePickerPresented, allowedContentTypes: [.item]) { result in
+            if case .success(let url) = result { runtime.importCore(at: url) }
         }
         .sheet(isPresented: Binding(get: { runtime.pendingContentURL != nil }, set: { if !$0 { runtime.cancelCoreChoice() } })) {
             CoreChoiceSheet()
@@ -189,6 +193,7 @@ struct NowPlayingView: View {
 
 struct SettingsView: View {
     @EnvironmentObject private var runtime: EmulatorRuntimeModel
+    @Binding var isCorePickerPresented: Bool
 
     var body: some View {
         AppScreen(title: "Settings", subtitle: "実際に保存・反映されるアプリ設定") {
@@ -248,6 +253,18 @@ struct SettingsView: View {
 
             SettingsGroup(title: "Loaded Core") {
                 SettingInfoRow(title: "Current Core", value: runtime.systemInfo?.libraryName ?? runtime.corePath ?? "Not loaded")
+                Button {
+                    isCorePickerPresented = true
+                } label: {
+                    Label("Load core manually", systemImage: "square.and.arrow.down")
+                        .font(.subheadline.bold())
+                        .foregroundColor(OneUI.accent)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        .background(OneUI.elevated)
+                        .clipShape(RoundedRectangle(cornerRadius: OneUI.compactRadius, style: .continuous))
+                }
+                .buttonStyle(.plain)
                 if runtime.coreOptions.isEmpty {
                     SettingInfoRow(title: "Core Options", value: "Load a core to edit its options")
                 } else {
@@ -640,9 +657,6 @@ struct PlayView: View {
                 }
                 if runtime.overlayEnabledSetting, runtime.overlayInfo?.enabled == true {
                     RetroArchOverlayView()
-                    PlayerUtilityBar { presentationMode.wrappedValue.dismiss() }
-                        .padding(.horizontal, 10)
-                        .padding(.bottom, 14)
                 } else {
                     PlayerControls { presentationMode.wrappedValue.dismiss() }
                         .padding(.horizontal, 10)

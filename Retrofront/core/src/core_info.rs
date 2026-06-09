@@ -65,6 +65,38 @@ impl CoreInfoList {
         self.sort_and_resolve_extensions();
     }
 
+    pub fn core_for_path(&self, core_path: &Path) -> Option<CoreInfo> {
+        if let Some(core) = self
+            .cores
+            .iter()
+            .find(|core| paths_equal(&core.path, core_path))
+            .cloned()
+        {
+            return Some(core);
+        }
+        if !core_path.exists() {
+            return None;
+        }
+        let mut info = self.load_info_for_core(core_path);
+        info.path = core_path.to_path_buf();
+        Some(info)
+    }
+
+    pub fn register_core_path(&mut self, core_path: &Path) -> bool {
+        let Some(info) = self.core_for_path(core_path) else {
+            return false;
+        };
+        if !self
+            .cores
+            .iter()
+            .any(|core| paths_equal(&core.path, core_path))
+        {
+            self.cores.push(info);
+            self.sort_and_resolve_extensions();
+        }
+        true
+    }
+
     pub fn supported_extensions_for_path(&self, core_path: &Path) -> Vec<String> {
         self.cores
             .iter()
@@ -224,7 +256,6 @@ impl CoreInfoList {
         };
 
         let Some(info_path) = self.find_info_path(core_path) else {
-            Self::apply_builtin_fallback_info(stem, &mut info);
             return info;
         };
 
@@ -277,75 +308,7 @@ impl CoreInfoList {
                 .filter(|key| key.starts_with("firmware") && key.ends_with("_path"))
                 .count();
         }
-        if info.supported_extensions.is_empty() {
-            Self::apply_builtin_fallback_info(stem, &mut info);
-        }
         info
-    }
-
-    fn apply_builtin_fallback_info(stem: &str, info: &mut CoreInfo) {
-        let normalized = stem.to_ascii_lowercase();
-        let fallback = if normalized.contains("mgba") {
-            Some((
-                "Nintendo - Game Boy Advance (mGBA)",
-                "Game Boy Advance",
-                &["gba", "gb", "gbc", "sgb"][..],
-            ))
-        } else if normalized.contains("bsnes") || normalized.contains("snes9x") {
-            Some((
-                "Nintendo - Super Nintendo",
-                "Super Nintendo Entertainment System",
-                &["sfc", "smc", "fig", "swc", "bs", "st"][..],
-            ))
-        } else if normalized.contains("gambatte") {
-            Some((
-                "Nintendo - Game Boy / Color",
-                "Game Boy",
-                &["gb", "gbc", "sgb"][..],
-            ))
-        } else if normalized.contains("nestopia")
-            || normalized.contains("fceumm")
-            || normalized.contains("quicknes")
-        {
-            Some((
-                "Nintendo - NES",
-                "Nintendo Entertainment System",
-                &["nes", "fds"][..],
-            ))
-        } else if normalized.contains("melonds") || normalized.contains("desmume") {
-            Some(("Nintendo - DS", "Nintendo DS", &["nds", "bin"][..]))
-        } else if normalized.contains("genesis_plus_gx") || normalized.contains("picodrive") {
-            Some((
-                "Sega - Mega Drive / Genesis",
-                "Mega Drive / Genesis",
-                &["md", "smd", "gen", "sms", "gg", "sg", "cue"][..],
-            ))
-        } else if normalized.contains("beetle_psx") || normalized.contains("pcsx") {
-            Some((
-                "Sony - PlayStation",
-                "PlayStation",
-                &["cue", "bin", "chd", "pbp", "toc", "m3u"][..],
-            ))
-        } else {
-            None
-        };
-
-        if let Some((display_name, system_name, extensions)) = fallback {
-            if info.display_name.is_empty()
-                || info.display_name == Self::display_name_from_stem(stem)
-            {
-                info.display_name = display_name.to_string();
-            }
-            if info.system_name.is_empty() {
-                info.system_name = system_name.to_string();
-            }
-            info.supported_extensions = extensions.iter().map(|ext| ext.to_string()).collect();
-            if info.notes.is_empty() {
-                info.notes =
-                    "Built-in compatibility fallback used because no .info metadata was found"
-                        .to_string();
-            }
-        }
     }
 
     fn find_info_path(&self, core_path: &Path) -> Option<PathBuf> {
@@ -383,29 +346,36 @@ impl CoreInfoList {
         let mut candidates = Vec::new();
         Self::push_unique(&mut candidates, stem.to_string());
 
-        let mut normalized = stem.to_string();
-        for suffix in [
-            "_libretro_ios",
-            "_libretro_macos",
-            "_libretro_android",
-            "_libretro",
-            "_ios",
-            "_macos",
-        ] {
-            if let Some(stripped) = normalized.strip_suffix(suffix) {
-                normalized = stripped.to_string();
-                Self::push_unique(&mut candidates, normalized.clone());
-            }
-        }
+        Self::push_platform_normalized_candidates(&mut candidates, stem);
 
         if let Some(stripped) = stem.strip_prefix("lib") {
             Self::push_unique(&mut candidates, stripped.to_string());
-            if let Some(stripped) = stripped.strip_suffix("_libretro") {
-                Self::push_unique(&mut candidates, stripped.to_string());
-            }
+            Self::push_platform_normalized_candidates(&mut candidates, stripped);
+        }
+
+        let underscored = stem.replace('-', "_");
+        if underscored != stem {
+            Self::push_unique(&mut candidates, underscored.clone());
+            Self::push_platform_normalized_candidates(&mut candidates, &underscored);
         }
 
         candidates
+    }
+
+    fn push_platform_normalized_candidates(candidates: &mut Vec<String>, name: &str) {
+        for platform_suffix in ["_ios", "_macos", "_android"] {
+            if let Some(base) = name.strip_suffix(platform_suffix) {
+                Self::push_unique(candidates, base.to_string());
+                if let Some(core_name) = base.strip_suffix("_libretro") {
+                    Self::push_unique(candidates, core_name.to_string());
+                    Self::push_unique(candidates, format!("{core_name}_libretro"));
+                }
+            }
+        }
+
+        if let Some(core_name) = name.strip_suffix("_libretro") {
+            Self::push_unique(candidates, core_name.to_string());
+        }
     }
 
     fn parse_info_file(content: &str) -> HashMap<String, String> {
@@ -482,17 +452,16 @@ mod tests {
         list.scan_directory(&dir);
 
         assert_eq!(list.cores.len(), 1);
-        assert!(list.cores[0]
-            .supported_extensions
-            .contains(&"gba".to_string()));
+        assert_eq!(list.cores[0].path, framework.join("mgba_libretro_ios"));
+        assert!(list.cores[0].supported_extensions.is_empty());
         let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
-    fn applies_builtin_mgba_extensions_without_info_file() {
+    fn does_not_embed_core_extensions_without_info_file() {
         let list = CoreInfoList::new();
         let info = list.load_info_for_core(Path::new("/cores/mgba_libretro_ios.dylib"));
-        assert!(info.supported_extensions.contains(&"gba".to_string()));
+        assert!(info.supported_extensions.is_empty());
     }
 
     #[test]
@@ -500,7 +469,31 @@ mod tests {
         let candidates =
             CoreInfoList::info_name_candidates(Path::new("/cores/mgba_libretro_ios.dylib"));
         assert!(candidates.contains(&"mgba_libretro_ios".to_string()));
+        assert!(candidates.contains(&"mgba_libretro".to_string()));
         assert!(candidates.contains(&"mgba".to_string()));
+    }
+
+    #[test]
+    fn finds_assets_zip_style_libretro_info_name() {
+        let dir = std::env::temp_dir().join(format!(
+            "retrofront-info-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(dir.join("info")).unwrap();
+        fs::write(
+            dir.join("info/mgba_libretro.info"),
+            "display_name = \"mGBA\"\nsupported_extensions = \"gba|gb|gbc\"\n",
+        )
+        .unwrap();
+        let mut list = CoreInfoList::new();
+        list.set_info_dir(dir.clone());
+        let info = list.load_info_for_core(Path::new("/cores/mgba_libretro_ios.dylib"));
+        assert_eq!(info.display_name, "mGBA");
+        assert!(info.supported_extensions.contains(&"gba".to_string()));
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -544,4 +537,14 @@ fn zip_member_extensions(path: &Path) -> Vec<String> {
         }
     }
     extensions
+}
+
+fn paths_equal(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
 }
