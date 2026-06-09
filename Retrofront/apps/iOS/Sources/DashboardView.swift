@@ -278,148 +278,339 @@ struct RustMenuView: View {
     @EnvironmentObject private var runtime: EmulatorRuntimeModel
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color(red: 0.02, green: 0.02, blue: 0.04), Color(red: 0.04, green: 0.10, blue: 0.14)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-
-            Circle()
-                .fill(.cyan.opacity(0.18))
-                .blur(radius: 70)
-                .frame(width: 260, height: 260)
-                .offset(x: -130, y: -220)
-
-            VStack(alignment: .leading, spacing: 24) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(runtime.currentMenu?.title.uppercased() ?? "RETROFRONT")
-                        .font(.system(size: 34, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
-                    Text("Rust libretro menu engine • XMB/Ozone compatible model")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.62))
-                }
-                .padding(.horizontal, 24)
-                .padding(.top, 28)
-
-                ScrollView {
-                    LazyVStack(spacing: 12) {
-                        if let menu = runtime.currentMenu {
-                            ForEach(menu.entries, id: \.actionId) { entry in
-                                RustMenuRow(entry: entry) {
-                                    runtime.menuAction(entry.actionId)
-                                }
-                            }
-                        } else {
-                            Text("Menu unavailable")
-                                .foregroundStyle(.white.opacity(0.7))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(24)
-                        }
-                    }
-                    .padding(.horizontal, 18)
-                    .padding(.bottom, 28)
-                }
-
-                Text("MoltenVK / OpenGL ES: bgfx requested, software copy fallback active until host handles are ready")
-                    .font(.caption2)
-                    .foregroundStyle(.cyan.opacity(0.75))
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 12)
+        Group {
+            switch runtime.currentMenu?.driver ?? .xmb {
+            case .rgui:
+                RguiMenuView(menu: runtime.currentMenu, action: runtime.menuAction)
+            case .materialui:
+                MaterialMenuView(menu: runtime.currentMenu, action: runtime.menuAction)
+            case .xmb:
+                XmbMenuView(menu: runtime.currentMenu, action: runtime.menuAction)
+            case .ozone:
+                OzoneMenuView(menu: runtime.currentMenu, action: runtime.menuAction)
             }
         }
     }
 }
 
-struct RustMenuRow: View {
+private struct XmbMenuView: View {
+    let menu: MenuList?
+    let action: (UInt32) -> Void
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(red: 0.04, green: 0.05, blue: 0.09), Color(red: 0.02, green: 0.15, blue: 0.22)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            Circle()
+                .fill(.white.opacity(0.18))
+                .blur(radius: 70)
+                .frame(width: 420, height: 420)
+                .offset(x: -170, y: -250)
+
+            VStack(alignment: .leading, spacing: 24) {
+                Text(menu?.title ?? "Main Menu")
+                    .font(.system(size: 28, weight: .light))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .padding(.horizontal, 28)
+                    .padding(.top, 30)
+
+                HStack(alignment: .top, spacing: 34) {
+                    ForEach(Array((menu?.entries ?? []).prefix(7).enumerated()), id: \.offset) { index, entry in
+                        Button { action(entry.actionId) } label: {
+                            VStack(spacing: 10) {
+                                MenuEntryIcon(kind: entry.kind, family: "xmb", selected: index == 0)
+                                Text(entry.label)
+                                    .font(.caption.weight(index == 0 ? .semibold : .regular))
+                                    .foregroundStyle(index == 0 ? .white : .white.opacity(0.62))
+                                    .multilineTextAlignment(.center)
+                                    .frame(width: 86)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(entry.actionId == 0)
+                    }
+                }
+                .padding(.horizontal, 32)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 7) {
+                        ForEach(menu?.entries ?? [], id: \.actionId) { entry in
+                            XmbSubRow(entry: entry) { action(entry.actionId) }
+                        }
+                    }
+                    .padding(.horizontal, 62)
+                    .padding(.bottom, 30)
+                }
+            }
+        }
+    }
+}
+
+private struct OzoneMenuView: View {
+    let menu: MenuList?
+    let action: (UInt32) -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("RETROFRONT")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.white)
+                Text(menu?.title.uppercased() ?? "MAIN MENU")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.55))
+                Divider().background(.white.opacity(0.2))
+                ForEach(Array((menu?.entries ?? []).prefix(9).enumerated()), id: \.offset) { index, entry in
+                    Button { action(entry.actionId) } label: {
+                        HStack(spacing: 12) {
+                            MenuEntryIcon(kind: entry.kind, family: "ozone", selected: index == 0)
+                            Text(entry.label)
+                                .font(.subheadline.weight(index == 0 ? .bold : .regular))
+                                .foregroundStyle(index == 0 ? .white : .white.opacity(0.72))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(entry.actionId == 0)
+                }
+                Spacer()
+            }
+            .frame(width: 245)
+            .padding(24)
+            .background(Color(red: 0.10, green: 0.11, blue: 0.13))
+
+            VStack(alignment: .leading, spacing: 18) {
+                Text(menu?.title ?? "Main Menu")
+                    .font(.system(size: 30, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.top, 26)
+                    .padding(.horizontal, 30)
+
+                ScrollView {
+                    LazyVStack(spacing: 1) {
+                        ForEach(menu?.entries ?? [], id: \.actionId) { entry in
+                            OzoneRow(entry: entry) { action(entry.actionId) }
+                        }
+                    }
+                    .padding(.horizontal, 30)
+                    .padding(.bottom, 30)
+                }
+            }
+            .background(Color(red: 0.15, green: 0.16, blue: 0.18))
+        }
+        .ignoresSafeArea()
+    }
+}
+
+private struct MaterialMenuView: View {
+    let menu: MenuList?
+    let action: (UInt32) -> Void
+
+    var body: some View {
+        ZStack {
+            Color(red: 0.94, green: 0.95, blue: 0.97).ignoresSafeArea()
+            VStack(spacing: 0) {
+                HStack {
+                    Text(menu?.title ?? "Main Menu")
+                        .font(.system(size: 22, weight: .medium))
+                        .foregroundStyle(.white)
+                    Spacer()
+                    Text(menu?.theme ?? "materialui")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+                .padding(.horizontal, 20)
+                .frame(height: 64)
+                .background(Color(red: 0.12, green: 0.47, blue: 0.74))
+
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        ForEach(menu?.entries ?? [], id: \.actionId) { entry in
+                            MaterialRow(entry: entry) { action(entry.actionId) }
+                        }
+                    }
+                    .padding(14)
+                }
+            }
+        }
+    }
+}
+
+private struct RguiMenuView: View {
+    let menu: MenuList?
+    let action: (UInt32) -> Void
+
+    var body: some View {
+        ZStack {
+            Color(red: 0.02, green: 0.05, blue: 0.12).ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 0) {
+                Text("┌─ \(menu?.title.uppercased() ?? "MAIN MENU") ".padding(toLength: 42, withPad: "─", startingAt: 0) + "┐")
+                    .font(rguiFont)
+                    .foregroundStyle(.cyan)
+                ForEach(menu?.entries ?? [], id: \.actionId) { entry in
+                    Button { action(entry.actionId) } label: {
+                        Text(rguiLine(for: entry))
+                            .font(rguiFont)
+                            .foregroundStyle(entry.actionId == 0 ? .gray : .white)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(entry.actionId == 0)
+                }
+                Spacer()
+                Text("└" + String(repeating: "─", count: 45) + "┘")
+                    .font(rguiFont)
+                    .foregroundStyle(.cyan)
+            }
+            .padding(18)
+        }
+    }
+
+    private var rguiFont: Font { .system(size: 16, weight: .regular, design: .monospaced) }
+
+    private func rguiLine(for entry: MenuEntry) -> String {
+        let marker = entry.kind == .submenu ? "▶" : " "
+        let value = entry.value.isEmpty ? "" : "  " + entry.value
+        return "│ \(marker) \(entry.label)\(value)".padding(toLength: 46, withPad: " ", startingAt: 0) + "│"
+    }
+}
+
+private struct XmbSubRow: View {
     let entry: MenuEntry
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 16) {
-                MenuEntryIcon(kind: entry.kind)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(entry.label)
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                    if !entry.sublabel.isEmpty {
-                        Text(entry.sublabel)
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.58))
-                            .lineLimit(2)
-                    }
-                }
-
-                Spacer(minLength: 12)
-
+            HStack {
+                Text(entry.label)
+                    .font(.system(size: 19, weight: .regular))
+                    .foregroundStyle(.white.opacity(entry.actionId == 0 ? 0.42 : 0.92))
+                Spacer()
                 if !entry.value.isEmpty {
                     Text(entry.value)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.cyan)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.55))
                         .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: 110, alignment: .trailing)
-                }
-
-                if entry.kind == .submenu {
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.white.opacity(0.5))
                 }
             }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(.white.opacity(0.08))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(.white.opacity(0.10), lineWidth: 1)
-                    )
-            )
+            .padding(.vertical, 7)
+            .padding(.horizontal, 16)
+            .background(Color.white.opacity(0.10))
         }
         .buttonStyle(.plain)
         .disabled(entry.actionId == 0)
     }
 }
 
-struct MenuEntryIcon: View {
+private struct OzoneRow: View {
+    let entry: MenuEntry
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                MenuEntryIcon(kind: entry.kind, family: "ozone", selected: false)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(entry.label)
+                        .font(.headline)
+                        .foregroundStyle(.white.opacity(entry.actionId == 0 ? 0.45 : 0.95))
+                    if !entry.sublabel.isEmpty {
+                        Text(entry.sublabel)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.45))
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+                if entry.kind == .submenu { Image(systemName: "chevron.right").foregroundStyle(.white.opacity(0.35)) }
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 14)
+            .background(Color.white.opacity(0.035))
+        }
+        .buttonStyle(.plain)
+        .disabled(entry.actionId == 0)
+    }
+}
+
+private struct MaterialRow: View {
+    let entry: MenuEntry
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 18) {
+                MenuEntryIcon(kind: entry.kind, family: "material", selected: false)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.label)
+                        .font(.body)
+                        .foregroundStyle(.black.opacity(entry.actionId == 0 ? 0.35 : 0.87))
+                    if !entry.sublabel.isEmpty {
+                        Text(entry.sublabel)
+                            .font(.caption)
+                            .foregroundStyle(.black.opacity(0.48))
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+                if !entry.value.isEmpty {
+                    Text(entry.value)
+                        .font(.caption)
+                        .foregroundStyle(Color(red: 0.12, green: 0.47, blue: 0.74))
+                        .lineLimit(1)
+                }
+            }
+            .padding(16)
+            .background(RoundedRectangle(cornerRadius: 3).fill(.white).shadow(color: .black.opacity(0.12), radius: 2, y: 1))
+        }
+        .buttonStyle(.plain)
+        .disabled(entry.actionId == 0)
+    }
+}
+
+private struct MenuEntryIcon: View {
     let kind: MenuEntryKind
+    let family: String
+    let selected: Bool
 
     var body: some View {
         Image(systemName: iconName)
-            .font(.system(size: 18, weight: .bold))
-            .foregroundStyle(.black)
-            .frame(width: 42, height: 42)
-            .background(Circle().fill(iconColor))
+            .font(.system(size: family == "rgui" ? 14 : 17, weight: .bold))
+            .foregroundStyle(family == "material" ? tint : .black)
+            .frame(width: iconSize, height: iconSize)
+            .background(background)
+    }
+
+    private var iconSize: CGFloat { family == "ozone" ? 30 : 42 }
+
+    @ViewBuilder
+    private var background: some View {
+        if family == "material" {
+            Color.clear
+        } else {
+            Circle().fill(selected ? Color.white : tint)
+        }
     }
 
     private var iconName: String {
         switch kind {
-        case .action:
-            return "play.fill"
-        case .submenu:
-            return "rectangle.grid.2x2.fill"
-        case .toggle:
-            return "switch.2"
-        case .setting:
-            return "slider.horizontal.3"
+        case .action: return "play.fill"
+        case .submenu: return family == "xmb" ? "square.grid.3x3.fill" : "folder.fill"
+        case .toggle: return "switch.2"
+        case .setting: return "slider.horizontal.3"
         }
     }
 
-    private var iconColor: Color {
+    private var tint: Color {
         switch kind {
-        case .action:
-            return .green
-        case .submenu:
-            return .cyan
-        case .toggle:
-            return .orange
-        case .setting:
-            return .purple
+        case .action: return .green
+        case .submenu: return .cyan
+        case .toggle: return .orange
+        case .setting: return .purple
         }
     }
 }

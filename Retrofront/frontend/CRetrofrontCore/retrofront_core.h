@@ -116,6 +116,14 @@ typedef struct RfMenuEntry {
 typedef struct RfMenuList {
     const char *title;
     uintptr_t entry_count;
+    const char *driver;
+    const char *theme;
+    const char *layout_model;
+    const char *navigation_model;
+    const char *icon_family;
+    bool supports_wallpaper;
+    bool supports_thumbnail_sidebar;
+    bool supports_touch;
 } RfMenuList;
 
 typedef struct RfSettingEntry {

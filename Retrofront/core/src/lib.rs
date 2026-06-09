@@ -650,6 +650,14 @@ pub struct RfMenuEntry {
 pub struct RfMenuList {
     pub title: *const c_char,
     pub entry_count: usize,
+    pub driver: *const c_char,
+    pub theme: *const c_char,
+    pub layout_model: *const c_char,
+    pub navigation_model: *const c_char,
+    pub icon_family: *const c_char,
+    pub supports_wallpaper: bool,
+    pub supports_thumbnail_sidebar: bool,
+    pub supports_touch: bool,
 }
 
 #[repr(C)]
@@ -1434,11 +1442,32 @@ pub unsafe extern "C" fn rf_frontend_menu_current_list(
     };
 
     with_active_frontend(|core| {
-        if let Some(list) = core.menu.current() {
-            let title_c = CString::new(list.title.as_str()).unwrap_or_default();
+        if let Some(presentation) = core.menu.presentation() {
+            let title_c = CString::new(presentation.title.as_str()).unwrap_or_default();
+            let driver_c = CString::new(presentation.driver.id()).unwrap_or_default();
+            let theme_c = CString::new(core.menu.skin.theme.as_str()).unwrap_or_default();
+            let layout_c = CString::new(presentation.style.layout_model).unwrap_or_default();
+            let navigation_c =
+                CString::new(presentation.style.navigation_model).unwrap_or_default();
+            let icon_c = CString::new(presentation.style.icon_family).unwrap_or_default();
+
             out_list.title = title_c.as_ptr();
-            out_list.entry_count = list.entries.len();
+            out_list.entry_count = presentation.entry_count;
+            out_list.driver = driver_c.as_ptr();
+            out_list.theme = theme_c.as_ptr();
+            out_list.layout_model = layout_c.as_ptr();
+            out_list.navigation_model = navigation_c.as_ptr();
+            out_list.icon_family = icon_c.as_ptr();
+            out_list.supports_wallpaper = presentation.style.supports_wallpaper;
+            out_list.supports_thumbnail_sidebar = presentation.style.supports_thumbnail_sidebar;
+            out_list.supports_touch = presentation.style.supports_touch;
+
             frontend.cached_strings.push(title_c);
+            frontend.cached_strings.push(driver_c);
+            frontend.cached_strings.push(theme_c);
+            frontend.cached_strings.push(layout_c);
+            frontend.cached_strings.push(navigation_c);
+            frontend.cached_strings.push(icon_c);
             true
         } else {
             false
@@ -1542,11 +1571,39 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
             core.menu.push_quick_menu(core.game_info().is_some());
             true
         }
-        menu::ACTION_ONLINE_UPDATER => {
-            core.menu.push_status(
-                "Online Updater",
-                "The RetroArch updater branch is modeled; network update jobs are not wired yet.",
+        menu::ACTION_HISTORY => {
+            core.menu.push_playlist_status(
+                "History",
+                "No recent content has been recorded by the host frontend yet.",
             );
+            true
+        }
+        menu::ACTION_FAVORITES => {
+            core.menu.push_playlist_status(
+                "Favorites",
+                "No favorite content has been pinned by the host frontend yet.",
+            );
+            true
+        }
+        menu::ACTION_IMPORT_CONTENT => {
+            core.menu.push_placeholder_settings("Import Content");
+            true
+        }
+        menu::ACTION_EXPLORE => {
+            core.menu.push_placeholder_settings("Explore");
+            true
+        }
+        menu::ACTION_NETPLAY => {
+            core.menu.push_placeholder_settings("Netplay");
+            true
+        }
+        menu::ACTION_CORE_CONTENTLESS => {
+            let cores = core.core_info.cores.clone();
+            core.menu.push_core_list(&cores);
+            true
+        }
+        menu::ACTION_ONLINE_UPDATER => {
+            core.menu.push_placeholder_settings("Online Updater");
             true
         }
         menu::ACTION_SETTINGS => {
@@ -1581,17 +1638,23 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
             true
         }
         menu::ACTION_SHADERS => {
-            core.menu.push_status(
-                "Shaders",
-                "Shader configuration is represented in the Rust video menu branch.",
-            );
+            core.menu.push_placeholder_settings("Shaders");
             true
         }
         menu::ACTION_SAVE_STATES => {
-            core.menu.push_status(
-                "Save States",
-                "Save-state actions are modeled but not executed yet.",
-            );
+            core.menu.push_placeholder_settings("Save States");
+            true
+        }
+        menu::ACTION_RECORDING => {
+            core.menu.push_placeholder_settings("Recording");
+            true
+        }
+        menu::ACTION_STREAMING => {
+            core.menu.push_placeholder_settings("Streaming");
+            true
+        }
+        menu::ACTION_ACHIEVEMENTS => {
+            core.menu.push_placeholder_settings("Achievements");
             true
         }
         menu::ACTION_CHEATS => {
@@ -1618,7 +1681,31 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
             core.menu.push_input_settings(&core.settings);
             true
         }
-        menu::ACTION_SETTINGS_USER_INTERFACE | menu::ACTION_SKIN_SETTINGS..=262 => {
+        menu::ACTION_SETTINGS_USER_INTERFACE | menu::ACTION_SKIN_SETTINGS..=267 => {
+            core.menu.push_skin_settings(&core.settings);
+            true
+        }
+        menu::ACTION_DRIVER_RGUI => {
+            core.settings.set("menu_driver", "rgui");
+            core.menu.set_driver(menu::MenuDriver::Rgui);
+            core.menu.push_skin_settings(&core.settings);
+            true
+        }
+        menu::ACTION_DRIVER_MATERIALUI => {
+            core.settings.set("menu_driver", "materialui");
+            core.menu.set_driver(menu::MenuDriver::MaterialUi);
+            core.menu.push_skin_settings(&core.settings);
+            true
+        }
+        menu::ACTION_DRIVER_XMB => {
+            core.settings.set("menu_driver", "xmb");
+            core.menu.set_driver(menu::MenuDriver::Xmb);
+            core.menu.push_skin_settings(&core.settings);
+            true
+        }
+        menu::ACTION_DRIVER_OZONE => {
+            core.settings.set("menu_driver", "ozone");
+            core.menu.set_driver(menu::MenuDriver::Ozone);
             core.menu.push_skin_settings(&core.settings);
             true
         }
@@ -1640,6 +1727,49 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
         }
         menu::ACTION_SETTINGS_PLAYLISTS => {
             core.menu.push_placeholder_settings("Playlists");
+            true
+        }
+        menu::ACTION_SETTINGS_NETWORK => {
+            core.menu.push_placeholder_settings("Network");
+            true
+        }
+        menu::ACTION_SETTINGS_ONSCREEN_DISPLAY => {
+            core.menu.push_placeholder_settings("On-Screen Display");
+            true
+        }
+        menu::ACTION_SETTINGS_ACCESSIBILITY => {
+            core.menu.push_placeholder_settings("Accessibility");
+            true
+        }
+        menu::ACTION_SETTINGS_AI_SERVICE => {
+            core.menu.push_placeholder_settings("AI Service");
+            true
+        }
+        menu::ACTION_SETTINGS_POWER_MANAGEMENT => {
+            core.menu.push_placeholder_settings("Power Management");
+            true
+        }
+        menu::ACTION_SETTINGS_LOGGING => {
+            core.menu.push_placeholder_settings("Logging");
+            true
+        }
+        menu::ACTION_SETTINGS_FILE_BROWSER => {
+            core.menu.push_placeholder_settings("File Browser");
+            true
+        }
+        menu::ACTION_SETTINGS_RECORDING => {
+            core.menu.push_placeholder_settings("Recording Settings");
+            true
+        }
+        menu::ACTION_SETTINGS_CLOUD_SYNC => {
+            core.menu.push_placeholder_settings("Cloud Sync");
+            true
+        }
+        menu::ACTION_REBOOT | menu::ACTION_QUIT => {
+            core.menu.push_status(
+                "System",
+                "The host frontend received a system-level menu request.",
+            );
             true
         }
         _ => false,

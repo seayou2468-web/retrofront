@@ -172,9 +172,24 @@ public struct MenuEntry: Sendable {
   public let actionId: UInt32
 }
 
+public enum MenuDriver: String, Sendable {
+  case rgui
+  case materialui
+  case xmb
+  case ozone
+}
+
 public struct MenuList: Sendable {
   public let title: String
   public let entries: [MenuEntry]
+  public let driver: MenuDriver
+  public let theme: String
+  public let layoutModel: String
+  public let navigationModel: String
+  public let iconFamily: String
+  public let supportsWallpaper: Bool
+  public let supportsThumbnailSidebar: Bool
+  public let supportsTouch: Bool
 }
 
 public struct RetrofrontSetting: Equatable, Sendable {
@@ -541,7 +556,19 @@ public final class Retrofront: @unchecked Sendable {
         ))
       }
     }
-    return MenuList(title: String(cString: raw.title), entries: entries)
+    let driverId = String(cString: raw.driver)
+    return MenuList(
+      title: String(cString: raw.title),
+      entries: entries,
+      driver: MenuDriver(rawValue: driverId) ?? .xmb,
+      theme: String(cString: raw.theme),
+      layoutModel: String(cString: raw.layout_model),
+      navigationModel: String(cString: raw.navigation_model),
+      iconFamily: String(cString: raw.icon_family),
+      supportsWallpaper: raw.supports_wallpaper,
+      supportsThumbnailSidebar: raw.supports_thumbnail_sidebar,
+      supportsTouch: raw.supports_touch
+    )
   }
 
   public func pushCoreList() {
