@@ -343,6 +343,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
     isRunning = false
     runTask?.cancel()
     runTask = nil
+    try? frontend?.saveSRAM()
   }
 
   @discardableResult
@@ -477,6 +478,26 @@ public final class EmulatorRuntimeModel: ObservableObject {
     settingValue("video_vsync") != "false"
   }
 
+  public var videoScaleModeChoices: [(label: String, value: String)] {
+    [("Aspect", "keep_aspect"), ("Integer", "integer"), ("Stretch", "stretch")]
+  }
+
+  public var videoFilterChoices: [(label: String, value: String)] {
+    [("Nearest", "nearest"), ("Linear", "linear")]
+  }
+
+  public var audioLatencyChoices: [(label: String, value: String)] {
+    [("32 ms", "32"), ("64 ms", "64"), ("96 ms", "96"), ("128 ms", "128")]
+  }
+
+  public var overlayOpacityChoices: [(label: String, value: String)] {
+    [("45%", "0.45"), ("70%", "0.70"), ("90%", "0.90")]
+  }
+
+  public var librarySortChoices: [(label: String, value: String)] {
+    [("Name ↑", "name_ascending"), ("Name ↓", "name_descending"), ("Extension", "extension")]
+  }
+
   public func setOverlayEnabledSetting(_ enabled: Bool) {
     setSetting(key: "input_overlay_enable", value: enabled ? "true" : "false")
     frontend?.setOverlayEnabled(enabled)
@@ -497,6 +518,92 @@ public final class EmulatorRuntimeModel: ObservableObject {
   public func setAudioSync(_ enabled: Bool) {
     setSetting(key: "audio_sync", value: enabled ? "true" : "false")
     statusMessage = enabled ? "Audio sync enabled" : "Audio sync disabled"
+  }
+
+
+  public func setAudioLatency(_ value: String) {
+    setSetting(key: "audio_latency_ms", value: value)
+    statusMessage = "Audio latency: \(audioLatencyLabel)"
+  }
+
+  public func setLibrarySort(_ value: String) {
+    setSetting(key: "library_sort_mode", value: value)
+    refreshGames()
+    statusMessage = "Library sort: \(librarySortLabel)"
+  }
+
+  public func selectOverlay(_ choice: OverlayChoice) {
+    setSetting(key: "input_overlay", value: choice.path)
+    if let frontend { loadConfiguredOverlay(frontend) }
+    statusMessage = "Overlay: \(choice.label)"
+  }
+
+  public func setOverlayOpacity(_ value: String) {
+    setSetting(key: "input_overlay_opacity", value: value)
+    if let frontend { loadConfiguredOverlay(frontend) }
+    statusMessage = "Overlay opacity: \(overlayOpacityLabel)"
+  }
+
+  public func setVideoScaleMode(_ value: String) {
+    setSetting(key: "video_scale_mode", value: value)
+    if let frontend { applyVideoSettings(frontend) }
+    refresh()
+    statusMessage = "Video scale: \(videoScaleModeLabel)"
+  }
+
+  public func setVideoFilter(_ value: String) {
+    setSetting(key: "video_filter_mode", value: value)
+    if let frontend { applyVideoSettings(frontend) }
+    refresh()
+    statusMessage = "Video filter: \(videoFilterLabel)"
+  }
+
+  public func closeContent() {
+    stop()
+    frontend?.unloadGame()
+    loadedGameURL = nil
+    displayImage = nil
+    refresh()
+    statusMessage = "Content closed"
+  }
+
+  public func closeCore() {
+    stop()
+    frontend?.unloadCore()
+    loadedGameURL = nil
+    corePath = nil
+    systemInfo = nil
+    displayImage = nil
+    refresh()
+    statusMessage = "Core unloaded"
+  }
+
+  public func resetContent() {
+    do {
+      try frontend?.reset()
+      statusMessage = "Content reset"
+    } catch {
+      statusMessage = "Reset failed: \(error)"
+    }
+  }
+
+  public func saveState(slot: UInt32 = 0) {
+    do {
+      try frontend?.saveState(slot: slot)
+      try? frontend?.saveSRAM()
+      statusMessage = "Saved state slot \(slot)"
+    } catch {
+      statusMessage = "Save state failed: \(error)"
+    }
+  }
+
+  public func loadState(slot: UInt32 = 0) {
+    do {
+      try frontend?.loadState(slot: slot)
+      statusMessage = "Loaded state slot \(slot)"
+    } catch {
+      statusMessage = "Load state failed: \(error)"
+    }
   }
 
   public func cycleAudioLatency() {

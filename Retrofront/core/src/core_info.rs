@@ -312,6 +312,20 @@ impl CoreInfoList {
                 "Nintendo Entertainment System",
                 &["nes", "fds"][..],
             ))
+        } else if normalized.contains("melonds") || normalized.contains("desmume") {
+            Some(("Nintendo - DS", "Nintendo DS", &["nds", "bin"][..]))
+        } else if normalized.contains("genesis_plus_gx") || normalized.contains("picodrive") {
+            Some((
+                "Sega - Mega Drive / Genesis",
+                "Mega Drive / Genesis",
+                &["md", "smd", "gen", "sms", "gg", "sg", "cue"][..],
+            ))
+        } else if normalized.contains("beetle_psx") || normalized.contains("pcsx") {
+            Some((
+                "Sony - PlayStation",
+                "PlayStation",
+                &["cue", "bin", "chd", "pbp", "toc", "m3u"][..],
+            ))
         } else {
             None
         };

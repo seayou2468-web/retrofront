@@ -270,6 +270,25 @@ public final class Retrofront: @unchecked Sendable {
     rf_frontend_unload_game(handle)
   }
 
+  public func unloadCore() {
+    rf_frontend_unload_core(handle)
+  }
+
+  public func reset() throws {
+    guard rf_frontend_reset(handle) else { throw lastError() }
+  }
+
+  public func saveSRAM() throws {
+    guard rf_frontend_save_sram(handle) else { throw lastError() }
+  }
+
+  public func saveState(slot: UInt32 = 0) throws {
+    guard rf_frontend_save_state(handle, slot) else { throw lastError() }
+  }
+
+  public func loadState(slot: UInt32 = 0) throws {
+    guard rf_frontend_load_state(handle, slot) else { throw lastError() }
+  }
 
   public func setJoypadButton(_ button: JoypadButton, pressed: Bool) throws {
     guard rf_frontend_set_joypad_button(handle, button.rawValue, pressed) else {

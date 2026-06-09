@@ -193,11 +193,11 @@ struct SettingsView: View {
     var body: some View {
         AppScreen(title: "Settings", subtitle: "実際に保存・反映されるアプリ設定") {
             SettingsGroup(title: "Video") {
-                SettingChoiceRow(title: "Scale", subtitle: "画面比率の扱い", value: runtime.videoScaleModeLabel) {
-                    runtime.cycleVideoScaleMode()
+                SettingPickerRow(title: "Scale", subtitle: "画面比率の扱い", value: runtime.videoScaleModeLabel, choices: runtime.videoScaleModeChoices) { choice in
+                    runtime.setVideoScaleMode(choice.value)
                 }
-                SettingChoiceRow(title: "Filter", subtitle: "ピクセル描画品質", value: runtime.videoFilterLabel) {
-                    runtime.toggleVideoFilter()
+                SettingPickerRow(title: "Filter", subtitle: "ピクセル描画品質", value: runtime.videoFilterLabel, choices: runtime.videoFilterChoices) { choice in
+                    runtime.setVideoFilter(choice.value)
                 }
                 SettingToggleRow(title: "VSync", subtitle: "表示更新に同期", isOn: runtime.vsyncEnabled) {
                     runtime.setVsyncEnabled($0)
@@ -211,8 +211,8 @@ struct SettingsView: View {
                 SettingToggleRow(title: "Audio Sync", subtitle: "音声同期", isOn: runtime.audioSyncSetting) {
                     runtime.setAudioSync($0)
                 }
-                SettingChoiceRow(title: "Latency", subtitle: "出力遅延", value: runtime.audioLatencyLabel) {
-                    runtime.cycleAudioLatency()
+                SettingPickerRow(title: "Latency", subtitle: "出力遅延", value: runtime.audioLatencyLabel, choices: runtime.audioLatencyChoices) { choice in
+                    runtime.setAudioLatency(choice.value)
                 }
             }
 
@@ -220,11 +220,11 @@ struct SettingsView: View {
                 SettingToggleRow(title: "Touch Overlay", subtitle: "画面上コントローラー", isOn: runtime.overlayEnabledSetting) {
                     runtime.setOverlayEnabledSetting($0)
                 }
-                SettingChoiceRow(title: "Overlay Set", subtitle: "RetroArch overlay .cfg", value: runtime.overlaySelectionLabel) {
-                    runtime.cycleOverlaySelection()
+                SettingPickerRow(title: "Overlay Set", subtitle: "RetroArch overlay .cfg", value: runtime.overlaySelectionLabel, choices: runtime.availableOverlays.map { (label: $0.label, value: $0.path) }) { choice in
+                    if let overlay = runtime.availableOverlays.first(where: { $0.path == choice.value }) { runtime.selectOverlay(overlay) }
                 }
-                SettingChoiceRow(title: "Overlay Opacity", subtitle: "タッチ操作の透明度", value: runtime.overlayOpacityLabel) {
-                    runtime.cycleOverlayOpacity()
+                SettingPickerRow(title: "Overlay Opacity", subtitle: "タッチ操作の透明度", value: runtime.overlayOpacityLabel, choices: runtime.overlayOpacityChoices) { choice in
+                    runtime.setOverlayOpacity(choice.value)
                 }
                 SettingToggleRow(title: "Haptics", subtitle: "タッチ操作の振動フィードバック", isOn: runtime.hapticsEnabledSetting) {
                     runtime.setHapticsEnabled($0)
@@ -232,8 +232,8 @@ struct SettingsView: View {
             }
 
             SettingsGroup(title: "Library") {
-                SettingChoiceRow(title: "Sort", subtitle: "ROMの並び順", value: runtime.librarySortLabel) {
-                    runtime.cycleLibrarySort()
+                SettingPickerRow(title: "Sort", subtitle: "ROMの並び順", value: runtime.librarySortLabel, choices: runtime.librarySortChoices) { choice in
+                    runtime.setLibrarySort(choice.value)
                 }
                 SettingToggleRow(title: "Core Badges", subtitle: "互換コア数をROMに表示", isOn: runtime.libraryCoreBadgesEnabled) {
                     runtime.setLibraryCoreBadgesEnabled($0)
@@ -252,13 +252,8 @@ struct SettingsView: View {
                     SettingInfoRow(title: "Core Options", value: "Load a core to edit its options")
                 } else {
                     ForEach(runtime.coreOptions, id: \.key) { option in
-                        SettingChoiceRow(title: option.desc.isEmpty ? option.key : option.desc, subtitle: option.info.isEmpty ? option.key : option.info, value: option.value) {
-                            guard let current = option.values.firstIndex(where: { $0.value == option.value }) else {
-                                if let next = option.values.first { runtime.setOption(key: option.key, value: next.value) }
-                                return
-                            }
-                            let next = option.values[(current + 1) % option.values.count]
-                            runtime.setOption(key: option.key, value: next.value)
+                        SettingPickerRow(title: option.desc.isEmpty ? option.key : option.desc, subtitle: option.info.isEmpty ? option.key : option.info, value: option.value, choices: option.values.map { (label: $0.label.isEmpty ? $0.value : $0.label, value: $0.value) }) { choice in
+                            runtime.setOption(key: option.key, value: choice.value)
                         }
                     }
                 }
@@ -525,14 +520,30 @@ struct SettingsGroup<Content: View>: View {
     }
 }
 
-struct SettingChoiceRow: View {
+struct SettingPickerRow: View {
     let title: String
     let subtitle: String
     let value: String
-    let action: () -> Void
+    let choices: [(label: String, value: String)]
+    let onSelect: ((label: String, value: String)) -> Void
 
     var body: some View {
-        Button(action: action) {
+        Menu {
+            if choices.isEmpty {
+                Text("No choices available")
+            } else {
+                ForEach(choices, id: \.value) { choice in
+                    Button {
+                        onSelect(choice)
+                    } label: {
+                        HStack {
+                            Text(choice.label)
+                            if choice.value == value || choice.label == value { Image(systemName: "checkmark") }
+                        }
+                    }
+                }
+            }
+        } label: {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title).font(.subheadline.bold()).foregroundColor(OneUI.ink)
@@ -545,6 +556,9 @@ struct SettingChoiceRow: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(Capsule().fill(OneUI.accent.opacity(0.10)))
+                Image(systemName: "chevron.down")
+                    .font(.caption.bold())
+                    .foregroundColor(OneUI.secondary)
             }
             .padding(12)
             .background(OneUI.elevated)
@@ -553,6 +567,7 @@ struct SettingChoiceRow: View {
         .buttonStyle(.plain)
     }
 }
+
 
 struct SettingToggleRow: View {
     let title: String
@@ -640,6 +655,8 @@ struct PlayView: View {
                     .onChanged { value in runtime.setOverlayTouch(slot: 0, location: value.location, in: outer.size, active: true) }
                     .onEnded { _ in runtime.setOverlayTouch(slot: 0, location: .zero, in: outer.size, active: false) }
             )
+            .onAppear { runtime.setOverlayOrientation(for: outer.size) }
+            .onChange(of: outer.size) { newSize in runtime.setOverlayOrientation(for: newSize) }
         }
         .background(Color.black.ignoresSafeArea())
         .statusBar(hidden: true)

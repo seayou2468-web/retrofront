@@ -162,6 +162,11 @@ bool rf_frontend_load_game(RfFrontend *frontend, const char *path, const char *m
 bool rf_frontend_launch_content(RfFrontend *frontend, const char *path, const char *preferred_core, const char *meta);
 bool rf_frontend_run_frame(RfFrontend *frontend);
 void rf_frontend_unload_game(RfFrontend *frontend);
+void rf_frontend_unload_core(RfFrontend *frontend);
+bool rf_frontend_reset(RfFrontend *frontend);
+bool rf_frontend_save_sram(RfFrontend *frontend);
+bool rf_frontend_save_state(RfFrontend *frontend, uint32_t slot);
+bool rf_frontend_load_state(RfFrontend *frontend, uint32_t slot);
 bool rf_frontend_set_gfx_backend(RfFrontend *frontend, uint32_t backend);
 bool rf_frontend_get_gfx_video_config(const RfFrontend *frontend, RfGfxVideoConfig *out_config);
 bool rf_frontend_set_gfx_video_config(RfFrontend *frontend, const RfGfxVideoConfig *config);

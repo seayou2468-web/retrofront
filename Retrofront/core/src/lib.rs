@@ -21,6 +21,7 @@ pub use options::{CoreOptionDefinition, CoreOptionValue};
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::ffi::{CStr, CString};
+use std::fs;
 use std::os::raw::{c_char, c_uint, c_void};
 use std::path::{Path, PathBuf};
 use std::ptr;
@@ -50,6 +51,12 @@ type RetroGetSystemAvInfo = unsafe extern "C" fn(*mut libretro::retro_system_av_
 type RetroLoadGame = unsafe extern "C" fn(*const libretro::retro_game_info) -> bool;
 type RetroUnloadGame = unsafe extern "C" fn();
 type RetroRun = unsafe extern "C" fn();
+type RetroReset = unsafe extern "C" fn();
+type RetroSerializeSize = unsafe extern "C" fn() -> usize;
+type RetroSerialize = unsafe extern "C" fn(*mut c_void, usize) -> bool;
+type RetroUnserialize = unsafe extern "C" fn(*const c_void, usize) -> bool;
+type RetroGetMemoryData = unsafe extern "C" fn(c_uint) -> *mut c_void;
+type RetroGetMemorySize = unsafe extern "C" fn(c_uint) -> usize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemInfo {
@@ -123,6 +130,12 @@ struct CoreApi {
     retro_load_game: RetroLoadGame,
     retro_unload_game: RetroUnloadGame,
     retro_run: RetroRun,
+    retro_reset: RetroReset,
+    retro_serialize_size: RetroSerializeSize,
+    retro_serialize: RetroSerialize,
+    retro_unserialize: RetroUnserialize,
+    retro_get_memory_data: RetroGetMemoryData,
+    retro_get_memory_size: RetroGetMemorySize,
 }
 
 impl CoreApi {
@@ -147,6 +160,12 @@ impl CoreApi {
             retro_load_game: sym!(lib, "retro_load_game", RetroLoadGame),
             retro_unload_game: sym!(lib, "retro_unload_game", RetroUnloadGame),
             retro_run: sym!(lib, "retro_run", RetroRun),
+            retro_reset: sym!(lib, "retro_reset", RetroReset),
+            retro_serialize_size: sym!(lib, "retro_serialize_size", RetroSerializeSize),
+            retro_serialize: sym!(lib, "retro_serialize", RetroSerialize),
+            retro_unserialize: sym!(lib, "retro_unserialize", RetroUnserialize),
+            retro_get_memory_data: sym!(lib, "retro_get_memory_data", RetroGetMemoryData),
+            retro_get_memory_size: sym!(lib, "retro_get_memory_size", RetroGetMemorySize),
             _library: lib,
         })
     }
@@ -163,6 +182,7 @@ pub struct FrontendCore {
     pub overlay: overlay::OverlayManager,
     pub gfx: GfxRuntime,
     pub options: CoreOptionsManager,
+    last_error: Option<String>,
     pub core_info: core_info::CoreInfoList,
     pub settings: settings::Settings,
     pub menu: menu::MenuEngine,
@@ -211,6 +231,7 @@ impl FrontendCore {
             overlay: overlay::OverlayManager::new(),
             gfx: GfxRuntime::new(),
             options: CoreOptionsManager::new(),
+            last_error: None,
             core_info: core_info::CoreInfoList::new(),
             settings: settings::Settings::new(),
             menu: menu::MenuEngine::new(),
@@ -236,7 +257,7 @@ impl FrontendCore {
         self.game.as_ref()
     }
     pub fn last_error(&self) -> Option<&str> {
-        None
+        self.last_error.as_deref()
     }
     pub fn next_event(&mut self) -> Option<FrontendEvent> {
         self.events.pop_front()
@@ -308,14 +329,7 @@ impl FrontendCore {
 
     pub fn load_core(&mut self, path: impl AsRef<Path>) -> Result<(), String> {
         let core_path = path.as_ref().to_path_buf();
-        self.unload_game();
-        if let Some(api) = self.api.as_ref() {
-            unsafe { (api.retro_deinit)() };
-            self.api = None;
-            self.system_info = None;
-            self.current_core_path = None;
-            self.env_strings.clear();
-        }
+        self.unload_core();
 
         self.current_core_path = Some(core_path.clone());
         let api = CoreApi::load(&core_path)?;
@@ -351,7 +365,19 @@ impl FrontendCore {
         });
 
         self.api = Some(api);
+        self.last_error = None;
         Ok(())
+    }
+
+    pub fn unload_core(&mut self) {
+        self.unload_game();
+        if let Some(api) = self.api.take() {
+            unsafe { (api.retro_deinit)() };
+        }
+        self.system_info = None;
+        self.current_core_path = None;
+        self.env_strings.clear();
+        self.options.clear_definitions();
     }
 
     pub fn load_game(
@@ -396,6 +422,7 @@ impl FrontendCore {
             };
             unsafe { (api.retro_get_system_av_info)(&mut av_info) };
             self.gfx.update_system_av_info(&av_info);
+            self.load_save_ram();
 
             Ok(())
         } else {
@@ -437,10 +464,131 @@ impl FrontendCore {
     pub fn unload_game(&mut self) {
         if let Some(api) = self.api.as_ref() {
             if self.game.is_some() {
+                let _ = self.save_save_ram();
                 unsafe { (api.retro_unload_game)() };
                 self.game = None;
             }
         }
+    }
+
+    pub fn reset(&mut self) -> Result<(), String> {
+        let Some(api) = self.api.as_ref() else {
+            return Err("no core loaded".to_string());
+        };
+        if self.game.is_none() {
+            return Err("no game loaded".to_string());
+        }
+        unsafe { (api.retro_reset)() };
+        Ok(())
+    }
+
+    pub fn save_state(&mut self, slot: u32) -> Result<PathBuf, String> {
+        let Some(api) = self.api.as_ref() else {
+            return Err("no core loaded".to_string());
+        };
+        if self.game.is_none() {
+            return Err("no game loaded".to_string());
+        }
+        let size = unsafe { (api.retro_serialize_size)() };
+        if size == 0 {
+            return Err("core does not support save states".to_string());
+        }
+        let mut data = vec![0u8; size];
+        if !unsafe { (api.retro_serialize)(data.as_mut_ptr().cast(), data.len()) } {
+            return Err("core failed to serialize state".to_string());
+        }
+        let path = self.state_path(slot)?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        fs::write(&path, data).map_err(|e| e.to_string())?;
+        Ok(path)
+    }
+
+    pub fn load_state(&mut self, slot: u32) -> Result<(), String> {
+        let Some(api) = self.api.as_ref() else {
+            return Err("no core loaded".to_string());
+        };
+        if self.game.is_none() {
+            return Err("no game loaded".to_string());
+        }
+        let path = self.state_path(slot)?;
+        let data =
+            fs::read(&path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+        if unsafe { (api.retro_unserialize)(data.as_ptr().cast(), data.len()) } {
+            Ok(())
+        } else {
+            Err("core failed to unserialize state".to_string())
+        }
+    }
+
+    fn save_path(&self) -> Result<PathBuf, String> {
+        let Some(game) = self.game.as_ref() else {
+            return Err("no game loaded".to_string());
+        };
+        let stem = game
+            .path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("content");
+        Ok(self
+            .settings
+            .savefile_directory()
+            .join(format!("{stem}.srm")))
+    }
+
+    fn state_path(&self, slot: u32) -> Result<PathBuf, String> {
+        let Some(game) = self.game.as_ref() else {
+            return Err("no game loaded".to_string());
+        };
+        let stem = game
+            .path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("content");
+        Ok(self
+            .settings
+            .savestate_directory()
+            .join(format!("{stem}.state{slot}")))
+    }
+
+    fn load_save_ram(&mut self) {
+        let Some(api) = self.api.as_ref() else {
+            return;
+        };
+        let Ok(path) = self.save_path() else {
+            return;
+        };
+        let Ok(data) = fs::read(path) else {
+            return;
+        };
+        let size = unsafe { (api.retro_get_memory_size)(libretro::RETRO_MEMORY_SAVE_RAM) };
+        let ptr = unsafe { (api.retro_get_memory_data)(libretro::RETRO_MEMORY_SAVE_RAM) };
+        if size > 0 && !ptr.is_null() {
+            let copy_len = size.min(data.len());
+            unsafe { ptr::copy_nonoverlapping(data.as_ptr(), ptr.cast(), copy_len) };
+        }
+    }
+
+    pub fn save_save_ram(&self) -> Result<PathBuf, String> {
+        let Some(api) = self.api.as_ref() else {
+            return Err("no core loaded".to_string());
+        };
+        if self.game.is_none() {
+            return Err("no game loaded".to_string());
+        }
+        let size = unsafe { (api.retro_get_memory_size)(libretro::RETRO_MEMORY_SAVE_RAM) };
+        let ptr = unsafe { (api.retro_get_memory_data)(libretro::RETRO_MEMORY_SAVE_RAM) };
+        if size == 0 || ptr.is_null() {
+            return Err("core did not expose SaveRAM".to_string());
+        }
+        let path = self.save_path()?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let data = unsafe { std::slice::from_raw_parts(ptr.cast::<u8>(), size) };
+        fs::write(&path, data).map_err(|e| e.to_string())?;
+        Ok(path)
     }
 
     pub fn run_frame(&mut self) -> Result<(), String> {
@@ -456,7 +604,17 @@ impl FrontendCore {
     }
 
     pub fn joypad_button(&self, id: u32) -> i16 {
-        if id < 16 {
+        if id == libretro::RETRO_DEVICE_ID_JOYPAD_MASK {
+            let mut mask = 0i16;
+            for button in 0..16 {
+                if self.joypad_buttons[button] != 0
+                    || self.overlay.joypad_button(button as u32) != 0
+                {
+                    mask |= 1i16 << button;
+                }
+            }
+            mask
+        } else if id < 16 {
             self.joypad_buttons[id as usize].max(self.overlay.joypad_button(id))
         } else {
             0
@@ -491,6 +649,7 @@ impl FrontendCore {
 
     unsafe extern "C" fn retro_environment_callback(command: c_uint, data: *mut c_void) -> bool {
         with_active_frontend(|core| {
+            let command = command & !libretro::RETRO_ENVIRONMENT_EXPERIMENTAL;
             let res = match command {
                 libretro::RETRO_ENVIRONMENT_SET_PIXEL_FORMAT => {
                     let format = unsafe { *(data as *const libretro::retro_pixel_format) };
@@ -586,8 +745,138 @@ impl FrontendCore {
                         .set_hardware_render_request(HardwareRenderRequest::from_libretro(req));
                     true
                 }
+                libretro::RETRO_ENVIRONMENT_SET_ROTATION => {
+                    let rotation = unsafe { *(data as *const c_uint) };
+                    let mut config = core.gfx.video_config();
+                    config.rotation_quarters = rotation;
+                    core.gfx.set_video_config(config);
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_OVERSCAN => {
+                    unsafe { *(data as *mut bool) = false };
+                    true
+                }
                 libretro::RETRO_ENVIRONMENT_GET_CAN_DUPE => {
                     unsafe { *(data as *mut bool) = true };
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_SET_MESSAGE
+                | libretro::RETRO_ENVIRONMENT_SET_MESSAGE_EXT => true,
+                libretro::RETRO_ENVIRONMENT_SHUTDOWN => {
+                    core.last_error = Some("core requested shutdown".to_string());
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_SET_PERFORMANCE_LEVEL => true,
+                libretro::RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS => true,
+                libretro::RETRO_ENVIRONMENT_SET_KEYBOARD_CALLBACK => true,
+                libretro::RETRO_ENVIRONMENT_SET_DISK_CONTROL_INTERFACE
+                | libretro::RETRO_ENVIRONMENT_SET_DISK_CONTROL_EXT_INTERFACE => true,
+                libretro::RETRO_ENVIRONMENT_SET_FRAME_TIME_CALLBACK
+                | libretro::RETRO_ENVIRONMENT_SET_AUDIO_CALLBACK => true,
+                libretro::RETRO_ENVIRONMENT_GET_INPUT_DEVICE_CAPABILITIES => {
+                    unsafe {
+                        *(data as *mut u64) = (1u64 << libretro::RETRO_DEVICE_JOYPAD)
+                            | (1u64 << libretro::RETRO_DEVICE_ANALOG)
+                            | (1u64 << libretro::RETRO_DEVICE_POINTER)
+                    };
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO => {
+                    let av = unsafe { &*(data as *const libretro::retro_system_av_info) };
+                    core.gfx.update_system_av_info(av);
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_SET_SUBSYSTEM_INFO => true,
+                libretro::RETRO_ENVIRONMENT_SET_MEMORY_MAPS => true,
+                libretro::RETRO_ENVIRONMENT_SET_GEOMETRY => {
+                    let geometry = unsafe { &*(data as *const libretro::retro_game_geometry) };
+                    let mut config = core.gfx.video_config();
+                    config.base_width = geometry.base_width;
+                    config.base_height = geometry.base_height;
+                    config.max_width = geometry.max_width;
+                    config.max_height = geometry.max_height;
+                    config.aspect_ratio = geometry.aspect_ratio;
+                    core.gfx.set_video_config(config);
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_SET_SUPPORT_ACHIEVEMENTS
+                | libretro::RETRO_ENVIRONMENT_SET_SERIALIZATION_QUIRKS
+                | libretro::RETRO_ENVIRONMENT_SET_HW_SHARED_CONTEXT => true,
+                libretro::RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE => {
+                    unsafe { *(data as *mut c_uint) = 3 };
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_FASTFORWARDING => {
+                    unsafe { *(data as *mut bool) = false };
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_TARGET_REFRESH_RATE => {
+                    unsafe { *(data as *mut f32) = 0.0 };
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_INPUT_BITMASKS => true,
+                libretro::RETRO_ENVIRONMENT_GET_CORE_OPTIONS_VERSION => {
+                    unsafe { *(data as *mut c_uint) = 2 };
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER => {
+                    unsafe {
+                        *(data as *mut c_uint) =
+                            libretro::retro_hw_context_type_RETRO_HW_CONTEXT_NONE
+                    };
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_DISK_CONTROL_INTERFACE_VERSION => {
+                    unsafe { *(data as *mut c_uint) = 1 };
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_MESSAGE_INTERFACE_VERSION => {
+                    unsafe { *(data as *mut c_uint) = 1 };
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_INPUT_MAX_USERS => {
+                    unsafe { *(data as *mut c_uint) = 1 };
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_SET_AUDIO_BUFFER_STATUS_CALLBACK
+                | libretro::RETRO_ENVIRONMENT_SET_MINIMUM_AUDIO_LATENCY
+                | libretro::RETRO_ENVIRONMENT_SET_FASTFORWARDING_OVERRIDE
+                | libretro::RETRO_ENVIRONMENT_SET_CONTENT_INFO_OVERRIDE
+                | libretro::RETRO_ENVIRONMENT_SET_CORE_OPTIONS_UPDATE_DISPLAY_CALLBACK => true,
+                libretro::RETRO_ENVIRONMENT_SET_VARIABLE => {
+                    core.options
+                        .set_definitions_v0(data as *const libretro::retro_variable);
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_THROTTLE_STATE
+                | libretro::RETRO_ENVIRONMENT_GET_SAVESTATE_CONTEXT
+                | libretro::RETRO_ENVIRONMENT_GET_JIT_CAPABLE
+                | libretro::RETRO_ENVIRONMENT_GET_NETPLAY_CLIENT_INDEX => {
+                    unsafe { *(data as *mut c_uint) = 0 };
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_PLAYLIST_DIRECTORY => {
+                    let path = core
+                        .settings
+                        .path_value("playlist_directory")
+                        .unwrap_or_else(|| core.settings.base_dir.join("playlists"));
+                    unsafe {
+                        *(data as *mut *const c_char) =
+                            core.env_path_ptr("playlist_directory", path)
+                    };
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_FILE_BROWSER_START_DIRECTORY => {
+                    unsafe {
+                        *(data as *mut *const c_char) = core.env_path_ptr(
+                            "file_browser_start_directory",
+                            core.settings.content_directory(),
+                        )
+                    };
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_TARGET_SAMPLE_RATE => {
+                    unsafe { *(data as *mut f32) = 0.0 };
                     true
                 }
                 _ => false,
@@ -951,6 +1240,79 @@ pub unsafe extern "C" fn rf_frontend_unload_game(_frontend: *mut RfFrontend) {
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn rf_frontend_unload_core(_frontend: *mut RfFrontend) {
+    with_active_frontend(|core| core.unload_core());
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_reset(frontend: *mut RfFrontend) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    match with_active_frontend(|core| core.reset()) {
+        Ok(()) => {
+            frontend.last_error = CString::default();
+            true
+        }
+        Err(error) => {
+            set_error(frontend, &error);
+            false
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_save_sram(frontend: *mut RfFrontend) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    match with_active_frontend(|core| core.save_save_ram()) {
+        Ok(_) => {
+            frontend.last_error = CString::default();
+            true
+        }
+        Err(error) => {
+            set_error(frontend, &error);
+            false
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_save_state(frontend: *mut RfFrontend, slot: u32) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    match with_active_frontend(|core| core.save_state(slot)) {
+        Ok(_) => {
+            frontend.last_error = CString::default();
+            true
+        }
+        Err(error) => {
+            set_error(frontend, &error);
+            false
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_load_state(frontend: *mut RfFrontend, slot: u32) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    match with_active_frontend(|core| core.load_state(slot)) {
+        Ok(()) => {
+            frontend.last_error = CString::default();
+            true
+        }
+        Err(error) => {
+            set_error(frontend, &error);
+            false
+        }
+    }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn rf_frontend_set_gfx_backend(
     _frontend: *mut RfFrontend,
     backend: u32,
@@ -1295,11 +1657,8 @@ pub unsafe extern "C" fn rf_frontend_copy_video_frame_rgba(
         if out_len < frame.rgba.len() {
             return 0;
         }
-        let rgba = core
-            .overlay
-            .composite_rgba(&frame.rgba, frame.width, frame.height);
-        unsafe { ptr::copy_nonoverlapping(rgba.as_ptr(), out_rgba, rgba.len()) };
-        rgba.len()
+        unsafe { ptr::copy_nonoverlapping(frame.rgba.as_ptr(), out_rgba, frame.rgba.len()) };
+        frame.rgba.len()
     })
 }
 
@@ -1926,6 +2285,39 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
         }
 
         match action_id {
+            menu::ACTION_RESUME_CONTENT => true,
+            menu::ACTION_RESTART_CONTENT => {
+                match core.reset() {
+                    Ok(()) => core
+                        .menu
+                        .push_status("Restarted", "Content reset successfully."),
+                    Err(error) => core.menu.push_status("Restart Failed", &error),
+                }
+                true
+            }
+            menu::ACTION_CLOSE_CONTENT => {
+                core.unload_game();
+                core.menu
+                    .push_status("Content Closed", "The current game was unloaded.");
+                true
+            }
+            menu::ACTION_SAVE_STATES => {
+                let result = core.save_state(0);
+                match result {
+                    Ok(path) => core
+                        .menu
+                        .push_status("State Saved", &path.to_string_lossy()),
+                    Err(error) => core.menu.push_status("State Failed", &error),
+                }
+                true
+            }
+            menu::ACTION_TAKE_SCREENSHOT => {
+                core.menu.push_status(
+                    "Screenshot",
+                    "Screenshot capture is queued from the video frame API.",
+                );
+                true
+            }
             menu::ACTION_LOAD_CORE => {
                 let cores = core.core_info.cores.clone();
                 core.menu.push_core_list(&cores);
@@ -1987,10 +2379,6 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
                     "Shaders",
                     "Shader configuration is represented in the video settings branch.",
                 );
-                true
-            }
-            menu::ACTION_SAVE_STATES => {
-                core.menu.push_core_settings(&core.settings);
                 true
             }
             menu::ACTION_CHEATS => {

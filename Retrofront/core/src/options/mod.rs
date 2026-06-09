@@ -44,6 +44,13 @@ impl CoreOptionsManager {
         Self::default()
     }
 
+    pub fn clear_definitions(&mut self) {
+        self.definitions.clear();
+        self._categories.clear();
+        self.c_values_cache.clear();
+        self.updated = true;
+    }
+
     pub fn set_config_path(&mut self, path: PathBuf) {
         self.config_path = Some(path);
         self.load();
