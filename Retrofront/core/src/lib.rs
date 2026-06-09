@@ -8,6 +8,7 @@ mod launch;
 pub mod libretro;
 mod menu;
 mod options;
+pub mod overlay;
 mod playlist;
 mod scanner;
 mod settings;
@@ -147,6 +148,7 @@ pub struct FrontendCore {
     game: Option<GameInfo>,
     events: VecDeque<FrontendEvent>,
     joypad_buttons: [i16; 16],
+    pub overlay: overlay::OverlayManager,
     pub gfx: GfxRuntime,
     pub options: CoreOptionsManager,
     pub core_info: core_info::CoreInfoList,
@@ -192,6 +194,7 @@ impl FrontendCore {
             game: None,
             events: VecDeque::new(),
             joypad_buttons: [0; 16],
+            overlay: overlay::OverlayManager::new(),
             gfx: GfxRuntime::new(),
             options: CoreOptionsManager::new(),
             core_info: core_info::CoreInfoList::new(),
@@ -235,6 +238,7 @@ impl FrontendCore {
 
     pub fn configure_from_settings(&mut self) {
         self.settings.ensure_directories();
+        self.configure_overlay_from_settings();
         self.core_info
             .set_info_dir(self.settings.libretro_info_path());
         self.options.set_config_path(
@@ -242,6 +246,46 @@ impl FrontendCore {
                 .path_value("core_options_path")
                 .unwrap_or_else(|| self.settings.base_dir.join("retroarch-core-options.cfg")),
         );
+    }
+
+    pub fn configure_overlay_from_settings(&mut self) {
+        if !self
+            .settings
+            .bool_value("input_overlay_enable")
+            .unwrap_or(true)
+        {
+            self.overlay.set_enabled(false);
+            return;
+        }
+        if let Some(path) = self.settings.string_value("input_overlay") {
+            if !path.is_empty() {
+                let _ = self.overlay.load(path);
+            }
+        }
+        if let Some(opacity) = self.settings.float_value("input_overlay_opacity") {
+            self.overlay.set_opacity(opacity);
+        }
+        if let Some(scale) = self.settings.float_value("input_overlay_scale") {
+            self.overlay.set_scale_factor(scale);
+        }
+    }
+
+    pub fn load_overlay(&mut self, path: impl AsRef<Path>) -> Result<(), String> {
+        self.overlay.load(path)
+    }
+
+    pub fn set_overlay_touch(
+        &mut self,
+        slot: usize,
+        x: f32,
+        y: f32,
+        active: bool,
+    ) -> Result<(), String> {
+        self.overlay.set_touch(slot, x, y, active)
+    }
+
+    pub fn clear_overlay_touches(&mut self) {
+        self.overlay.clear_touches();
     }
 
     pub fn load_core(&mut self, path: impl AsRef<Path>) -> Result<(), String> {
@@ -395,7 +439,7 @@ impl FrontendCore {
 
     pub fn joypad_button(&self, id: u32) -> i16 {
         if id < 16 {
-            self.joypad_buttons[id as usize]
+            self.joypad_buttons[id as usize].max(self.overlay.joypad_button(id))
         } else {
             0
         }
@@ -539,6 +583,7 @@ pub struct RfFrontend {
     cached_option_values: Vec<Vec<RfCoreOptionValue>>,
     cached_cores: Vec<RfCoreInfo>,
     cached_menu_entries: Vec<RfMenuEntry>,
+    cached_overlay_render_descs: Vec<RfOverlayRenderDesc>,
     cached_strings: Vec<CString>,
 }
 
@@ -600,6 +645,25 @@ pub struct RfGfxDriverInfo {
     pub frame_number: u64,
     pub hardware_ready: bool,
     pub rendered: bool,
+}
+
+#[repr(C)]
+pub struct RfOverlayInfo {
+    pub enabled: bool,
+    pub active_index: usize,
+    pub overlay_count: usize,
+    pub active_name: *const c_char,
+}
+
+#[repr(C)]
+pub struct RfOverlayRenderDesc {
+    pub image_path: *const c_char,
+    pub image_index: usize,
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub alpha: f32,
 }
 
 #[repr(C)]
@@ -674,6 +738,7 @@ pub unsafe extern "C" fn rf_frontend_create() -> *mut RfFrontend {
         cached_option_values: Vec::new(),
         cached_cores: Vec::new(),
         cached_menu_entries: Vec::new(),
+        cached_overlay_render_descs: Vec::new(),
         cached_strings: Vec::new(),
     }))
 }
@@ -918,6 +983,146 @@ pub unsafe extern "C" fn rf_frontend_set_joypad_button(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn rf_frontend_load_overlay(
+    frontend: *mut RfFrontend,
+    path: *const c_char,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    let Some(path_str) = ptr_to_str(path) else {
+        return false;
+    };
+    match with_active_frontend(|core| core.load_overlay(path_str)) {
+        Ok(()) => {
+            frontend.last_error = CString::default();
+            true
+        }
+        Err(error) => {
+            set_error(frontend, &error);
+            false
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_set_overlay_enabled(
+    _frontend: *mut RfFrontend,
+    enabled: bool,
+) {
+    with_active_frontend(|core| core.overlay.set_enabled(enabled));
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_set_overlay_touch(
+    frontend: *mut RfFrontend,
+    slot: usize,
+    x: f32,
+    y: f32,
+    active: bool,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    match with_active_frontend(|core| core.set_overlay_touch(slot, x, y, active)) {
+        Ok(()) => true,
+        Err(error) => {
+            set_error(frontend, &error);
+            false
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_clear_overlay_touches(_frontend: *mut RfFrontend) {
+    with_active_frontend(|core| core.clear_overlay_touches());
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_overlay_info(
+    frontend: *mut RfFrontend,
+    out_info: *mut RfOverlayInfo,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    if out_info.is_null() {
+        return false;
+    }
+    let (enabled, active_index, overlay_count, name) = with_active_frontend(|core| {
+        (
+            core.overlay.enabled(),
+            core.overlay.active_index(),
+            core.overlay.overlays().len(),
+            core.overlay.active_name().unwrap_or("").to_string(),
+        )
+    });
+    let active_name = cache_string(frontend, &name);
+    unsafe {
+        *out_info = RfOverlayInfo {
+            enabled,
+            active_index,
+            overlay_count,
+            active_name,
+        };
+    }
+    true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_overlay_render_desc_count(frontend: *mut RfFrontend) -> usize {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return 0;
+    };
+    frontend.cached_overlay_render_descs.clear();
+    let descs = with_active_frontend(|core| core.overlay.render_descs());
+    for desc in descs {
+        let image_path = cache_string(frontend, &desc.image_path.to_string_lossy());
+        frontend
+            .cached_overlay_render_descs
+            .push(RfOverlayRenderDesc {
+                image_path,
+                image_index: desc.image_index,
+                x: desc.x,
+                y: desc.y,
+                w: desc.w,
+                h: desc.h,
+                alpha: desc.alpha,
+            });
+    }
+    frontend.cached_overlay_render_descs.len()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_get_overlay_render_desc(
+    frontend: *mut RfFrontend,
+    index: usize,
+    out_desc: *mut RfOverlayRenderDesc,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_ref() }) else {
+        return false;
+    };
+    if out_desc.is_null() {
+        return false;
+    }
+    let Some(desc) = frontend.cached_overlay_render_descs.get(index) else {
+        return false;
+    };
+    unsafe {
+        *out_desc = RfOverlayRenderDesc {
+            image_path: desc.image_path,
+            image_index: desc.image_index,
+            x: desc.x,
+            y: desc.y,
+            w: desc.w,
+            h: desc.h,
+            alpha: desc.alpha,
+        };
+    }
+    true
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn rf_frontend_gfx_driver_info(
     _frontend: *const RfFrontend,
     out: *mut RfGfxDriverInfo,
@@ -977,10 +1182,14 @@ pub unsafe extern "C" fn rf_frontend_copy_video_frame_rgba(
         if frame.width == 0 {
             return 0;
         }
-        let rgba = &frame.rgba;
-        let count = rgba.len().min(out_len);
-        unsafe { ptr::copy_nonoverlapping(rgba.as_ptr(), out_rgba, count) };
-        count
+        if out_len < frame.rgba.len() {
+            return 0;
+        }
+        let rgba = core
+            .overlay
+            .composite_rgba(&frame.rgba, frame.width, frame.height);
+        unsafe { ptr::copy_nonoverlapping(rgba.as_ptr(), out_rgba, rgba.len()) };
+        rgba.len()
     })
 }
 
@@ -1790,6 +1999,13 @@ fn set_error(frontend: &mut RfFrontend, message: &str) {
     frontend.last_error = CString::new(message).unwrap_or_else(|_| {
         CString::new("error contained an interior NUL").expect("static CString")
     });
+}
+
+fn cache_string(frontend: &mut RfFrontend, value: &str) -> *const c_char {
+    let c_value = CString::new(value).unwrap_or_default();
+    let ptr = c_value.as_ptr();
+    frontend.cached_strings.push(c_value);
+    ptr
 }
 
 fn cache_system_info(frontend: &mut RfFrontend, info: &SystemInfo) {

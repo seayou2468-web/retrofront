@@ -84,6 +84,23 @@ typedef struct RfGfxDriverInfo {
     bool rendered;
 } RfGfxDriverInfo;
 
+typedef struct RfOverlayInfo {
+    bool enabled;
+    uintptr_t active_index;
+    uintptr_t overlay_count;
+    const char *active_name;
+} RfOverlayInfo;
+
+typedef struct RfOverlayRenderDesc {
+    const char *image_path;
+    uintptr_t image_index;
+    float x;
+    float y;
+    float w;
+    float h;
+    float alpha;
+} RfOverlayRenderDesc;
+
 typedef struct RfCoreOptionValue {
     const char *value;
     const char *label;
@@ -149,6 +166,13 @@ bool rf_frontend_set_gfx_backend(RfFrontend *frontend, uint32_t backend);
 bool rf_frontend_get_gfx_video_config(const RfFrontend *frontend, RfGfxVideoConfig *out_config);
 bool rf_frontend_set_gfx_video_config(RfFrontend *frontend, const RfGfxVideoConfig *config);
 bool rf_frontend_set_joypad_button(RfFrontend *frontend, uint32_t button_id, bool pressed);
+bool rf_frontend_load_overlay(RfFrontend *frontend, const char *path);
+void rf_frontend_set_overlay_enabled(RfFrontend *frontend, bool enabled);
+bool rf_frontend_set_overlay_touch(RfFrontend *frontend, uintptr_t slot, float x, float y, bool active);
+void rf_frontend_clear_overlay_touches(RfFrontend *frontend);
+bool rf_frontend_overlay_info(RfFrontend *frontend, RfOverlayInfo *out_info);
+uintptr_t rf_frontend_overlay_render_desc_count(RfFrontend *frontend);
+bool rf_frontend_get_overlay_render_desc(RfFrontend *frontend, uintptr_t index, RfOverlayRenderDesc *out_desc);
 bool rf_frontend_set_gfx_host_handles(RfFrontend *frontend, const RfGfxHostHandles *handles);
 bool rf_frontend_gfx_driver_info(const RfFrontend *frontend, RfGfxDriverInfo *out_info);
 bool rf_frontend_video_frame_info(const RfFrontend *frontend, RfVideoFrameInfo *out_info);

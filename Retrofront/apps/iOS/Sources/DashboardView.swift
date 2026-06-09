@@ -260,19 +260,33 @@ struct PlayView: View {
 
     var body: some View {
         VStack {
-            ZStack {
-                Color.black
-                if let image = runtime.displayImage {
-                    Image(uiImage: image)
-                        .resizable()
-                        .interpolation(.none)
-                        .scaledToFit()
-                } else {
-                    VStack {
-                        Image(systemName: "gamecontroller").font(.system(size: 50))
-                        Text("No Video").font(.headline)
-                    }.foregroundStyle(.white)
+            GeometryReader { proxy in
+                ZStack(alignment: .topLeading) {
+                    Color.black
+                    if let image = runtime.displayImage {
+                        Image(uiImage: image)
+                            .resizable()
+                            .interpolation(.none)
+                            .scaledToFit()
+                    } else {
+                        VStack {
+                            Image(systemName: "gamecontroller").font(.system(size: 50))
+                            Text("No Video").font(.headline)
+                        }.foregroundStyle(.white)
+                    }
+                    if let overlay = runtime.overlayInfo, overlay.enabled {
+                        Text(overlay.activeName.isEmpty ? "Overlay" : overlay.activeName)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white.opacity(0.75))
+                            .padding(8)
+                    }
                 }
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in runtime.setOverlayTouch(slot: 0, location: value.location, in: proxy.size, active: true) }
+                        .onEnded { _ in runtime.setOverlayTouch(slot: 0, location: .zero, in: proxy.size, active: false) }
+                )
             }
             .aspectRatio(runtime.aspectRatio, contentMode: .fit)
             .cornerRadius(12)
@@ -307,6 +321,7 @@ struct PlayView: View {
             runtime.play()
         }
         .onDisappear {
+            runtime.clearOverlayTouches()
             runtime.stop()
         }
     }

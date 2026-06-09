@@ -98,6 +98,23 @@ impl Settings {
         self.values.get(key).map(PathBuf::from)
     }
 
+    pub fn string_value(&self, key: &str) -> Option<String> {
+        self.values.get(key).cloned()
+    }
+
+    pub fn bool_value(&self, key: &str) -> Option<bool> {
+        self.values.get(key).map(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "true" | "1" | "yes" | "on"
+            )
+        })
+    }
+
+    pub fn float_value(&self, key: &str) -> Option<f32> {
+        self.values.get(key).and_then(|value| value.parse().ok())
+    }
+
     pub fn libretro_info_path(&self) -> PathBuf {
         self.path_value("libretro_info_path")
             .unwrap_or_else(|| self.base_dir.join("info"))
@@ -211,7 +228,11 @@ impl Settings {
             ("input_remapping_directory", base_dir.join("remaps")),
             ("cheat_database_path", base_dir.join("cht")),
             ("content_database_path", base_dir.join("database/rdb")),
-            ("overlay_directory", base_dir.join("overlays")),
+            ("overlay_directory", base_dir.join("assets/assets/overlays")),
+            (
+                "input_overlay",
+                base_dir.join("assets/assets/overlays/gamepads/flat/retropad.cfg"),
+            ),
             ("joypad_autoconfig_dir", base_dir.join("autoconfig")),
             ("video_shader_dir", base_dir.join("shaders")),
             ("video_filter_dir", base_dir.join("filters/video")),
@@ -229,6 +250,16 @@ impl Settings {
             ("menu_driver", PathBuf::from("xmb")),
             ("menu_xmb_theme", PathBuf::from("monochrome")),
         ];
+        let scalar_defaults = [
+            ("input_overlay_enable", "true"),
+            ("input_overlay_opacity", "0.70"),
+            ("input_overlay_scale", "1.0"),
+        ];
+        for (key, value) in scalar_defaults {
+            self.values
+                .entry(key.to_string())
+                .or_insert_with(|| value.to_string());
+        }
         for (key, value) in defaults {
             let value = value.to_string_lossy().into_owned();
             match self.values.get(key) {
@@ -246,6 +277,9 @@ impl Settings {
             "video_driver",
             "audio_driver",
             "input_driver",
+            "input_overlay_enable",
+            "input_overlay_opacity",
+            "input_overlay_scale",
             "menu_driver",
             "menu_xmb_theme",
             "libretro_directory",
@@ -272,6 +306,7 @@ impl Settings {
             "cheat_database_path",
             "content_database_path",
             "overlay_directory",
+            "input_overlay",
             "joypad_autoconfig_dir",
             "video_shader_dir",
             "video_filter_dir",
@@ -304,6 +339,7 @@ impl Settings {
             "cheat_database_path",
             "content_database_path",
             "overlay_directory",
+            "input_overlay",
             "joypad_autoconfig_dir",
             "video_shader_dir",
             "video_filter_dir",

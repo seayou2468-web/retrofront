@@ -23,3 +23,4 @@ bindgen = "0.69"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tga"] }

@@ -187,6 +187,23 @@ public struct AssetInstallReport: Equatable, Sendable {
   public let directoriesCreated: Int
 }
 
+public struct OverlayInfo: Equatable, Sendable {
+  public let enabled: Bool
+  public let activeIndex: Int
+  public let overlayCount: Int
+  public let activeName: String
+}
+
+public struct OverlayRenderDesc: Equatable, Sendable {
+  public let imagePath: String
+  public let imageIndex: Int
+  public let x: Float
+  public let y: Float
+  public let w: Float
+  public let h: Float
+  public let alpha: Float
+}
+
 public final class Retrofront: @unchecked Sendable {
   private let handle: OpaquePointer
 
@@ -257,6 +274,49 @@ public final class Retrofront: @unchecked Sendable {
   public func setJoypadButton(_ button: JoypadButton, pressed: Bool) throws {
     guard rf_frontend_set_joypad_button(handle, button.rawValue, pressed) else {
       throw lastError()
+    }
+  }
+
+  public func loadOverlay(at path: String) throws {
+    let ok = path.withCString { rf_frontend_load_overlay(handle, $0) }
+    guard ok else { throw lastError() }
+  }
+
+  public func setOverlayEnabled(_ enabled: Bool) {
+    rf_frontend_set_overlay_enabled(handle, enabled)
+  }
+
+  public func setOverlayTouch(slot: Int, x: Float, y: Float, active: Bool) throws {
+    guard rf_frontend_set_overlay_touch(handle, UInt(slot), x, y, active) else {
+      throw lastError()
+    }
+  }
+
+  public func clearOverlayTouches() {
+    rf_frontend_clear_overlay_touches(handle)
+  }
+
+  public func overlayInfo() -> OverlayInfo? {
+    var raw = RfOverlayInfo()
+    guard rf_frontend_overlay_info(handle, &raw) else { return nil }
+    return OverlayInfo(
+      enabled: raw.enabled,
+      activeIndex: Int(raw.active_index),
+      overlayCount: Int(raw.overlay_count),
+      activeName: raw.active_name.map { String(cString: $0) } ?? ""
+    )
+  }
+
+  public func overlayRenderDescs() -> [OverlayRenderDesc] {
+    let count = Int(rf_frontend_overlay_render_desc_count(handle))
+    return (0..<count).compactMap { index in
+      var raw = RfOverlayRenderDesc()
+      guard rf_frontend_get_overlay_render_desc(handle, UInt(index), &raw) else { return nil }
+      return OverlayRenderDesc(
+        imagePath: raw.image_path.map { String(cString: $0) } ?? "",
+        imageIndex: Int(raw.image_index),
+        x: raw.x, y: raw.y, w: raw.w, h: raw.h, alpha: raw.alpha
+      )
     }
   }
 

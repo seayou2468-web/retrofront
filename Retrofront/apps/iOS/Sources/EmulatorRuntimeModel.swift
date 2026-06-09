@@ -17,6 +17,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
   @Published private(set) var corePath: String?
   @Published private(set) var loadedGameURL: URL?
   @Published private(set) var currentMenu: MenuList?
+  @Published private(set) var overlayInfo: OverlayInfo?
   @Published private(set) var settings: [RetrofrontSetting] = []
   @Published private(set) var pendingCoreChoices: [CoreInfo] = []
   @Published private(set) var pendingContentURL: URL?
@@ -31,6 +32,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
     refreshAvailableCores()
     refreshGames()
     refreshMenu()
+    overlayInfo = frontend?.overlayInfo()
   }
 
   private var retroArchRoot: URL {
@@ -53,6 +55,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
       try? frontend.setSetting(key: "content_directory", value: root.path)
       try? frontend.setSetting(key: "core_assets_directory", value: root.appendingPathComponent("downloads").path)
       try? frontend.setGfxBackend(.bgfx)
+      loadConfiguredOverlay(frontend)
       frontend.saveSettings()
       refresh()
     } catch {
@@ -127,6 +130,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
     let assetsDir = URL(fileURLWithPath: frontend.setting("assets_directory") ?? retroArchRoot.appendingPathComponent("assets").path)
     do {
       let report = try frontend.installAssetsZip(from: zipURL.path, to: assetsDir.path)
+      loadConfiguredOverlay(frontend)
       refresh()
       statusMessage = "Installed assets: \(report.filesWritten) files"
     } catch {
@@ -196,6 +200,25 @@ public final class EmulatorRuntimeModel: ObservableObject {
     try? frontend?.setJoypadButton(button, pressed: pressed)
   }
 
+  public func setOverlayTouch(slot: Int, location: CGPoint, in size: CGSize, active: Bool) {
+    guard size.width > 0, size.height > 0 else { return }
+    let x = Float(max(0, min(1, location.x / size.width)))
+    let y = Float(max(0, min(1, location.y / size.height)))
+    try? frontend?.setOverlayTouch(slot: slot, x: x, y: y, active: active)
+  }
+
+  public func clearOverlayTouches() {
+    frontend?.clearOverlayTouches()
+  }
+
+  private func loadConfiguredOverlay(_ frontend: Retrofront) {
+    if let path = frontend.setting("input_overlay"), FileManager.default.fileExists(atPath: path) {
+      try? frontend.loadOverlay(at: path)
+      frontend.setOverlayEnabled(true)
+    }
+    overlayInfo = frontend.overlayInfo()
+  }
+
   public func toggleRunning() { isRunning ? stop() : play() }
 
   public func play() {
@@ -254,6 +277,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
       else if config.baseHeight > 0 { aspectRatio = Double(config.baseWidth) / Double(config.baseHeight) }
     }
     refreshMenu()
+    overlayInfo = frontend.overlayInfo()
   }
 
   public func refreshMenu() { currentMenu = frontend?.currentMenuList() }
