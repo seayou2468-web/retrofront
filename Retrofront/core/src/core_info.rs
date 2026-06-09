@@ -49,24 +49,20 @@ impl CoreInfoList {
     }
 
     pub fn scan_directory(&mut self, cores_dir: &Path) {
-        if let Ok(entries) = fs::read_dir(cores_dir) {
-            let mut paths: Vec<PathBuf> = entries
-                .flatten()
-                .map(|entry| entry.path())
-                .filter(|path| Self::is_libretro_library(path))
-                .collect();
-            paths.sort();
+        let mut paths = Vec::new();
+        Self::collect_core_paths(cores_dir, &mut paths, 0);
+        paths.sort();
+        paths.dedup();
 
-            for path in paths {
-                if self.cores.iter().any(|c| c.path == path) {
-                    continue;
-                }
-                let mut info = self.load_info_for_core(&path);
-                info.path = path;
-                self.cores.push(info);
+        for path in paths {
+            if self.cores.iter().any(|c| c.path == path) {
+                continue;
             }
-            self.sort_and_resolve_extensions();
+            let mut info = self.load_info_for_core(&path);
+            info.path = path;
+            self.cores.push(info);
         }
+        self.sort_and_resolve_extensions();
     }
 
     pub fn supported_extensions_for_path(&self, core_path: &Path) -> Vec<String> {
@@ -169,6 +165,41 @@ impl CoreInfoList {
         self.all_extensions = all.into_iter().collect();
     }
 
+    fn collect_core_paths(dir: &Path, paths: &mut Vec<PathBuf>, depth: usize) {
+        if depth > 4 {
+            return;
+        }
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if Self::is_framework_dir(&path) {
+                    if let Some(binary) = Self::framework_binary_path(&path) {
+                        paths.push(binary);
+                    }
+                } else {
+                    Self::collect_core_paths(&path, paths, depth + 1);
+                }
+            } else if Self::is_libretro_library(&path) {
+                paths.push(path);
+            }
+        }
+    }
+
+    fn is_framework_dir(path: &Path) -> bool {
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("framework"))
+    }
+
+    fn framework_binary_path(path: &Path) -> Option<PathBuf> {
+        let stem = path.file_stem()?.to_str()?;
+        let binary = path.join(stem);
+        binary.is_file().then_some(binary)
+    }
+
     fn is_libretro_library(path: &Path) -> bool {
         if !path.is_file() {
             return false;
@@ -193,6 +224,7 @@ impl CoreInfoList {
         };
 
         let Some(info_path) = self.find_info_path(core_path) else {
+            Self::apply_builtin_fallback_info(stem, &mut info);
             return info;
         };
 
@@ -245,7 +277,61 @@ impl CoreInfoList {
                 .filter(|key| key.starts_with("firmware") && key.ends_with("_path"))
                 .count();
         }
+        if info.supported_extensions.is_empty() {
+            Self::apply_builtin_fallback_info(stem, &mut info);
+        }
         info
+    }
+
+    fn apply_builtin_fallback_info(stem: &str, info: &mut CoreInfo) {
+        let normalized = stem.to_ascii_lowercase();
+        let fallback = if normalized.contains("mgba") {
+            Some((
+                "Nintendo - Game Boy Advance (mGBA)",
+                "Game Boy Advance",
+                &["gba", "gb", "gbc", "sgb"][..],
+            ))
+        } else if normalized.contains("bsnes") || normalized.contains("snes9x") {
+            Some((
+                "Nintendo - Super Nintendo",
+                "Super Nintendo Entertainment System",
+                &["sfc", "smc", "fig", "swc", "bs", "st"][..],
+            ))
+        } else if normalized.contains("gambatte") {
+            Some((
+                "Nintendo - Game Boy / Color",
+                "Game Boy",
+                &["gb", "gbc", "sgb"][..],
+            ))
+        } else if normalized.contains("nestopia")
+            || normalized.contains("fceumm")
+            || normalized.contains("quicknes")
+        {
+            Some((
+                "Nintendo - NES",
+                "Nintendo Entertainment System",
+                &["nes", "fds"][..],
+            ))
+        } else {
+            None
+        };
+
+        if let Some((display_name, system_name, extensions)) = fallback {
+            if info.display_name.is_empty()
+                || info.display_name == Self::display_name_from_stem(stem)
+            {
+                info.display_name = display_name.to_string();
+            }
+            if info.system_name.is_empty() {
+                info.system_name = system_name.to_string();
+            }
+            info.supported_extensions = extensions.iter().map(|ext| ext.to_string()).collect();
+            if info.notes.is_empty() {
+                info.notes =
+                    "Built-in compatibility fallback used because no .info metadata was found"
+                        .to_string();
+            }
+        }
     }
 
     fn find_info_path(&self, core_path: &Path) -> Option<PathBuf> {
@@ -345,6 +431,36 @@ impl CoreInfoList {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scans_ios_framework_bundles() {
+        let dir = std::env::temp_dir().join(format!(
+            "retrofront-framework-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let framework = dir.join("mgba_libretro_ios.framework");
+        fs::create_dir_all(&framework).unwrap();
+        File::create(framework.join("mgba_libretro_ios")).unwrap();
+
+        let mut list = CoreInfoList::new();
+        list.scan_directory(&dir);
+
+        assert_eq!(list.cores.len(), 1);
+        assert!(list.cores[0]
+            .supported_extensions
+            .contains(&"gba".to_string()));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn applies_builtin_mgba_extensions_without_info_file() {
+        let list = CoreInfoList::new();
+        let info = list.load_info_for_core(Path::new("/cores/mgba_libretro_ios.dylib"));
+        assert!(info.supported_extensions.contains(&"gba".to_string()));
+    }
 
     #[test]
     fn derives_retroarch_info_candidates_for_ios_libretro_names() {

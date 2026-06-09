@@ -31,7 +31,9 @@ impl Scanner {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() {
-                    self.scan_directory_inner(&path, extensions);
+                    if !is_excluded_library_directory(&path) {
+                        self.scan_directory_inner(&path, extensions);
+                    }
                 } else if should_include(&path, extensions)
                     && !self.games.iter().any(|g| g.path == path)
                 {
@@ -66,6 +68,18 @@ fn normalize_extensions(extensions: &[String]) -> Vec<String> {
     normalized.sort();
     normalized.dedup();
     normalized
+}
+
+fn is_excluded_library_directory(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    matches!(
+        name.as_str(),
+        "cores" | "core" | "info" | "assets" | "system" | "saves" | "states" | "cache" | "logs"
+    ) || name.ends_with(".framework")
 }
 
 fn should_include(path: &Path, extensions: &[String]) -> bool {
@@ -127,6 +141,8 @@ mod tests {
         File::create(dir.join("notes.txt")).unwrap();
         File::create(dir.join("cover.png")).unwrap();
         File::create(dir.join("core.dylib")).unwrap();
+        fs::create_dir_all(dir.join("Cores")).unwrap();
+        File::create(dir.join("Cores/misplaced.gba")).unwrap();
 
         let mut scanner = Scanner::new();
         scanner.scan_directory(&dir, &[]);

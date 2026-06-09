@@ -90,7 +90,7 @@ struct LibraryView: View {
     @Binding var isFilePickerPresented: Bool
 
     var body: some View {
-        AppScreen(title: "Library", subtitle: "インポート済みのゲームと利用可能なコア") {
+        AppScreen(title: "Library", subtitle: "ROM専用ライブラリ（coresフォルダは表示しません）") {
             HStack(spacing: 12) {
                 PrimaryAction(title: "Import", subtitle: "ROMを追加", icon: "plus", tint: OneUI.accent) {
                     isFilePickerPresented = true
@@ -102,28 +102,24 @@ struct LibraryView: View {
 
             StatusPill(message: runtime.statusMessage)
 
-            ContentSection(title: "Games", count: runtime.availableGames.count) {
+            HStack(spacing: 10) {
+                LibraryStatCard(title: "ROMs", value: "\(runtime.availableGames.count)", icon: "gamecontroller.fill", tint: OneUI.accent)
+                LibraryStatCard(title: "Types", value: "\(runtime.libraryRomTypeCount)", icon: "doc.fill", tint: OneUI.violet)
+            }
+
+            ContentSection(title: "ROMs", count: runtime.availableGames.count) {
                 if runtime.availableGames.isEmpty {
-                    EmptyPanel(icon: "tray", title: "No games", message: "Importからゲームファイルを追加してください。")
+                    EmptyPanel(icon: "tray", title: "No ROMs", message: "Importから.gbaなどのROMだけを追加してください。coresやinfoはライブラリに表示されません。")
                 } else {
                     VStack(spacing: 10) {
                         ForEach(runtime.availableGames, id: \.path) { game in
-                            GameRow(game: game) {
+                            GameRow(
+                                game: game,
+                                details: runtime.romDetails(for: game),
+                                compatibility: runtime.compatibleCoreSummary(for: game)
+                            ) {
                                 runtime.loadGame(at: URL(fileURLWithPath: game.path))
                             }
-                        }
-                    }
-                }
-            }
-
-            ContentSection(title: "Cores", count: runtime.availableCores.count) {
-                if runtime.availableCores.isEmpty {
-                    EmptyPanel(icon: "cpu", title: "No cores", message: "アプリにバンドルされたlibretroコアが見つかりません。")
-                } else {
-                    VStack(spacing: 10) {
-                        ForEach(runtime.availableCores, id: \.path) { core in
-                            Button { runtime.loadCore(core) } label: { CoreRow(core: core) }
-                                .buttonStyle(.plain)
                         }
                     }
                 }
@@ -207,12 +203,42 @@ struct SettingsView: View {
                 }
             }
 
+            SettingsGroup(title: "Audio") {
+                SettingToggleRow(title: "Audio Output", subtitle: "音声出力を有効化", isOn: runtime.audioEnabledSetting) {
+                    runtime.setAudioEnabled($0)
+                }
+                SettingToggleRow(title: "Audio Sync", subtitle: "音声同期", isOn: runtime.audioSyncSetting) {
+                    runtime.setAudioSync($0)
+                }
+                SettingChoiceRow(title: "Latency", subtitle: "出力遅延", value: runtime.audioLatencyLabel) {
+                    runtime.cycleAudioLatency()
+                }
+            }
+
             SettingsGroup(title: "Controller") {
                 SettingToggleRow(title: "Touch Overlay", subtitle: "画面上コントローラー", isOn: runtime.overlayEnabledSetting) {
                     runtime.setOverlayEnabledSetting($0)
                 }
                 SettingChoiceRow(title: "Overlay Opacity", subtitle: "タッチ操作の透明度", value: runtime.overlayOpacityLabel) {
                     runtime.cycleOverlayOpacity()
+                }
+                SettingToggleRow(title: "Haptics", subtitle: "タッチ操作の振動フィードバック", isOn: runtime.hapticsEnabledSetting) {
+                    runtime.setHapticsEnabled($0)
+                }
+            }
+
+            SettingsGroup(title: "Library") {
+                SettingChoiceRow(title: "Sort", subtitle: "ROMの並び順", value: runtime.librarySortLabel) {
+                    runtime.cycleLibrarySort()
+                }
+                SettingToggleRow(title: "Core Badges", subtitle: "互換コア数をROMに表示", isOn: runtime.libraryCoreBadgesEnabled) {
+                    runtime.setLibraryCoreBadgesEnabled($0)
+                }
+                SettingToggleRow(title: "File Details", subtitle: "拡張子とサイズを表示", isOn: runtime.libraryFileDetailsEnabled) {
+                    runtime.setLibraryFileDetailsEnabled($0)
+                }
+                SettingToggleRow(title: "Auto Scan", subtitle: "起動時にROMを再スキャン", isOn: runtime.libraryAutoScanEnabled) {
+                    runtime.setLibraryAutoScanEnabled($0)
                 }
             }
 
@@ -237,6 +263,11 @@ struct SettingsView: View {
             SettingsGroup(title: "Storage") {
                 SettingInfoRow(title: "Content Folder", value: runtime.settingValue("content_directory"))
                 SettingInfoRow(title: "Core Folder", value: runtime.settingValue("libretro_directory"))
+                SettingInfoRow(title: "Info Folder", value: runtime.settingValue("libretro_info_path"))
+                SettingInfoRow(title: "Saves", value: runtime.settingValue("savefile_directory"))
+                SettingInfoRow(title: "States", value: runtime.settingValue("savestate_directory"))
+                SettingInfoRow(title: "System/BIOS", value: runtime.settingValue("system_directory"))
+                SettingInfoRow(title: "Screenshots", value: runtime.settingValue("screenshot_directory"))
                 Button {
                     runtime.installBundledAssets()
                 } label: {
@@ -354,6 +385,8 @@ struct ContentSection<Content: View>: View {
 
 struct GameRow: View {
     let game: GameEntrySwift
+    let details: String
+    let compatibility: String
     let action: () -> Void
 
     var body: some View {
@@ -365,11 +398,14 @@ struct GameRow: View {
                         .font(.headline)
                         .foregroundColor(OneUI.ink)
                         .lineLimit(1)
-                    Text(game.path)
+                    Text(details)
                         .font(.caption)
                         .foregroundColor(OneUI.secondary)
                         .lineLimit(1)
-                        .truncationMode(.middle)
+                    Text(compatibility)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundColor(compatibility.hasPrefix("No") ? .orange : OneUI.teal)
+                        .lineLimit(1)
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
@@ -403,6 +439,28 @@ struct CoreRow: View {
             Spacer(minLength: 0)
         }
         .padding(15)
+        .background(OneUI.surface)
+        .clipShape(RoundedRectangle(cornerRadius: OneUI.compactRadius, style: .continuous))
+    }
+}
+
+struct LibraryStatCard: View {
+    let title: String
+    let value: String
+    let icon: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 10) {
+            RoundedIcon(systemName: icon, tint: tint)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(value).font(.title3.bold()).foregroundColor(OneUI.ink)
+                Text(title).font(.caption.weight(.semibold)).foregroundColor(OneUI.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity)
         .background(OneUI.surface)
         .clipShape(RoundedRectangle(cornerRadius: OneUI.compactRadius, style: .continuous))
     }

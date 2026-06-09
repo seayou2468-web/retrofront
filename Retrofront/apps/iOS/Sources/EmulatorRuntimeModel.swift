@@ -102,7 +102,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
     try? FileManager.default.createDirectory(at: contentDir, withIntermediateDirectories: true)
     let exts = frontend.allSupportedExtensions().joined(separator: "|")
     frontend.scanGames(in: contentDir.path, extensions: exts)
-    availableGames = frontend.availableGames()
+    availableGames = sortedGames(frontend.availableGames())
   }
 
   public func rescanLibrary() {
@@ -347,6 +347,47 @@ public final class EmulatorRuntimeModel: ObservableObject {
     settingValue("input_overlay_enable") != "false"
   }
 
+  public var hapticsEnabledSetting: Bool {
+    settingValue("input_haptic_feedback") != "false"
+  }
+
+  public var audioEnabledSetting: Bool {
+    settingValue("audio_enable") != "false"
+  }
+
+  public var audioSyncSetting: Bool {
+    settingValue("audio_sync") != "false"
+  }
+
+  public var audioLatencyLabel: String {
+    let value = settingValue("audio_latency_ms")
+    return value.isEmpty ? "64 ms" : "\(value) ms"
+  }
+
+  public var libraryCoreBadgesEnabled: Bool {
+    settingValue("library_show_core_badges") != "false"
+  }
+
+  public var libraryFileDetailsEnabled: Bool {
+    settingValue("library_show_file_details") != "false"
+  }
+
+  public var libraryAutoScanEnabled: Bool {
+    settingValue("library_auto_scan_on_launch") != "false"
+  }
+
+  public var librarySortLabel: String {
+    switch settingValue("library_sort_mode") {
+    case "extension": return "Extension"
+    case "name_descending": return "Name ↓"
+    default: return "Name ↑"
+    }
+  }
+
+  public var libraryRomTypeCount: Int {
+    Set(availableGames.map { URL(fileURLWithPath: $0.path).pathExtension.lowercased() }.filter { !$0.isEmpty }).count
+  }
+
   public var overlayOpacityLabel: String {
     let value = settingValue("input_overlay_opacity")
     return value.isEmpty ? "70%" : "\(Int((Double(value) ?? 0.70) * 100))%"
@@ -373,6 +414,47 @@ public final class EmulatorRuntimeModel: ObservableObject {
     frontend?.setOverlayEnabled(enabled)
     refresh()
     statusMessage = enabled ? "Touch overlay enabled" : "Touch overlay disabled"
+  }
+
+  public func setHapticsEnabled(_ enabled: Bool) {
+    setSetting(key: "input_haptic_feedback", value: enabled ? "true" : "false")
+    statusMessage = enabled ? "Haptics enabled" : "Haptics disabled"
+  }
+
+  public func setAudioEnabled(_ enabled: Bool) {
+    setSetting(key: "audio_enable", value: enabled ? "true" : "false")
+    statusMessage = enabled ? "Audio enabled" : "Audio disabled"
+  }
+
+  public func setAudioSync(_ enabled: Bool) {
+    setSetting(key: "audio_sync", value: enabled ? "true" : "false")
+    statusMessage = enabled ? "Audio sync enabled" : "Audio sync disabled"
+  }
+
+  public func cycleAudioLatency() {
+    cycleSetting(key: "audio_latency_ms", values: ["32", "64", "96", "128"])
+    statusMessage = "Audio latency: \(audioLatencyLabel)"
+  }
+
+  public func cycleLibrarySort() {
+    cycleSetting(key: "library_sort_mode", values: ["name_ascending", "name_descending", "extension"])
+    refreshGames()
+    statusMessage = "Library sort: \(librarySortLabel)"
+  }
+
+  public func setLibraryCoreBadgesEnabled(_ enabled: Bool) {
+    setSetting(key: "library_show_core_badges", value: enabled ? "true" : "false")
+    statusMessage = enabled ? "Core badges enabled" : "Core badges hidden"
+  }
+
+  public func setLibraryFileDetailsEnabled(_ enabled: Bool) {
+    setSetting(key: "library_show_file_details", value: enabled ? "true" : "false")
+    statusMessage = enabled ? "ROM details enabled" : "ROM details hidden"
+  }
+
+  public func setLibraryAutoScanEnabled(_ enabled: Bool) {
+    setSetting(key: "library_auto_scan_on_launch", value: enabled ? "true" : "false")
+    statusMessage = enabled ? "Library auto scan enabled" : "Library auto scan disabled"
   }
 
   public func cycleOverlayOpacity() {
@@ -402,6 +484,47 @@ public final class EmulatorRuntimeModel: ObservableObject {
     if let frontend { applyVideoSettings(frontend) }
     refresh()
     statusMessage = enabled ? "VSync enabled" : "VSync disabled"
+  }
+
+  public func romDetails(for game: GameEntrySwift) -> String {
+    guard libraryFileDetailsEnabled else { return URL(fileURLWithPath: game.path).deletingLastPathComponent().lastPathComponent }
+    let url = URL(fileURLWithPath: game.path)
+    let ext = url.pathExtension.isEmpty ? "ROM" : url.pathExtension.uppercased()
+    let size = (try? FileManager.default.attributesOfItem(atPath: game.path)[.size] as? NSNumber)?.int64Value ?? 0
+    let formatted = ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+    return "\(ext) • \(formatted)"
+  }
+
+  public func compatibleCoreSummary(for game: GameEntrySwift) -> String {
+    guard libraryCoreBadgesEnabled, let frontend else { return URL(fileURLWithPath: game.path).lastPathComponent }
+    guard let plan = frontend.planContentLaunch(path: game.path) else { return "Compatibility unknown" }
+    switch plan.decision {
+    case .selected:
+      if let selected = plan.selectedCorePath,
+         let core = availableCores.first(where: { $0.path == selected }) {
+        return "Ready with \(core.displayName)"
+      }
+      return "Ready • \(plan.candidateCount) core"
+    case .needsCoreChoice:
+      return "\(plan.candidateCount) compatible cores"
+    case .noCore:
+      return "No compatible core for .\(plan.contentExtension)"
+    }
+  }
+
+  private func sortedGames(_ games: [GameEntrySwift]) -> [GameEntrySwift] {
+    switch settingValue("library_sort_mode") {
+    case "extension":
+      return games.sorted {
+        let left = URL(fileURLWithPath: $0.path).pathExtension.lowercased()
+        let right = URL(fileURLWithPath: $1.path).pathExtension.lowercased()
+        return left == right ? $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending : left < right
+      }
+    case "name_descending":
+      return games.sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedDescending }
+    default:
+      return games.sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
+    }
   }
 
   public func setSetting(key: String, value: String) {

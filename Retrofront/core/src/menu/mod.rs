@@ -597,19 +597,23 @@ impl MenuEngine {
                 Self::setting(
                     "Scaling",
                     "Integer scale / keep aspect policy",
-                    "Keep Aspect",
+                    settings
+                        .get("video_scale_mode")
+                        .map_or("keep_aspect", String::as_str),
                     621,
                 ),
                 Self::setting(
                     "Bilinear Filtering",
                     "Software frame interpolation",
-                    "Nearest",
+                    settings
+                        .get("video_filter_mode")
+                        .map_or("nearest", String::as_str),
                     622,
                 ),
                 Self::setting(
                     "VSync",
                     "Synchronize presentation to display refresh",
-                    "On",
+                    settings.get("video_vsync").map_or("true", String::as_str),
                     623,
                 ),
             ],
@@ -626,8 +630,26 @@ impl MenuEngine {
                     settings.get("audio_driver").map_or("swift", String::as_str),
                     640,
                 ),
-                Self::setting("Synchronization", "Audio sync policy", "On", 641),
-                Self::setting("Latency", "Target output latency", "64 ms", 642),
+                Self::setting(
+                    "Enabled",
+                    "Master audio output",
+                    settings.get("audio_enable").map_or("true", String::as_str),
+                    641,
+                ),
+                Self::setting(
+                    "Synchronization",
+                    "Audio sync policy",
+                    settings.get("audio_sync").map_or("true", String::as_str),
+                    642,
+                ),
+                Self::setting(
+                    "Latency",
+                    "Target output latency in milliseconds",
+                    settings
+                        .get("audio_latency_ms")
+                        .map_or("64", String::as_str),
+                    643,
+                ),
             ],
         });
     }
@@ -668,6 +690,22 @@ impl MenuEngine {
                         .unwrap_or_default()
                         .to_string_lossy(),
                     663,
+                ),
+                Self::setting(
+                    "Overlay Enabled",
+                    "Show touch overlay while playing",
+                    settings
+                        .get("input_overlay_enable")
+                        .map_or("true", String::as_str),
+                    664,
+                ),
+                Self::setting(
+                    "Haptics",
+                    "Touch feedback for virtual controls",
+                    settings
+                        .get("input_haptic_feedback")
+                        .map_or("true", String::as_str),
+                    665,
                 ),
             ],
         });
@@ -844,6 +882,38 @@ impl MenuEngine {
                     "On",
                     714,
                 ),
+                Self::setting(
+                    "Sort",
+                    "Library ordering mode",
+                    settings
+                        .get("library_sort_mode")
+                        .map_or("name_ascending", String::as_str),
+                    715,
+                ),
+                Self::setting(
+                    "Core Badges",
+                    "Show compatible core counts on ROM rows",
+                    settings
+                        .get("library_show_core_badges")
+                        .map_or("true", String::as_str),
+                    716,
+                ),
+                Self::setting(
+                    "File Details",
+                    "Show ROM extension and file size",
+                    settings
+                        .get("library_show_file_details")
+                        .map_or("true", String::as_str),
+                    717,
+                ),
+                Self::setting(
+                    "Auto Scan",
+                    "Refresh ROM list on app launch",
+                    settings
+                        .get("library_auto_scan_on_launch")
+                        .map_or("true", String::as_str),
+                    718,
+                ),
             ],
         });
     }
@@ -884,6 +954,22 @@ impl MenuEngine {
                     "Remember per-extension core selections",
                     "On",
                     724,
+                ),
+                Self::setting(
+                    "Auto Save State",
+                    "Save a state when closing content",
+                    settings
+                        .get("savestate_auto_save")
+                        .map_or("false", String::as_str),
+                    725,
+                ),
+                Self::setting(
+                    "Auto Load State",
+                    "Load the latest state when launching content",
+                    settings
+                        .get("savestate_auto_load")
+                        .map_or("false", String::as_str),
+                    726,
                 ),
             ],
         });
