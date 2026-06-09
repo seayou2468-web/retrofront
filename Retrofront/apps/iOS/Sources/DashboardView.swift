@@ -278,341 +278,104 @@ struct RustMenuView: View {
     @EnvironmentObject private var runtime: EmulatorRuntimeModel
 
     var body: some View {
-        Group {
-            switch runtime.currentMenu?.driver ?? .xmb {
-            case .rgui:
-                RguiMenuView(menu: runtime.currentMenu, action: runtime.menuAction)
-            case .materialui:
-                MaterialMenuView(menu: runtime.currentMenu, action: runtime.menuAction)
-            case .xmb:
-                XmbMenuView(menu: runtime.currentMenu, action: runtime.menuAction)
-            case .ozone:
-                OzoneMenuView(menu: runtime.currentMenu, action: runtime.menuAction)
+        GeometryReader { geometry in
+            if let scene = runtime.currentMenuRenderScene(width: geometry.size.width, height: geometry.size.height) {
+                RustMenuSceneView(scene: scene, action: runtime.menuAction)
+            } else {
+                Text("Menu unavailable")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }
 }
 
-private struct XmbMenuView: View {
-    let menu: MenuList?
+private struct RustMenuSceneView: View {
+    let scene: MenuRenderScene
     let action: (UInt32) -> Void
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color(red: 0.04, green: 0.05, blue: 0.09), Color(red: 0.02, green: 0.15, blue: 0.22)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
-
-            Circle()
-                .fill(.white.opacity(0.18))
-                .blur(radius: 70)
-                .frame(width: 420, height: 420)
-                .offset(x: -170, y: -250)
-
-            VStack(alignment: .leading, spacing: 24) {
-                Text(menu?.title ?? "Main Menu")
-                    .font(.system(size: 28, weight: .light))
-                    .foregroundStyle(.white.opacity(0.88))
-                    .padding(.horizontal, 28)
-                    .padding(.top, 30)
-
-                HStack(alignment: .top, spacing: 34) {
-                    ForEach(Array((menu?.entries ?? []).prefix(7).enumerated()), id: \.offset) { index, entry in
-                        Button { action(entry.actionId) } label: {
-                            VStack(spacing: 10) {
-                                MenuEntryIcon(kind: entry.kind, family: "xmb", selected: index == 0)
-                                Text(entry.label)
-                                    .font(.caption.weight(index == 0 ? .semibold : .regular))
-                                    .foregroundStyle(index == 0 ? .white : .white.opacity(0.62))
-                                    .multilineTextAlignment(.center)
-                                    .frame(width: 86)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(entry.actionId == 0)
-                    }
-                }
-                .padding(.horizontal, 32)
-
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 7) {
-                        ForEach(menu?.entries ?? [], id: \.actionId) { entry in
-                            XmbSubRow(entry: entry) { action(entry.actionId) }
-                        }
-                    }
-                    .padding(.horizontal, 62)
-                    .padding(.bottom, 30)
-                }
+        ZStack(alignment: .topLeading) {
+            argb(scene.backgroundColor).ignoresSafeArea()
+            ForEach(Array(scene.nodes.enumerated()), id: \.offset) { _, node in
+                RustMenuRenderNodeView(node: node, action: action)
             }
         }
     }
 }
 
-private struct OzoneMenuView: View {
-    let menu: MenuList?
+private struct RustMenuRenderNodeView: View {
+    let node: MenuRenderNode
     let action: (UInt32) -> Void
 
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 18) {
-                Text("RETROFRONT")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(.white)
-                Text(menu?.title.uppercased() ?? "MAIN MENU")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.55))
-                Divider().background(.white.opacity(0.2))
-                ForEach(Array((menu?.entries ?? []).prefix(9).enumerated()), id: \.offset) { index, entry in
-                    Button { action(entry.actionId) } label: {
-                        HStack(spacing: 12) {
-                            MenuEntryIcon(kind: entry.kind, family: "ozone", selected: index == 0)
-                            Text(entry.label)
-                                .font(.subheadline.weight(index == 0 ? .bold : .regular))
-                                .foregroundStyle(index == 0 ? .white : .white.opacity(0.72))
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(entry.actionId == 0)
-                }
-                Spacer()
+        switch node.kind {
+        case .panel:
+            Rectangle()
+                .fill(argb(node.backgroundColor))
+                .frame(width: CGFloat(node.width), height: CGFloat(node.height))
+                .position(x: CGFloat(node.x + node.width / 2), y: CGFloat(node.y + node.height / 2))
+        case .separator:
+            Rectangle()
+                .fill(argb(node.backgroundColor))
+                .frame(width: CGFloat(node.width), height: max(CGFloat(node.height), 1))
+                .position(x: CGFloat(node.x + node.width / 2), y: CGFloat(node.y))
+        case .text:
+            Text(node.text)
+                .font(font)
+                .foregroundStyle(argb(node.foregroundColor))
+                .position(x: CGFloat(node.x), y: CGFloat(node.y))
+        case .entry:
+            Button { if node.actionId != 0 { action(node.actionId) } } label: {
+                Text(node.text)
+                    .font(font)
+                    .foregroundStyle(argb(node.foregroundColor))
+                    .frame(width: CGFloat(node.width), height: CGFloat(node.height), alignment: .leading)
+                    .padding(.horizontal, 8)
+                    .background(entryBackground)
             }
-            .frame(width: 245)
-            .padding(24)
-            .background(Color(red: 0.10, green: 0.11, blue: 0.13))
-
-            VStack(alignment: .leading, spacing: 18) {
-                Text(menu?.title ?? "Main Menu")
-                    .font(.system(size: 30, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.top, 26)
-                    .padding(.horizontal, 30)
-
-                ScrollView {
-                    LazyVStack(spacing: 1) {
-                        ForEach(menu?.entries ?? [], id: \.actionId) { entry in
-                            OzoneRow(entry: entry) { action(entry.actionId) }
-                        }
-                    }
-                    .padding(.horizontal, 30)
-                    .padding(.bottom, 30)
-                }
+            .buttonStyle(.plain)
+            .disabled(node.actionId == 0)
+            .position(x: CGFloat(node.x + node.width / 2), y: CGFloat(node.y + node.height / 2))
+        case .icon:
+            Button { if node.actionId != 0 { action(node.actionId) } } label: {
+                Image(systemName: "square.grid.3x3.fill")
+                    .font(.system(size: CGFloat(max(node.fontSize, 12)), weight: .bold))
+                    .foregroundStyle(argb(node.foregroundColor))
+                    .frame(width: CGFloat(node.width), height: CGFloat(node.height))
+                    .background(Circle().fill(argb(node.backgroundColor)))
             }
-            .background(Color(red: 0.15, green: 0.16, blue: 0.18))
-        }
-        .ignoresSafeArea()
-    }
-}
-
-private struct MaterialMenuView: View {
-    let menu: MenuList?
-    let action: (UInt32) -> Void
-
-    var body: some View {
-        ZStack {
-            Color(red: 0.94, green: 0.95, blue: 0.97).ignoresSafeArea()
-            VStack(spacing: 0) {
-                HStack {
-                    Text(menu?.title ?? "Main Menu")
-                        .font(.system(size: 22, weight: .medium))
-                        .foregroundStyle(.white)
-                    Spacer()
-                    Text(menu?.theme ?? "materialui")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.72))
-                }
-                .padding(.horizontal, 20)
-                .frame(height: 64)
-                .background(Color(red: 0.12, green: 0.47, blue: 0.74))
-
-                ScrollView {
-                    LazyVStack(spacing: 8) {
-                        ForEach(menu?.entries ?? [], id: \.actionId) { entry in
-                            MaterialRow(entry: entry) { action(entry.actionId) }
-                        }
-                    }
-                    .padding(14)
-                }
-            }
-        }
-    }
-}
-
-private struct RguiMenuView: View {
-    let menu: MenuList?
-    let action: (UInt32) -> Void
-
-    var body: some View {
-        ZStack {
-            Color(red: 0.02, green: 0.05, blue: 0.12).ignoresSafeArea()
-            VStack(alignment: .leading, spacing: 0) {
-                Text("┌─ \(menu?.title.uppercased() ?? "MAIN MENU") ".padding(toLength: 42, withPad: "─", startingAt: 0) + "┐")
-                    .font(rguiFont)
-                    .foregroundStyle(.cyan)
-                ForEach(menu?.entries ?? [], id: \.actionId) { entry in
-                    Button { action(entry.actionId) } label: {
-                        Text(rguiLine(for: entry))
-                            .font(rguiFont)
-                            .foregroundStyle(entry.actionId == 0 ? .gray : .white)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(entry.actionId == 0)
-                }
-                Spacer()
-                Text("└" + String(repeating: "─", count: 45) + "┘")
-                    .font(rguiFont)
-                    .foregroundStyle(.cyan)
-            }
-            .padding(18)
+            .buttonStyle(.plain)
+            .disabled(node.actionId == 0)
+            .position(x: CGFloat(node.x + node.width / 2), y: CGFloat(node.y + node.height / 2))
         }
     }
 
-    private var rguiFont: Font { .system(size: 16, weight: .regular, design: .monospaced) }
-
-    private func rguiLine(for entry: MenuEntry) -> String {
-        let marker = entry.kind == .submenu ? "▶" : " "
-        let value = entry.value.isEmpty ? "" : "  " + entry.value
-        return "│ \(marker) \(entry.label)\(value)".padding(toLength: 46, withPad: " ", startingAt: 0) + "│"
-    }
-}
-
-private struct XmbSubRow: View {
-    let entry: MenuEntry
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack {
-                Text(entry.label)
-                    .font(.system(size: 19, weight: .regular))
-                    .foregroundStyle(.white.opacity(entry.actionId == 0 ? 0.42 : 0.92))
-                Spacer()
-                if !entry.value.isEmpty {
-                    Text(entry.value)
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.55))
-                        .lineLimit(1)
-                }
-            }
-            .padding(.vertical, 7)
-            .padding(.horizontal, 16)
-            .background(Color.white.opacity(0.10))
+    private var font: Font {
+        if node.flags & 4 != 0 {
+            return .system(size: CGFloat(max(node.fontSize, 10)), weight: .regular, design: .monospaced)
         }
-        .buttonStyle(.plain)
-        .disabled(entry.actionId == 0)
+        return .system(size: CGFloat(max(node.fontSize, 10)), weight: node.flags & 1 != 0 ? .bold : .regular)
     }
-}
-
-private struct OzoneRow: View {
-    let entry: MenuEntry
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                MenuEntryIcon(kind: entry.kind, family: "ozone", selected: false)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(entry.label)
-                        .font(.headline)
-                        .foregroundStyle(.white.opacity(entry.actionId == 0 ? 0.45 : 0.95))
-                    if !entry.sublabel.isEmpty {
-                        Text(entry.sublabel)
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.45))
-                            .lineLimit(1)
-                    }
-                }
-                Spacer()
-                if entry.kind == .submenu { Image(systemName: "chevron.right").foregroundStyle(.white.opacity(0.35)) }
-            }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 14)
-            .background(Color.white.opacity(0.035))
-        }
-        .buttonStyle(.plain)
-        .disabled(entry.actionId == 0)
-    }
-}
-
-private struct MaterialRow: View {
-    let entry: MenuEntry
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 18) {
-                MenuEntryIcon(kind: entry.kind, family: "material", selected: false)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(entry.label)
-                        .font(.body)
-                        .foregroundStyle(.black.opacity(entry.actionId == 0 ? 0.35 : 0.87))
-                    if !entry.sublabel.isEmpty {
-                        Text(entry.sublabel)
-                            .font(.caption)
-                            .foregroundStyle(.black.opacity(0.48))
-                            .lineLimit(1)
-                    }
-                }
-                Spacer()
-                if !entry.value.isEmpty {
-                    Text(entry.value)
-                        .font(.caption)
-                        .foregroundStyle(Color(red: 0.12, green: 0.47, blue: 0.74))
-                        .lineLimit(1)
-                }
-            }
-            .padding(16)
-            .background(RoundedRectangle(cornerRadius: 3).fill(.white).shadow(color: .black.opacity(0.12), radius: 2, y: 1))
-        }
-        .buttonStyle(.plain)
-        .disabled(entry.actionId == 0)
-    }
-}
-
-private struct MenuEntryIcon: View {
-    let kind: MenuEntryKind
-    let family: String
-    let selected: Bool
-
-    var body: some View {
-        Image(systemName: iconName)
-            .font(.system(size: family == "rgui" ? 14 : 17, weight: .bold))
-            .foregroundStyle(family == "material" ? tint : .black)
-            .frame(width: iconSize, height: iconSize)
-            .background(background)
-    }
-
-    private var iconSize: CGFloat { family == "ozone" ? 30 : 42 }
 
     @ViewBuilder
-    private var background: some View {
-        if family == "material" {
+    private var entryBackground: some View {
+        if node.backgroundColor == 0 {
             Color.clear
+        } else if node.flags & 2 != 0 {
+            RoundedRectangle(cornerRadius: 3).fill(argb(node.backgroundColor)).shadow(color: .black.opacity(0.12), radius: 2, y: 1)
         } else {
-            Circle().fill(selected ? Color.white : tint)
+            Rectangle().fill(argb(node.backgroundColor))
         }
     }
+}
 
-    private var iconName: String {
-        switch kind {
-        case .action: return "play.fill"
-        case .submenu: return family == "xmb" ? "square.grid.3x3.fill" : "folder.fill"
-        case .toggle: return "switch.2"
-        case .setting: return "slider.horizontal.3"
-        }
-    }
-
-    private var tint: Color {
-        switch kind {
-        case .action: return .green
-        case .submenu: return .cyan
-        case .toggle: return .orange
-        case .setting: return .purple
-        }
-    }
+private func argb(_ value: UInt32) -> Color {
+    let a = Double((value >> 24) & 0xff) / 255.0
+    let r = Double((value >> 16) & 0xff) / 255.0
+    let g = Double((value >> 8) & 0xff) / 255.0
+    let b = Double(value & 0xff) / 255.0
+    return Color(red: r, green: g, blue: b).opacity(a)
 }
 
 struct PlayView: View {

@@ -1225,6 +1225,367 @@ impl MenuEngine {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuRenderNodeKind {
+    Panel,
+    Text,
+    Entry,
+    Icon,
+    Separator,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MenuRenderNode {
+    pub kind: MenuRenderNodeKind,
+    pub text: String,
+    pub action_id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub font_size: f32,
+    pub fg_color: u32,
+    pub bg_color: u32,
+    pub flags: u32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MenuRenderScene {
+    pub driver: MenuDriver,
+    pub background_color: u32,
+    pub nodes: Vec<MenuRenderNode>,
+}
+
+impl MenuRenderNodeKind {
+    pub fn code(self) -> u32 {
+        match self {
+            Self::Panel => 0,
+            Self::Text => 1,
+            Self::Entry => 2,
+            Self::Icon => 3,
+            Self::Separator => 4,
+        }
+    }
+}
+
+impl MenuRenderNode {
+    fn panel(x: f32, y: f32, width: f32, height: f32, bg_color: u32) -> Self {
+        Self {
+            kind: MenuRenderNodeKind::Panel,
+            text: String::new(),
+            action_id: 0,
+            x,
+            y,
+            width,
+            height,
+            font_size: 0.0,
+            fg_color: 0xffffffff,
+            bg_color,
+            flags: 0,
+        }
+    }
+
+    fn text(
+        text: impl Into<String>,
+        x: f32,
+        y: f32,
+        font_size: f32,
+        fg_color: u32,
+        flags: u32,
+    ) -> Self {
+        Self {
+            kind: MenuRenderNodeKind::Text,
+            text: text.into(),
+            action_id: 0,
+            x,
+            y,
+            width: 0.0,
+            height: font_size * 1.4,
+            font_size,
+            fg_color,
+            bg_color: 0,
+            flags,
+        }
+    }
+
+    fn entry(
+        entry: &MenuEntry,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        font_size: f32,
+        fg_color: u32,
+        bg_color: u32,
+        flags: u32,
+    ) -> Self {
+        Self {
+            kind: MenuRenderNodeKind::Entry,
+            text: entry.label.clone(),
+            action_id: entry.action_id,
+            x,
+            y,
+            width,
+            height,
+            font_size,
+            fg_color,
+            bg_color,
+            flags,
+        }
+    }
+
+    fn icon(
+        entry: &MenuEntry,
+        x: f32,
+        y: f32,
+        size: f32,
+        fg_color: u32,
+        bg_color: u32,
+        flags: u32,
+    ) -> Self {
+        Self {
+            kind: MenuRenderNodeKind::Icon,
+            text: entry.label.clone(),
+            action_id: entry.action_id,
+            x,
+            y,
+            width: size,
+            height: size,
+            font_size: size * 0.42,
+            fg_color,
+            bg_color,
+            flags,
+        }
+    }
+
+    fn separator(x: f32, y: f32, width: f32, color: u32) -> Self {
+        Self {
+            kind: MenuRenderNodeKind::Separator,
+            text: String::new(),
+            action_id: 0,
+            x,
+            y,
+            width,
+            height: 1.0,
+            font_size: 0.0,
+            fg_color: color,
+            bg_color: color,
+            flags: 0,
+        }
+    }
+}
+
+impl MenuEngine {
+    pub fn render_scene(&self, width: f32, height: f32) -> Option<MenuRenderScene> {
+        let list = self.current()?;
+        Some(match self.driver() {
+            MenuDriver::Rgui => self.render_rgui_scene(list, width, height),
+            MenuDriver::MaterialUi => self.render_materialui_scene(list, width, height),
+            MenuDriver::Xmb => self.render_xmb_scene(list, width, height),
+            MenuDriver::Ozone => self.render_ozone_scene(list, width, height),
+        })
+    }
+
+    fn render_xmb_scene(&self, list: &MenuList, width: f32, height: f32) -> MenuRenderScene {
+        let mut nodes = vec![MenuRenderNode::panel(0.0, 0.0, width, height, 0xff071729)];
+        nodes.push(MenuRenderNode::text(
+            &list.title,
+            34.0,
+            28.0,
+            28.0,
+            0xe8ffffff,
+            0,
+        ));
+        let icon_y = 92.0;
+        for (index, entry) in list.entries.iter().take(8).enumerate() {
+            let x = 42.0 + index as f32 * 104.0;
+            let selected = index == self.selected_indices.last().copied().unwrap_or(0);
+            nodes.push(MenuRenderNode::icon(
+                entry,
+                x,
+                icon_y,
+                if selected { 58.0 } else { 48.0 },
+                0xff000000,
+                if selected { 0xffffffff } else { 0xff27d3f5 },
+                if selected { 1 } else { 0 },
+            ));
+            nodes.push(MenuRenderNode::text(
+                &entry.label,
+                x - 18.0,
+                icon_y + 66.0,
+                12.0,
+                if selected { 0xffffffff } else { 0xa0ffffff },
+                1,
+            ));
+        }
+        let row_x = width * 0.16;
+        let row_w = width * 0.72;
+        for (index, entry) in list.entries.iter().enumerate() {
+            let y = 214.0 + index as f32 * 34.0;
+            if y > height - 44.0 {
+                break;
+            }
+            nodes.push(MenuRenderNode::entry(
+                entry, row_x, y, row_w, 28.0, 19.0, 0xeaffffff, 0x1fffffff, 0,
+            ));
+        }
+        MenuRenderScene {
+            driver: MenuDriver::Xmb,
+            background_color: 0xff071729,
+            nodes,
+        }
+    }
+
+    fn render_ozone_scene(&self, list: &MenuList, width: f32, height: f32) -> MenuRenderScene {
+        let sidebar_w = 252.0;
+        let mut nodes = vec![
+            MenuRenderNode::panel(0.0, 0.0, sidebar_w, height, 0xff191c21),
+            MenuRenderNode::panel(sidebar_w, 0.0, width - sidebar_w, height, 0xff26292f),
+            MenuRenderNode::text("RETROFRONT", 24.0, 24.0, 18.0, 0xffffffff, 0),
+            MenuRenderNode::text(list.title.to_uppercase(), 24.0, 56.0, 11.0, 0x99ffffff, 0),
+            MenuRenderNode::separator(24.0, 86.0, sidebar_w - 48.0, 0x33ffffff),
+            MenuRenderNode::text(&list.title, sidebar_w + 32.0, 30.0, 30.0, 0xffffffff, 0),
+        ];
+        for (index, entry) in list.entries.iter().take(10).enumerate() {
+            let y = 112.0 + index as f32 * 46.0;
+            nodes.push(MenuRenderNode::icon(
+                entry,
+                24.0,
+                y,
+                30.0,
+                0xff000000,
+                if index == 0 { 0xffffffff } else { 0xff27d3f5 },
+                if index == 0 { 1 } else { 0 },
+            ));
+            nodes.push(MenuRenderNode::entry(
+                entry,
+                66.0,
+                y,
+                sidebar_w - 84.0,
+                32.0,
+                14.0,
+                if index == 0 { 0xffffffff } else { 0xb8ffffff },
+                0,
+                if index == 0 { 1 } else { 0 },
+            ));
+        }
+        for (index, entry) in list.entries.iter().enumerate() {
+            let y = 92.0 + index as f32 * 57.0;
+            if y > height - 62.0 {
+                break;
+            }
+            nodes.push(MenuRenderNode::entry(
+                entry,
+                sidebar_w + 32.0,
+                y,
+                width - sidebar_w - 64.0,
+                52.0,
+                17.0,
+                0xf2ffffff,
+                0x09ffffff,
+                0,
+            ));
+        }
+        MenuRenderScene {
+            driver: MenuDriver::Ozone,
+            background_color: 0xff26292f,
+            nodes,
+        }
+    }
+
+    fn render_materialui_scene(&self, list: &MenuList, width: f32, height: f32) -> MenuRenderScene {
+        let mut nodes = vec![
+            MenuRenderNode::panel(0.0, 0.0, width, height, 0xfff0f2f6),
+            MenuRenderNode::panel(0.0, 0.0, width, 64.0, 0xff1e78bd),
+            MenuRenderNode::text(&list.title, 20.0, 20.0, 22.0, 0xffffffff, 0),
+        ];
+        for (index, entry) in list.entries.iter().enumerate() {
+            let y = 84.0 + index as f32 * 68.0;
+            if y > height - 74.0 {
+                break;
+            }
+            nodes.push(MenuRenderNode::entry(
+                entry,
+                14.0,
+                y,
+                width - 28.0,
+                58.0,
+                17.0,
+                0xdd000000,
+                0xffffffff,
+                2,
+            ));
+            nodes.push(MenuRenderNode::icon(
+                entry,
+                26.0,
+                y + 8.0,
+                40.0,
+                0xff1e78bd,
+                0,
+                0,
+            ));
+        }
+        MenuRenderScene {
+            driver: MenuDriver::MaterialUi,
+            background_color: 0xfff0f2f6,
+            nodes,
+        }
+    }
+
+    fn render_rgui_scene(&self, list: &MenuList, width: f32, height: f32) -> MenuRenderScene {
+        let mut nodes = vec![MenuRenderNode::panel(0.0, 0.0, width, height, 0xff040c1f)];
+        let title = format!("┌─ {} {}┐", list.title.to_uppercase(), "─".repeat(32));
+        nodes.push(MenuRenderNode::text(title, 18.0, 18.0, 16.0, 0xff00ffff, 4));
+        for (index, entry) in list.entries.iter().enumerate() {
+            let y = 48.0 + index as f32 * 22.0;
+            if y > height - 44.0 {
+                break;
+            }
+            let marker = if entry.kind == MenuEntryKind::Submenu {
+                "▶"
+            } else {
+                " "
+            };
+            let mut line = format!("│ {} {}", marker, entry.label);
+            if !entry.value.is_empty() {
+                line.push_str("  ");
+                line.push_str(&entry.value);
+            }
+            nodes.push(MenuRenderNode {
+                text: line,
+                ..MenuRenderNode::entry(
+                    entry,
+                    18.0,
+                    y,
+                    width - 36.0,
+                    21.0,
+                    16.0,
+                    if entry.action_id == 0 {
+                        0xff777777
+                    } else {
+                        0xffffffff
+                    },
+                    0,
+                    4,
+                )
+            });
+        }
+        nodes.push(MenuRenderNode::text(
+            format!("└{}┘", "─".repeat(45)),
+            18.0,
+            height - 30.0,
+            16.0,
+            0xff00ffff,
+            4,
+        ));
+        MenuRenderScene {
+            driver: MenuDriver::Rgui,
+            background_color: 0xff040c1f,
+            nodes,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1327,5 +1688,20 @@ mod tests {
         assert_eq!(presentation.driver, MenuDriver::Xmb);
         assert_eq!(presentation.breadcrumb, vec!["Main Menu", "Help"]);
         assert_eq!(presentation.selected_index, 2);
+    }
+
+    #[test]
+    fn rust_renderer_emits_driver_specific_scene_nodes() {
+        let mut engine = MenuEngine::new();
+        for driver in MenuDriver::all() {
+            engine.set_driver(*driver);
+            let scene = engine.render_scene(1280.0, 720.0).unwrap();
+            assert_eq!(scene.driver, *driver);
+            assert!(!scene.nodes.is_empty());
+            assert!(scene
+                .nodes
+                .iter()
+                .any(|node| node.kind == MenuRenderNodeKind::Entry));
+        }
     }
 }

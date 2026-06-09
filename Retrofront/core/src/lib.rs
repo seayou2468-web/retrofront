@@ -544,6 +544,7 @@ pub struct RfFrontend {
     cached_option_values: Vec<Vec<RfCoreOptionValue>>,
     cached_cores: Vec<RfCoreInfo>,
     cached_menu_entries: Vec<RfMenuEntry>,
+    cached_menu_render_nodes: Vec<RfMenuRenderNode>,
     cached_strings: Vec<CString>,
 }
 
@@ -661,6 +662,29 @@ pub struct RfMenuList {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RfMenuRenderNode {
+    pub kind: u32,
+    pub text: *const c_char,
+    pub action_id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub font_size: f32,
+    pub fg_color: u32,
+    pub bg_color: u32,
+    pub flags: u32,
+}
+
+#[repr(C)]
+pub struct RfMenuRenderScene {
+    pub driver: *const c_char,
+    pub background_color: u32,
+    pub node_count: usize,
+}
+
+#[repr(C)]
 pub struct RfSettingEntry {
     pub key: *const c_char,
     pub value: *const c_char,
@@ -687,6 +711,7 @@ pub unsafe extern "C" fn rf_frontend_create() -> *mut RfFrontend {
         cached_option_values: Vec::new(),
         cached_cores: Vec::new(),
         cached_menu_entries: Vec::new(),
+        cached_menu_render_nodes: Vec::new(),
         cached_strings: Vec::new(),
     }))
 }
@@ -1517,6 +1542,73 @@ pub unsafe extern "C" fn rf_frontend_menu_get_entry(
             false
         }
     })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_menu_render_scene(
+    frontend: *mut RfFrontend,
+    width: f32,
+    height: f32,
+    out_scene: *mut RfMenuRenderScene,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    let Some(out_scene) = (unsafe { out_scene.as_mut() }) else {
+        return false;
+    };
+
+    frontend.cached_menu_render_nodes.clear();
+    with_active_frontend(|core| {
+        let Some(scene) = core.menu.render_scene(width, height) else {
+            return false;
+        };
+        let driver_c = CString::new(scene.driver.id()).unwrap_or_default();
+        out_scene.driver = driver_c.as_ptr();
+        out_scene.background_color = scene.background_color;
+        out_scene.node_count = scene.nodes.len();
+        frontend.cached_strings.push(driver_c);
+
+        for node in scene.nodes {
+            let text_c = CString::new(node.text.as_str()).unwrap_or_default();
+            let raw = RfMenuRenderNode {
+                kind: node.kind.code(),
+                text: text_c.as_ptr(),
+                action_id: node.action_id,
+                x: node.x,
+                y: node.y,
+                width: node.width,
+                height: node.height,
+                font_size: node.font_size,
+                fg_color: node.fg_color,
+                bg_color: node.bg_color,
+                flags: node.flags,
+            };
+            frontend.cached_strings.push(text_c);
+            frontend.cached_menu_render_nodes.push(raw);
+        }
+        true
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_menu_render_node(
+    frontend: *mut RfFrontend,
+    index: usize,
+    out_node: *mut RfMenuRenderNode,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    let Some(out_node) = (unsafe { out_node.as_mut() }) else {
+        return false;
+    };
+    if let Some(node) = frontend.cached_menu_render_nodes.get(index) {
+        *out_node = *node;
+        true
+    } else {
+        false
+    }
 }
 
 #[no_mangle]

@@ -192,6 +192,34 @@ public struct MenuList: Sendable {
   public let supportsTouch: Bool
 }
 
+public enum MenuRenderNodeKind: UInt32, Sendable {
+  case panel = 0
+  case text = 1
+  case entry = 2
+  case icon = 3
+  case separator = 4
+}
+
+public struct MenuRenderNode: Sendable {
+  public let kind: MenuRenderNodeKind
+  public let text: String
+  public let actionId: UInt32
+  public let x: Float
+  public let y: Float
+  public let width: Float
+  public let height: Float
+  public let fontSize: Float
+  public let foregroundColor: UInt32
+  public let backgroundColor: UInt32
+  public let flags: UInt32
+}
+
+public struct MenuRenderScene: Sendable {
+  public let driver: MenuDriver
+  public let backgroundColor: UInt32
+  public let nodes: [MenuRenderNode]
+}
+
 public struct RetrofrontSetting: Equatable, Sendable {
   public let key: String
   public let value: String
@@ -568,6 +596,35 @@ public final class Retrofront: @unchecked Sendable {
       supportsWallpaper: raw.supports_wallpaper,
       supportsThumbnailSidebar: raw.supports_thumbnail_sidebar,
       supportsTouch: raw.supports_touch
+    )
+  }
+
+  public func currentMenuRenderScene(width: Float, height: Float) -> MenuRenderScene? {
+    var raw = RfMenuRenderScene()
+    guard rf_frontend_menu_render_scene(handle, width, height, &raw) else { return nil }
+    var nodes: [MenuRenderNode] = []
+    for i in 0..<raw.node_count {
+      var rawNode = RfMenuRenderNode()
+      if rf_frontend_menu_render_node(handle, UInt(i), &rawNode) {
+        nodes.append(MenuRenderNode(
+          kind: MenuRenderNodeKind(rawValue: rawNode.kind) ?? .text,
+          text: String(cString: rawNode.text),
+          actionId: rawNode.action_id,
+          x: rawNode.x,
+          y: rawNode.y,
+          width: rawNode.width,
+          height: rawNode.height,
+          fontSize: rawNode.font_size,
+          foregroundColor: rawNode.fg_color,
+          backgroundColor: rawNode.bg_color,
+          flags: rawNode.flags
+        ))
+      }
+    }
+    return MenuRenderScene(
+      driver: MenuDriver(rawValue: String(cString: raw.driver)) ?? .xmb,
+      backgroundColor: raw.background_color,
+      nodes: nodes
     )
   }
 

@@ -126,6 +126,26 @@ typedef struct RfMenuList {
     bool supports_touch;
 } RfMenuList;
 
+typedef struct RfMenuRenderNode {
+    uint32_t kind;
+    const char *text;
+    uint32_t action_id;
+    float x;
+    float y;
+    float width;
+    float height;
+    float font_size;
+    uint32_t fg_color;
+    uint32_t bg_color;
+    uint32_t flags;
+} RfMenuRenderNode;
+
+typedef struct RfMenuRenderScene {
+    const char *driver;
+    uint32_t background_color;
+    uintptr_t node_count;
+} RfMenuRenderScene;
+
 typedef struct RfSettingEntry {
     const char *key;
     const char *value;
@@ -189,6 +209,8 @@ bool rf_frontend_get_launch_candidate(RfFrontend *frontend, uintptr_t index, RfC
 // Menu Engine API
 bool rf_frontend_menu_current_list(RfFrontend *frontend, RfMenuList *out_list);
 bool rf_frontend_menu_get_entry(RfFrontend *frontend, uintptr_t index, RfMenuEntry *out_entry);
+bool rf_frontend_menu_render_scene(RfFrontend *frontend, float width, float height, RfMenuRenderScene *out_scene);
+bool rf_frontend_menu_render_node(RfFrontend *frontend, uintptr_t index, RfMenuRenderNode *out_node);
 void rf_frontend_menu_push_core_list(RfFrontend *frontend);
 void rf_frontend_menu_push_content_list(RfFrontend *frontend);
 void rf_frontend_menu_push_settings(RfFrontend *frontend);

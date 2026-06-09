@@ -246,6 +246,10 @@ runTask = Task.detached(priority: .userInitiated) { [weak self] in
       currentMenu = frontend?.currentMenuList()
   }
 
+  public func currentMenuRenderScene(width: CGFloat, height: CGFloat) -> MenuRenderScene? {
+      frontend?.currentMenuRenderScene(width: Float(width), height: Float(height))
+  }
+
   public func menuAction(_ actionId: UInt32) {
       guard let frontend else { return }
       if frontend.activateMenuAction(actionId) {
