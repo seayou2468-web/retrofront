@@ -1,8 +1,13 @@
 use std::collections::{BTreeSet, HashMap};
+use std::ffi::{CStr, CString};
 use std::fs;
 use std::fs::File;
 use std::io::Read;
+use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
+
+use crate::dylib::Library;
+use crate::libretro;
 
 #[derive(Debug, Clone, Default)]
 pub struct CoreInfo {
@@ -251,64 +256,103 @@ impl CoreInfoList {
         let fallback_name = Self::display_name_from_stem(stem);
 
         let mut info = CoreInfo {
-            display_name: fallback_name,
+            display_name: fallback_name.clone(),
             ..CoreInfo::default()
         };
 
-        let Some(info_path) = self.find_info_path(core_path) else {
-            return info;
-        };
+        if let Some(info_path) = self.find_info_path(core_path) {
+            if let Ok(content) = fs::read_to_string(info_path) {
+                let map = Self::parse_info_file(&content);
+                if let Some(val) = map.get("display_name") {
+                    info.display_name = val.clone();
+                }
+                if let Some(val) = map.get("display_version") {
+                    info.display_version = val.clone();
+                }
+                if let Some(val) = map.get("corename") {
+                    info.core_name = val.clone();
+                }
+                if let Some(val) = map
+                    .get("manufacturer")
+                    .or_else(|| map.get("system_manufacturer"))
+                {
+                    info.system_manufacturer = val.clone();
+                }
+                if let Some(val) = map.get("systemname") {
+                    info.system_name = val.clone();
+                }
+                if let Some(val) = map.get("supported_extensions") {
+                    info.supported_extensions = Self::split_list(val);
+                }
+                if let Some(val) = map.get("authors") {
+                    info.authors = val.clone();
+                }
+                if let Some(val) = map.get("permissions") {
+                    info.permissions = val.clone();
+                }
+                if let Some(val) = map.get("license") {
+                    info.licenses = val.clone();
+                }
+                if let Some(val) = map.get("categories") {
+                    info.categories = val.clone();
+                }
+                if let Some(val) = map.get("notes") {
+                    info.notes = val.clone();
+                }
+                if let Some(val) = map.get("description") {
+                    info.description = val.clone();
+                }
+                if let Some(val) = map.get("database").or_else(|| map.get("databases")) {
+                    info.database = val.clone();
+                }
+                info.firmware_count = map
+                    .keys()
+                    .filter(|key| key.starts_with("firmware") && key.ends_with("_path"))
+                    .count();
+            }
+        }
 
-        if let Ok(content) = fs::read_to_string(info_path) {
-            let map = Self::parse_info_file(&content);
-            if let Some(val) = map.get("display_name") {
-                info.display_name = val.clone();
+        if info.supported_extensions.is_empty() || info.display_name == fallback_name {
+            if let Some(probed) = Self::probe_system_info(core_path) {
+                if info.display_name == fallback_name && !probed.display_name.is_empty() {
+                    info.display_name = probed.display_name;
+                }
+                if info.display_version.is_empty() {
+                    info.display_version = probed.display_version;
+                }
+                if info.supported_extensions.is_empty() {
+                    info.supported_extensions = probed.supported_extensions;
+                }
             }
-            if let Some(val) = map.get("display_version") {
-                info.display_version = val.clone();
-            }
-            if let Some(val) = map.get("corename") {
-                info.core_name = val.clone();
-            }
-            if let Some(val) = map
-                .get("manufacturer")
-                .or_else(|| map.get("system_manufacturer"))
-            {
-                info.system_manufacturer = val.clone();
-            }
-            if let Some(val) = map.get("systemname") {
-                info.system_name = val.clone();
-            }
-            if let Some(val) = map.get("supported_extensions") {
-                info.supported_extensions = Self::split_list(val);
-            }
-            if let Some(val) = map.get("authors") {
-                info.authors = val.clone();
-            }
-            if let Some(val) = map.get("permissions") {
-                info.permissions = val.clone();
-            }
-            if let Some(val) = map.get("license") {
-                info.licenses = val.clone();
-            }
-            if let Some(val) = map.get("categories") {
-                info.categories = val.clone();
-            }
-            if let Some(val) = map.get("notes") {
-                info.notes = val.clone();
-            }
-            if let Some(val) = map.get("description") {
-                info.description = val.clone();
-            }
-            if let Some(val) = map.get("database").or_else(|| map.get("databases")) {
-                info.database = val.clone();
-            }
-            info.firmware_count = map
-                .keys()
-                .filter(|key| key.starts_with("firmware") && key.ends_with("_path"))
-                .count();
         }
         info
+    }
+
+    fn probe_system_info(core_path: &Path) -> Option<CoreInfoProbe> {
+        type RetroGetSystemInfo = unsafe extern "C" fn(*mut libretro::retro_system_info);
+        let library = Library::open(core_path).ok()?;
+        let symbol = CString::new("retro_get_system_info").ok()?;
+        let get_system_info = library
+            .symbol::<RetroGetSystemInfo>(symbol.as_c_str())
+            .ok()?
+            .get();
+        let mut raw = libretro::retro_system_info {
+            library_name: std::ptr::null(),
+            library_version: std::ptr::null(),
+            valid_extensions: std::ptr::null(),
+            need_fullpath: false,
+            block_extract: false,
+        };
+        unsafe { get_system_info(&mut raw) };
+        Some(CoreInfoProbe {
+            display_name: cstr_ptr_to_string(raw.library_name),
+            display_version: cstr_ptr_to_string(raw.library_version),
+            supported_extensions: cstr_ptr_to_string(raw.valid_extensions)
+                .split('|')
+                .map(|entry| entry.trim().trim_start_matches('.').to_lowercase())
+                .filter(|entry| !entry.is_empty())
+                .collect(),
+        })
     }
 
     fn find_info_path(&self, core_path: &Path) -> Option<PathBuf> {
@@ -357,6 +401,12 @@ impl CoreInfoList {
         if underscored != stem {
             Self::push_unique(&mut candidates, underscored.clone());
             Self::push_platform_normalized_candidates(&mut candidates, &underscored);
+        }
+
+        let hyphenated = stem.replace('_', "-");
+        if hyphenated != stem {
+            Self::push_unique(&mut candidates, hyphenated.clone());
+            Self::push_platform_normalized_candidates(&mut candidates, &hyphenated);
         }
 
         candidates
@@ -546,5 +596,22 @@ fn paths_equal(left: &Path, right: &Path) -> bool {
     match (left.canonicalize(), right.canonicalize()) {
         (Ok(left), Ok(right)) => left == right,
         _ => false,
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct CoreInfoProbe {
+    display_name: String,
+    display_version: String,
+    supported_extensions: Vec<String>,
+}
+
+fn cstr_ptr_to_string(ptr: *const c_char) -> String {
+    if ptr.is_null() {
+        String::new()
+    } else {
+        unsafe { CStr::from_ptr(ptr) }
+            .to_string_lossy()
+            .into_owned()
     }
 }

@@ -7,18 +7,11 @@ struct DashboardView: View {
     @EnvironmentObject private var runtime: EmulatorRuntimeModel
     @State private var selectedTab = 0
     @State private var isPlayViewActive = false
-    private enum ImportMode {
-        case rom
-        case core
-    }
-
     @State private var isImporterPresented = false
-    @State private var importMode: ImportMode?
 
     var body: some View {
         TabView(selection: $selectedTab) {
             LibraryView {
-                importMode = .rom
                 isImporterPresented = true
             }
                 .tabItem { Label("Library", systemImage: "rectangle.stack.fill") }
@@ -28,10 +21,7 @@ struct DashboardView: View {
                 .tabItem { Label("Play", systemImage: "play.fill") }
                 .tag(1)
 
-            SettingsView {
-                importMode = .core
-                isImporterPresented = true
-            }
+            SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
                 .tag(2)
         }
@@ -42,17 +32,9 @@ struct DashboardView: View {
         .background(OneUI.background.ignoresSafeArea())
         .fullScreenCover(isPresented: $isPlayViewActive) { PlayView() }
         .fileImporter(isPresented: $isImporterPresented, allowedContentTypes: [.data]) { result in
-            guard let importMode else { return }
-
             switch result {
             case .success(let url):
-                switch importMode {
-                case .rom:
-                    runtime.importFile(at: url)
-                case .core:
-                    runtime.importCore(at: url)
-                }
-
+                runtime.importFile(at: url)
             case .failure(let error):
                 runtime.statusMessage = "Import failed: \(error)"
             }
@@ -214,11 +196,13 @@ struct NowPlayingView: View {
 
 struct SettingsView: View {
     @EnvironmentObject private var runtime: EmulatorRuntimeModel
-    let onCoreImport: () -> Void
 
     var body: some View {
         AppScreen(title: "Settings", subtitle: "実際に保存・反映されるアプリ設定") {
             SettingsGroup(title: "Video") {
+                SettingPickerRow(title: "Renderer", subtitle: "Software / Metal / MoltenVK / OpenGL ES", value: runtime.rendererLabel, choices: runtime.rendererChoices) { choice in
+                    runtime.setRenderer(choice.value)
+                }
                 SettingPickerRow(title: "Scale", subtitle: "画面比率の扱い", value: runtime.videoScaleModeLabel, choices: runtime.videoScaleModeChoices) { choice in
                     runtime.setVideoScaleMode(choice.value)
                 }
@@ -274,18 +258,18 @@ struct SettingsView: View {
 
             SettingsGroup(title: "Loaded Core") {
                 SettingInfoRow(title: "Current Core", value: runtime.systemInfo?.libraryName ?? runtime.corePath ?? "Not loaded")
-                Button {
-                    onCoreImport()
-                } label: {
-                    Label("Load core manually", systemImage: "square.and.arrow.down")
-                        .font(.subheadline.bold())
-                        .foregroundColor(OneUI.accent)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
-                        .background(OneUI.elevated)
-                        .clipShape(RoundedRectangle(cornerRadius: OneUI.compactRadius, style: .continuous))
+                if runtime.availableCores.isEmpty {
+                    SettingInfoRow(title: "Bundled Cores", value: "No bundled cores discovered")
+                } else {
+                    ForEach(runtime.availableCores, id: \.path) { core in
+                        Button {
+                            runtime.loadBundledCore(core)
+                        } label: {
+                            CoreRow(core: core)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .buttonStyle(.plain)
                 if runtime.coreOptions.isEmpty {
                     SettingInfoRow(title: "Core Options", value: "Load a core to edit its options")
                 } else {

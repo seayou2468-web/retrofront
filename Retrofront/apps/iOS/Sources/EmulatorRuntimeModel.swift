@@ -68,7 +68,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
       try? frontend.setSetting(key: "core_assets_directory", value: downloads.path)
       installBundledAssetsIfNeeded(frontend)
       refreshOverlayChoices()
-      try? frontend.setGfxBackend(.bgfx)
+      applyRendererSetting(frontend)
       applyVideoSettings(frontend)
       loadConfiguredOverlay(frontend)
       frontend.saveSettings()
@@ -124,37 +124,6 @@ public final class EmulatorRuntimeModel: ObservableObject {
 
   public func importFile(at url: URL) {
     importGame(at: url)
-  }
-
-  public func importCore(at url: URL) {
-    guard let frontend else { return }
-    let coreDir = retroArchRoot.appendingPathComponent("Cores", isDirectory: true)
-    do {
-      try FileManager.default.createDirectory(at: coreDir, withIntermediateDirectories: true)
-    } catch {
-      statusMessage = "Core directory failed: \(error)"
-      return
-    }
-
-    let securityScoped = url.startAccessingSecurityScopedResource()
-    defer { if securityScoped { url.stopAccessingSecurityScopedResource() } }
-
-    let destination = coreDir.appendingPathComponent(url.lastPathComponent)
-    do {
-      if FileManager.default.fileExists(atPath: destination.path) {
-        try FileManager.default.removeItem(at: destination)
-      }
-      try FileManager.default.copyItem(at: url, to: destination)
-      try? frontend.setSetting(key: "manual_core_directory", value: coreDir.path)
-      frontend.scanCores(in: coreDir.path)
-      systemInfo = try frontend.loadCore(at: destination.path)
-      corePath = destination.path
-      refreshAvailableCores()
-      refresh()
-      statusMessage = "Loaded manual core: \(systemInfo?.libraryName ?? destination.deletingPathExtension().lastPathComponent)"
-    } catch {
-      statusMessage = "Manual core load failed: \(error)"
-    }
   }
 
   public func importGame(at url: URL) {
@@ -231,11 +200,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
       return
     }
     guard let plan = frontend.planContentLaunch(path: url.path) else {
-      if let corePath {
-        doLaunch(url, preferredCore: corePath)
-      } else {
-        statusMessage = "Could not create launch plan"
-      }
+      statusMessage = "Could not create launch plan"
       return
     }
     switch plan.decision {
@@ -246,12 +211,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
       pendingCoreChoices = frontend.launchCandidates()
       statusMessage = "Select a core for .\(plan.contentExtension)"
     case .noCore:
-      if let corePath {
-        statusMessage = "No info match for .\(plan.contentExtension); trying current core"
-        doLaunch(url, preferredCore: corePath)
-      } else {
-        statusMessage = "No compatible core found for .\(plan.contentExtension)"
-      }
+      statusMessage = "No compatible core found for .\(plan.contentExtension). Load a matching bundled core first."
     }
   }
 
@@ -562,6 +522,15 @@ public final class EmulatorRuntimeModel: ObservableObject {
     settingValue("video_filter_mode") == "linear" ? "Linear" : "Nearest"
   }
 
+  public var rendererLabel: String {
+    switch settingValue("video_driver") {
+    case "software": return "Software"
+    case "moltenvk": return "MoltenVK"
+    case "opengl": return "OpenGL ES"
+    default: return "Metal"
+    }
+  }
+
   public var vsyncEnabled: Bool {
     settingValue("video_vsync") != "false"
   }
@@ -572,6 +541,10 @@ public final class EmulatorRuntimeModel: ObservableObject {
 
   public var videoFilterChoices: [(label: String, value: String)] {
     [("Nearest", "nearest"), ("Linear", "linear")]
+  }
+
+  public var rendererChoices: [(label: String, value: String)] {
+    [("Metal", "metal"), ("Software", "software"), ("MoltenVK", "moltenvk"), ("OpenGL ES", "opengl")]
   }
 
   public var audioLatencyChoices: [(label: String, value: String)] {
@@ -644,6 +617,17 @@ public final class EmulatorRuntimeModel: ObservableObject {
     if let frontend { applyVideoSettings(frontend) }
     refresh()
     statusMessage = "Video filter: \(videoFilterLabel)"
+  }
+
+  public func setRenderer(_ value: String) {
+    setSetting(key: "video_driver", value: value)
+    if let frontend { applyRendererSetting(frontend) }
+    refresh()
+    statusMessage = "Renderer: \(rendererLabel)"
+  }
+
+  public func loadBundledCore(_ core: CoreInfo) {
+    loadCore(core)
   }
 
   public func closeContent() {
@@ -836,6 +820,13 @@ public final class EmulatorRuntimeModel: ObservableObject {
 
   private func filterModeFromSetting(_ value: String?) -> GfxFilterMode {
     value == "linear" ? .linear : .nearest
+  }
+
+  private func applyRendererSetting(_ frontend: Retrofront) {
+    let value = frontend.setting("video_driver") ?? "metal"
+    let backend: GfxBackend = value == "software" ? .software : .bgfx
+    try? frontend.setGfxBackend(backend)
+    try? frontend.setSetting(key: "video_bgfx_renderer", value: value == "software" ? "metal" : value)
   }
 
   public func setOption(key: String, value: String) {

@@ -209,7 +209,7 @@ impl MenuEngine {
         let entries = if cores.is_empty() {
             vec![Self::action(
                 "No Cores Available",
-                "Scan the configured core directory or import a .dylib core",
+                "Scan the bundled/configured core directories",
                 0,
             )]
         } else {
@@ -559,7 +559,7 @@ impl MenuEngine {
                 Self::setting(
                     "Video",
                     "video_driver",
-                    settings.get("video_driver").map_or("bgfx", String::as_str),
+                    settings.get("video_driver").map_or("metal", String::as_str),
                     600,
                 ),
                 Self::setting(
@@ -591,7 +591,7 @@ impl MenuEngine {
                 Self::setting(
                     "Output",
                     "Active rendering backend",
-                    settings.get("video_driver").map_or("bgfx", String::as_str),
+                    settings.get("video_driver").map_or("metal", String::as_str),
                     620,
                 ),
                 Self::setting(

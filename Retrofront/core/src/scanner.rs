@@ -59,11 +59,10 @@ fn normalize_extensions(extensions: &[String]) -> Vec<String> {
         .map(|ext| ext.trim().trim_start_matches('.').to_lowercase())
         .filter(|ext| !ext.is_empty() && !blocked_non_rom_extensions().contains(&ext.as_str()))
         .collect();
-    if normalized.is_empty() {
-        normalized = default_rom_extensions()
-            .iter()
-            .map(|ext| ext.to_string())
-            .collect();
+    for ext in default_rom_extensions() {
+        if !normalized.iter().any(|existing| existing == ext) {
+            normalized.push((*ext).to_string());
+        }
     }
     normalized.sort();
     normalized.dedup();
@@ -131,6 +130,27 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("retrofront-{name}-{id}"))
+    }
+
+    #[test]
+    fn scans_default_rom_extensions_even_when_core_filter_is_narrow() {
+        let dir = temp_dir("rom-union-filter");
+        fs::create_dir_all(&dir).unwrap();
+        File::create(dir.join("advance.gba")).unwrap();
+        File::create(dir.join("super.sfc")).unwrap();
+        File::create(dir.join("notes.txt")).unwrap();
+
+        let mut scanner = Scanner::new();
+        scanner.scan_directory(&dir, &["gba".to_string()]);
+
+        let mut labels: Vec<_> = scanner
+            .games
+            .iter()
+            .map(|game| game.label.as_str())
+            .collect();
+        labels.sort();
+        assert_eq!(labels, vec!["advance", "super"]);
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

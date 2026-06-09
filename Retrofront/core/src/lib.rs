@@ -140,7 +140,9 @@ struct CoreApi {
 
 impl CoreApi {
     fn load(path: impl AsRef<Path>) -> Result<Self, String> {
-        let lib = Library::open(path.as_ref()).map_err(|e| e.to_string())?;
+        let core_path = path.as_ref();
+        let lib = Library::open(core_path)
+            .map_err(|e| format!("failed to load core {}: {e}", core_path.display()))?;
         Ok(Self {
             retro_set_environment: sym!(lib, "retro_set_environment", RetroSetEnvironment),
             retro_set_video_refresh: sym!(lib, "retro_set_video_refresh", RetroSetVideoRefresh),

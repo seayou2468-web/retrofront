@@ -19,7 +19,7 @@ Retrofront separates UI and frontend management:
 
 - `core/src/gfx.rs` implements the portable software-frame path first: `RETRO_ENVIRONMENT_SET_PIXEL_FORMAT` selects 0RGB1555, RGB565, or XRGB8888, and every `retro_video_refresh_t` buffer is copied and normalized to tight RGBA8888.
 - The C/Swift ABI exposes `rf_frontend_video_frame_info` and `rf_frontend_copy_video_frame_rgba`, allowing Linux and iOS to upload the latest Rust-owned RGBA frame to their native surfaces.
-- Backend selection is shared (`software`, `openGL`, `vulkan`). iOS can request OpenGL ES through the SDK or Vulkan through MoltenVK while keeping core launch, frame ingestion, and format conversion in Rust.
+- Backend selection is shared (`software`, `metal`, `moltenvk`, `opengl`). iOS stores the selected route in settings, maps software to the CPU path, and maps Metal/MoltenVK/OpenGL ES to the bgfx host path while keeping core launch, frame ingestion, and format conversion in Rust.
 - Hardware-render requests from libretro cores are captured from `RETRO_ENVIRONMENT_SET_HW_RENDER` so platform OpenGL/Vulkan surface integration can use the same Rust state instead of duplicating frontend logic.
 
 ## Platform notes

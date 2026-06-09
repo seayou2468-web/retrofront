@@ -31,7 +31,7 @@ swift build
 
 ## iOS device app
 
-The iOS app is generated with XcodeGen and builds for real devices only; no iOS simulator setup is required. During the app build, every `*.dylib` in `dylibs/` is copied into the app's `Frameworks` directory without linking the app executable against those cores. This keeps libretro cores loadable on demand with `dlopen` instead of causing launch-time `Library not loaded` failures. The Cores tab also lets users import additional `.dylib` cores from Files into `Documents/Cores`; imported cores are discovered automatically and can be selected before loading a ROM. The app runs the core frame loop, forwards virtual RetroPad input, and draws software video frames in SwiftUI.
+The iOS app is generated with XcodeGen and builds for real devices only; no iOS simulator setup is required. During the app build, every `*.dylib` in `dylibs/` is copied into the app's `Frameworks` directory without linking the app executable against those cores. This keeps libretro cores loadable on demand with `dlopen` instead of causing launch-time `Library not loaded` failures. Bundled cores are discovered automatically from the app bundle and can be selected explicitly before loading a ROM; there is intentionally no user-facing core import flow. The app runs the core frame loop, forwards virtual RetroPad input, and draws software video frames in SwiftUI.
 
 ```sh
 cd Retrofront
