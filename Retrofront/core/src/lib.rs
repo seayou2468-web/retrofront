@@ -21,11 +21,13 @@ pub use options::{CoreOptionDefinition, CoreOptionValue};
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::ffi::{CStr, CString};
-use std::fs;
-use std::os::raw::{c_char, c_uint, c_void};
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::os::raw::{c_char, c_int, c_uint, c_void};
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::{Mutex, OnceLock};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 pub const RETRO_HW_FRAME_BUFFER_VALID: *const c_void = usize::MAX as *const c_void;
 
@@ -36,6 +38,57 @@ macro_rules! sym {
         $lib.symbol::<$ty>(name)?.get()
     }};
 }
+
+struct VfsFileHandle {
+    path: CString,
+    file: File,
+}
+
+struct VfsDirEntry {
+    name: CString,
+    is_dir: bool,
+}
+
+struct VfsDirHandle {
+    entries: Vec<VfsDirEntry>,
+    current: Option<usize>,
+}
+
+static PERF_EPOCH: OnceLock<Instant> = OnceLock::new();
+static VFS_INTERFACE: libretro::retro_vfs_interface = libretro::retro_vfs_interface {
+    get_path: Some(vfs_get_path),
+    open: Some(vfs_open),
+    close: Some(vfs_close),
+    size: Some(vfs_size),
+    tell: Some(vfs_tell),
+    seek: Some(vfs_seek),
+    read: Some(vfs_read),
+    write: Some(vfs_write),
+    flush: Some(vfs_flush),
+    remove: Some(vfs_remove),
+    rename: Some(vfs_rename),
+    truncate: Some(vfs_truncate),
+    stat: Some(vfs_stat),
+    mkdir: Some(vfs_mkdir),
+    opendir: Some(vfs_opendir),
+    readdir: Some(vfs_readdir),
+    dirent_get_name: Some(vfs_dirent_get_name),
+    dirent_is_dir: Some(vfs_dirent_is_dir),
+    closedir: Some(vfs_closedir),
+    stat_64: Some(vfs_stat_64),
+};
+static PERF_INTERFACE: libretro::retro_perf_callback = libretro::retro_perf_callback {
+    get_time_usec: Some(perf_get_time_usec),
+    get_cpu_features: Some(perf_get_cpu_features),
+    get_perf_counter: Some(perf_get_counter),
+    perf_register: Some(perf_register),
+    perf_start: Some(perf_start),
+    perf_stop: Some(perf_stop),
+    perf_log: Some(perf_log),
+};
+static RUMBLE_INTERFACE: libretro::retro_rumble_interface = libretro::retro_rumble_interface {
+    set_rumble_state: Some(set_rumble_state),
+};
 
 type RetroSetEnvironment = unsafe extern "C" fn(libretro::retro_environment_t);
 type RetroSetVideoRefresh = unsafe extern "C" fn(libretro::retro_video_refresh_t);
@@ -178,6 +231,7 @@ pub struct FrontendCore {
     system_info: Option<SystemInfo>,
     game: Option<GameInfo>,
     current_core_path: Option<PathBuf>,
+    game_info_ext: Option<libretro::retro_game_info_ext>,
     env_strings: HashMap<String, CString>,
     events: VecDeque<FrontendEvent>,
     joypad_buttons: [i16; 16],
@@ -191,6 +245,8 @@ pub struct FrontendCore {
     pub scanner: scanner::Scanner,
     pub launcher: launch::LaunchManager,
 }
+
+unsafe impl Send for FrontendCore {}
 
 static CORE_INSTANCE: OnceLock<Mutex<FrontendCore>> = OnceLock::new();
 
@@ -220,6 +276,333 @@ where
     })
 }
 
+unsafe fn vfs_file<'a>(
+    stream: *mut libretro::retro_vfs_file_handle,
+) -> Option<&'a mut VfsFileHandle> {
+    unsafe { (stream as *mut VfsFileHandle).as_mut() }
+}
+
+unsafe fn vfs_dir<'a>(stream: *mut libretro::retro_vfs_dir_handle) -> Option<&'a mut VfsDirHandle> {
+    unsafe { (stream as *mut VfsDirHandle).as_mut() }
+}
+
+unsafe extern "C" fn vfs_get_path(stream: *mut libretro::retro_vfs_file_handle) -> *const c_char {
+    unsafe { vfs_file(stream) }
+        .map(|handle| handle.path.as_ptr())
+        .unwrap_or(ptr::null())
+}
+
+unsafe extern "C" fn vfs_open(
+    path: *const c_char,
+    mode: c_uint,
+    _hints: c_uint,
+) -> *mut libretro::retro_vfs_file_handle {
+    let Some(path) = ptr_to_str(path) else {
+        return ptr::null_mut();
+    };
+    let read = mode & libretro::RETRO_VFS_FILE_ACCESS_READ != 0;
+    let write = mode & libretro::RETRO_VFS_FILE_ACCESS_WRITE != 0;
+    let update_existing = mode & libretro::RETRO_VFS_FILE_ACCESS_UPDATE_EXISTING != 0;
+    let mut options = OpenOptions::new();
+    options.read(read || !write).write(write);
+    if write && !update_existing {
+        options.create(true);
+        if !read {
+            options.truncate(true);
+        }
+    }
+    let Ok(file) = options.open(&path) else {
+        return ptr::null_mut();
+    };
+    let Ok(path) = CString::new(path.replace('\0', "")) else {
+        return ptr::null_mut();
+    };
+    Box::into_raw(Box::new(VfsFileHandle { path, file })) as *mut libretro::retro_vfs_file_handle
+}
+
+unsafe extern "C" fn vfs_close(stream: *mut libretro::retro_vfs_file_handle) -> c_int {
+    if stream.is_null() {
+        return -1;
+    }
+    let _ = unsafe { Box::from_raw(stream as *mut VfsFileHandle) };
+    0
+}
+
+unsafe extern "C" fn vfs_size(stream: *mut libretro::retro_vfs_file_handle) -> i64 {
+    let Some(handle) = (unsafe { vfs_file(stream) }) else {
+        return -1;
+    };
+    handle.file.metadata().map(|m| m.len() as i64).unwrap_or(-1)
+}
+
+unsafe extern "C" fn vfs_truncate(
+    stream: *mut libretro::retro_vfs_file_handle,
+    length: i64,
+) -> i64 {
+    let Some(handle) = (unsafe { vfs_file(stream) }) else {
+        return -1;
+    };
+    if length < 0 {
+        return -1;
+    }
+    handle
+        .file
+        .set_len(length as u64)
+        .map(|_| length)
+        .unwrap_or(-1)
+}
+
+unsafe extern "C" fn vfs_tell(stream: *mut libretro::retro_vfs_file_handle) -> i64 {
+    let Some(handle) = (unsafe { vfs_file(stream) }) else {
+        return -1;
+    };
+    handle
+        .file
+        .stream_position()
+        .map(|p| p as i64)
+        .unwrap_or(-1)
+}
+
+unsafe extern "C" fn vfs_seek(
+    stream: *mut libretro::retro_vfs_file_handle,
+    offset: i64,
+    seek_position: c_int,
+) -> i64 {
+    let Some(handle) = (unsafe { vfs_file(stream) }) else {
+        return -1;
+    };
+    let pos = match seek_position as u32 {
+        libretro::RETRO_VFS_SEEK_POSITION_START => {
+            if offset < 0 {
+                return -1;
+            }
+            SeekFrom::Start(offset as u64)
+        }
+        libretro::RETRO_VFS_SEEK_POSITION_CURRENT => SeekFrom::Current(offset),
+        libretro::RETRO_VFS_SEEK_POSITION_END => SeekFrom::End(offset),
+        _ => return -1,
+    };
+    handle.file.seek(pos).map(|p| p as i64).unwrap_or(-1)
+}
+
+unsafe extern "C" fn vfs_read(
+    stream: *mut libretro::retro_vfs_file_handle,
+    s: *mut c_void,
+    len: u64,
+) -> i64 {
+    let Some(handle) = (unsafe { vfs_file(stream) }) else {
+        return -1;
+    };
+    if s.is_null() {
+        return -1;
+    }
+    let buf = unsafe { std::slice::from_raw_parts_mut(s.cast::<u8>(), len as usize) };
+    handle.file.read(buf).map(|n| n as i64).unwrap_or(-1)
+}
+
+unsafe extern "C" fn vfs_write(
+    stream: *mut libretro::retro_vfs_file_handle,
+    s: *const c_void,
+    len: u64,
+) -> i64 {
+    let Some(handle) = (unsafe { vfs_file(stream) }) else {
+        return -1;
+    };
+    if s.is_null() {
+        return -1;
+    }
+    let buf = unsafe { std::slice::from_raw_parts(s.cast::<u8>(), len as usize) };
+    handle.file.write(buf).map(|n| n as i64).unwrap_or(-1)
+}
+
+unsafe extern "C" fn vfs_flush(stream: *mut libretro::retro_vfs_file_handle) -> c_int {
+    let Some(handle) = (unsafe { vfs_file(stream) }) else {
+        return -1;
+    };
+    handle.file.flush().map(|_| 0).unwrap_or(-1)
+}
+
+unsafe extern "C" fn vfs_remove(path: *const c_char) -> c_int {
+    let Some(path) = ptr_to_str(path) else {
+        return -1;
+    };
+    fs::remove_file(&path)
+        .or_else(|_| fs::remove_dir(&path))
+        .map(|_| 0)
+        .unwrap_or(-1)
+}
+
+unsafe extern "C" fn vfs_rename(old_path: *const c_char, new_path: *const c_char) -> c_int {
+    let Some(old_path) = ptr_to_str(old_path) else {
+        return -1;
+    };
+    let Some(new_path) = ptr_to_str(new_path) else {
+        return -1;
+    };
+    fs::rename(old_path, new_path).map(|_| 0).unwrap_or(-1)
+}
+
+unsafe extern "C" fn vfs_stat(path: *const c_char, size: *mut i32) -> c_int {
+    let Some((flags, len)) = vfs_metadata(path) else {
+        return -1;
+    };
+    if !size.is_null() {
+        unsafe { *size = len.min(i32::MAX as i64) as i32 };
+    }
+    flags
+}
+
+unsafe extern "C" fn vfs_stat_64(path: *const c_char, size: *mut i64) -> c_int {
+    let Some((flags, len)) = vfs_metadata(path) else {
+        return -1;
+    };
+    if !size.is_null() {
+        unsafe { *size = len };
+    }
+    flags
+}
+
+fn vfs_metadata(path: *const c_char) -> Option<(c_int, i64)> {
+    let path = ptr_to_str(path)?;
+    let metadata = fs::metadata(path).ok()?;
+    let len = metadata.len() as i64;
+    let mut flags = libretro::RETRO_VFS_STAT_IS_VALID as c_int;
+    if metadata.is_dir() {
+        flags |= libretro::RETRO_VFS_STAT_IS_DIRECTORY as c_int;
+    }
+    Some((flags, len))
+}
+
+unsafe extern "C" fn vfs_mkdir(dir: *const c_char) -> c_int {
+    let Some(dir) = ptr_to_str(dir) else {
+        return -1;
+    };
+    fs::create_dir_all(dir).map(|_| 0).unwrap_or(-1)
+}
+
+unsafe extern "C" fn vfs_opendir(
+    dir: *const c_char,
+    include_hidden: bool,
+) -> *mut libretro::retro_vfs_dir_handle {
+    let Some(dir) = ptr_to_str(dir) else {
+        return ptr::null_mut();
+    };
+    let Ok(read_dir) = fs::read_dir(dir) else {
+        return ptr::null_mut();
+    };
+    let mut entries = Vec::new();
+    for entry in read_dir.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !include_hidden && name.starts_with('.') {
+            continue;
+        }
+        if let Ok(name) = CString::new(name.replace('\0', "")) {
+            entries.push(VfsDirEntry {
+                name,
+                is_dir: entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false),
+            });
+        }
+    }
+    Box::into_raw(Box::new(VfsDirHandle {
+        entries,
+        current: None,
+    })) as *mut libretro::retro_vfs_dir_handle
+}
+
+unsafe extern "C" fn vfs_readdir(dirstream: *mut libretro::retro_vfs_dir_handle) -> bool {
+    let Some(handle) = (unsafe { vfs_dir(dirstream) }) else {
+        return false;
+    };
+    let next = handle.current.map_or(0, |current| current + 1);
+    if next >= handle.entries.len() {
+        return false;
+    }
+    handle.current = Some(next);
+    true
+}
+
+unsafe extern "C" fn vfs_dirent_get_name(
+    dirstream: *mut libretro::retro_vfs_dir_handle,
+) -> *const c_char {
+    let Some(handle) = (unsafe { vfs_dir(dirstream) }) else {
+        return ptr::null();
+    };
+    handle
+        .current
+        .and_then(|current| handle.entries.get(current))
+        .map(|entry| entry.name.as_ptr())
+        .unwrap_or(ptr::null())
+}
+
+unsafe extern "C" fn vfs_dirent_is_dir(dirstream: *mut libretro::retro_vfs_dir_handle) -> bool {
+    let Some(handle) = (unsafe { vfs_dir(dirstream) }) else {
+        return false;
+    };
+    handle
+        .current
+        .and_then(|current| handle.entries.get(current))
+        .is_some_and(|entry| entry.is_dir)
+}
+
+unsafe extern "C" fn vfs_closedir(dirstream: *mut libretro::retro_vfs_dir_handle) -> c_int {
+    if dirstream.is_null() {
+        return -1;
+    }
+    let _ = unsafe { Box::from_raw(dirstream as *mut VfsDirHandle) };
+    0
+}
+
+unsafe extern "C" fn set_rumble_state(
+    _port: c_uint,
+    _effect: libretro::retro_rumble_effect,
+    _strength: u16,
+) -> bool {
+    true
+}
+
+unsafe extern "C" fn perf_get_time_usec() -> libretro::retro_time_t {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_micros().min(i64::MAX as u128) as i64)
+        .unwrap_or(0)
+}
+
+unsafe extern "C" fn perf_get_counter() -> libretro::retro_perf_tick_t {
+    PERF_EPOCH
+        .get_or_init(Instant::now)
+        .elapsed()
+        .as_nanos()
+        .min(u64::MAX as u128) as u64
+}
+
+unsafe extern "C" fn perf_get_cpu_features() -> u64 {
+    0
+}
+
+unsafe extern "C" fn perf_register(counter: *mut libretro::retro_perf_counter) {
+    if let Some(counter) = unsafe { counter.as_mut() } {
+        counter.registered = true;
+    }
+}
+
+unsafe extern "C" fn perf_start(counter: *mut libretro::retro_perf_counter) {
+    if let Some(counter) = unsafe { counter.as_mut() } {
+        counter.start = unsafe { perf_get_counter() };
+    }
+}
+
+unsafe extern "C" fn perf_stop(counter: *mut libretro::retro_perf_counter) {
+    if let Some(counter) = unsafe { counter.as_mut() } {
+        let now = unsafe { perf_get_counter() };
+        counter.total = counter
+            .total
+            .saturating_add(now.saturating_sub(counter.start));
+        counter.call_cnt = counter.call_cnt.saturating_add(1);
+    }
+}
+
+unsafe extern "C" fn perf_log() {}
+
 impl FrontendCore {
     pub fn new() -> Self {
         Self {
@@ -227,6 +610,7 @@ impl FrontendCore {
             system_info: None,
             game: None,
             current_core_path: None,
+            game_info_ext: None,
             env_strings: HashMap::new(),
             events: VecDeque::new(),
             joypad_buttons: [0; 16],
@@ -388,22 +772,31 @@ impl FrontendCore {
         meta: Option<String>,
     ) -> Result<(), String> {
         let path_buf = path.as_ref().to_path_buf();
-        let c_path = CString::new(path_buf.to_string_lossy().as_bytes()).unwrap();
 
         self.unload_game();
 
-        let Some(api) = self.api.as_ref() else {
-            return Err("no core loaded".to_string());
+        let (retro_load_game, retro_get_system_av_info) = {
+            let Some(api) = self.api.as_ref() else {
+                return Err("no core loaded".to_string());
+            };
+            (api.retro_load_game, api.retro_get_system_av_info)
         };
+
+        self.prepare_game_info_ext(&path_buf, meta.as_deref());
+        let path_ptr = self.env_path_ptr("game_info_path", path_buf.clone());
+        let meta_ptr = meta
+            .as_ref()
+            .map(|meta| self.env_string_ptr("game_info_meta", meta.clone()))
+            .unwrap_or(ptr::null());
 
         let game_info = libretro::retro_game_info {
-            path: c_path.as_ptr(),
+            path: path_ptr,
             data: ptr::null(),
             size: 0,
-            meta: ptr::null(),
+            meta: meta_ptr,
         };
 
-        if unsafe { (api.retro_load_game)(&game_info) } {
+        if unsafe { (retro_load_game)(&game_info) } {
             self.game = Some(GameInfo {
                 path: path_buf,
                 meta,
@@ -422,14 +815,54 @@ impl FrontendCore {
                     sample_rate: 0.0,
                 },
             };
-            unsafe { (api.retro_get_system_av_info)(&mut av_info) };
+            unsafe { (retro_get_system_av_info)(&mut av_info) };
             self.gfx.update_system_av_info(&av_info);
             self.load_save_ram();
 
             Ok(())
         } else {
+            self.game_info_ext = None;
             Err("core failed to load game".to_string())
         }
+    }
+
+    fn prepare_game_info_ext(&mut self, path: &Path, meta: Option<&str>) {
+        let full_path = self.env_path_ptr("game_info_ext_full_path", path.to_path_buf());
+        let dir = self.env_path_ptr(
+            "game_info_ext_dir",
+            path.parent().map(Path::to_path_buf).unwrap_or_default(),
+        );
+        let name = self.env_string_ptr(
+            "game_info_ext_name",
+            path.file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+                .to_string(),
+        );
+        let ext = self.env_string_ptr(
+            "game_info_ext_ext",
+            path.extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or_default()
+                .to_lowercase(),
+        );
+        let meta = meta
+            .map(|meta| self.env_string_ptr("game_info_ext_meta", meta.to_string()))
+            .unwrap_or(ptr::null());
+
+        self.game_info_ext = Some(libretro::retro_game_info_ext {
+            full_path,
+            archive_path: ptr::null(),
+            archive_file: ptr::null(),
+            dir,
+            name,
+            ext,
+            meta,
+            data: ptr::null(),
+            size: 0,
+            file_in_archive: false,
+            persistent_data: false,
+        });
     }
 
     pub fn launch_content(
@@ -486,6 +919,7 @@ impl FrontendCore {
             unsafe { (api.retro_unload_game)() };
         }
         self.game = None;
+        self.game_info_ext = None;
     }
 
     pub fn reset(&mut self) -> Result<(), String> {
@@ -666,7 +1100,6 @@ impl FrontendCore {
 
     unsafe extern "C" fn retro_environment_callback(command: c_uint, data: *mut c_void) -> bool {
         with_active_frontend(|core| {
-            let command = command & !libretro::RETRO_ENVIRONMENT_EXPERIMENTAL;
             let res = match command {
                 libretro::RETRO_ENVIRONMENT_SET_PIXEL_FORMAT => {
                     let format = unsafe { *(data as *const libretro::retro_pixel_format) };
@@ -790,6 +1223,20 @@ impl FrontendCore {
                 | libretro::RETRO_ENVIRONMENT_SET_DISK_CONTROL_EXT_INTERFACE => true,
                 libretro::RETRO_ENVIRONMENT_SET_FRAME_TIME_CALLBACK
                 | libretro::RETRO_ENVIRONMENT_SET_AUDIO_CALLBACK => true,
+                libretro::RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE => {
+                    if !data.is_null() {
+                        unsafe {
+                            *(data as *mut libretro::retro_rumble_interface) = RUMBLE_INTERFACE
+                        };
+                    }
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_PERF_INTERFACE => {
+                    if !data.is_null() {
+                        unsafe { *(data as *mut libretro::retro_perf_callback) = PERF_INTERFACE };
+                    }
+                    true
+                }
                 libretro::RETRO_ENVIRONMENT_GET_INPUT_DEVICE_CAPABILITIES => {
                     unsafe {
                         *(data as *mut u64) = (1u64 << libretro::RETRO_DEVICE_JOYPAD)
@@ -805,6 +1252,22 @@ impl FrontendCore {
                 }
                 libretro::RETRO_ENVIRONMENT_SET_SUBSYSTEM_INFO => true,
                 libretro::RETRO_ENVIRONMENT_SET_MEMORY_MAPS => true,
+                libretro::RETRO_ENVIRONMENT_GET_VFS_INTERFACE => {
+                    if data.is_null() {
+                        false
+                    } else {
+                        let info =
+                            unsafe { &mut *(data as *mut libretro::retro_vfs_interface_info) };
+                        if info.required_interface_version <= 4 {
+                            info.required_interface_version = 4;
+                            info.iface = (&VFS_INTERFACE as *const libretro::retro_vfs_interface)
+                                as *mut libretro::retro_vfs_interface;
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                }
                 libretro::RETRO_ENVIRONMENT_SET_GEOMETRY => {
                     let geometry = unsafe { &*(data as *const libretro::retro_game_geometry) };
                     let mut config = core.gfx.video_config();
@@ -860,6 +1323,19 @@ impl FrontendCore {
                 | libretro::RETRO_ENVIRONMENT_SET_FASTFORWARDING_OVERRIDE
                 | libretro::RETRO_ENVIRONMENT_SET_CONTENT_INFO_OVERRIDE
                 | libretro::RETRO_ENVIRONMENT_SET_CORE_OPTIONS_UPDATE_DISPLAY_CALLBACK => true,
+                libretro::RETRO_ENVIRONMENT_GET_GAME_INFO_EXT => {
+                    if data.is_null() {
+                        false
+                    } else if let Some(info) = core.game_info_ext.as_ref() {
+                        unsafe {
+                            *(data as *mut *const libretro::retro_game_info_ext) =
+                                info as *const libretro::retro_game_info_ext
+                        };
+                        true
+                    } else {
+                        false
+                    }
+                }
                 libretro::RETRO_ENVIRONMENT_SET_VARIABLE => {
                     core.options
                         .set_definitions_v0(data as *const libretro::retro_variable);
@@ -896,6 +1372,19 @@ impl FrontendCore {
                     unsafe { *(data as *mut f32) = 0.0 };
                     true
                 }
+                libretro::RETRO_ENVIRONMENT_EXEC_MEM_ALLOC => {
+                    if data.is_null() {
+                        false
+                    } else {
+                        let request =
+                            unsafe { &mut *(data as *mut libretro::retro_exec_mem_alloc) };
+                        request.mode = libretro::RETRO_EXEC_MEM_MODE_UNAVAILABLE;
+                        request.rx = ptr::null_mut();
+                        request.rw = ptr::null_mut();
+                        false
+                    }
+                }
+                libretro::RETRO_ENVIRONMENT_EXEC_MEM_FREE => true,
                 _ => false,
             };
             core.events.push_back(FrontendEvent::EnvironmentCommand {
@@ -2657,6 +3146,66 @@ mod tests {
         let frontend = FrontendCore::new();
         assert_eq!(frontend.state(), SessionState::Empty);
         assert!(frontend.system_info().is_none());
+    }
+
+    #[test]
+    fn environment_dispatch_handles_experimental_vfs_command() {
+        let mut info = libretro::retro_vfs_interface_info {
+            required_interface_version: 4,
+            iface: ptr::null_mut(),
+        };
+
+        let ok = unsafe {
+            FrontendCore::retro_environment_callback(
+                libretro::RETRO_ENVIRONMENT_GET_VFS_INTERFACE,
+                (&mut info as *mut libretro::retro_vfs_interface_info).cast(),
+            )
+        };
+
+        assert!(ok);
+        assert_eq!(info.required_interface_version, 4);
+        assert!(!info.iface.is_null());
+    }
+
+    #[test]
+    fn vfs_callbacks_roundtrip_file_data() {
+        let dir = std::env::temp_dir().join(format!(
+            "retrofront-vfs-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("save.bin");
+        let c_path = CString::new(path.to_string_lossy().as_bytes()).unwrap();
+
+        let stream = unsafe {
+            vfs_open(
+                c_path.as_ptr(),
+                libretro::RETRO_VFS_FILE_ACCESS_READ_WRITE,
+                libretro::RETRO_VFS_FILE_ACCESS_HINT_NONE,
+            )
+        };
+        assert!(!stream.is_null());
+
+        let payload = b"retrofront";
+        assert_eq!(
+            unsafe { vfs_write(stream, payload.as_ptr().cast(), payload.len() as u64) },
+            payload.len() as i64
+        );
+        assert_eq!(
+            unsafe { vfs_seek(stream, 0, libretro::RETRO_VFS_SEEK_POSITION_START as c_int) },
+            0
+        );
+        let mut readback = vec![0_u8; payload.len()];
+        assert_eq!(
+            unsafe { vfs_read(stream, readback.as_mut_ptr().cast(), readback.len() as u64) },
+            payload.len() as i64
+        );
+        assert_eq!(readback, payload);
+        assert_eq!(unsafe { vfs_close(stream) }, 0);
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
