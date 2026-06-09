@@ -59,6 +59,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
       try? frontend.setSetting(key: "content_directory", value: downloads.path)
       try? frontend.setSetting(key: "menu_content_directory", value: downloads.path)
       try? frontend.setSetting(key: "core_assets_directory", value: downloads.path)
+      installBundledAssetsIfNeeded(frontend)
       try? frontend.setGfxBackend(.bgfx)
       applyVideoSettings(frontend)
       loadConfiguredOverlay(frontend)
@@ -73,13 +74,13 @@ public final class EmulatorRuntimeModel: ObservableObject {
     if let frameworksURL = Bundle.main.privateFrameworksURL {
       try? frontend.setSetting(key: "libretro_directory", value: frameworksURL.path)
     }
-    if let resourceURL = Bundle.main.resourceURL {
-      let info = resourceURL.appendingPathComponent("info", isDirectory: true)
-      if FileManager.default.fileExists(atPath: info.path) {
-        frontend.setInfoDir(info.path)
-        try? frontend.setSetting(key: "libretro_info_path", value: info.path)
-      }
-    }
+    let assetsDir = URL(fileURLWithPath: frontend.setting("assets_directory") ?? retroArchRoot.appendingPathComponent("assets").path)
+    let info = assetsDir.appendingPathComponent("info", isDirectory: true)
+    frontend.setInfoDir(info.path)
+    try? frontend.setSetting(key: "libretro_info_path", value: info.path)
+    try? frontend.setSetting(key: "menu_assets_directory", value: assetsDir.path)
+    try? frontend.setSetting(key: "overlay_directory", value: assetsDir.appendingPathComponent("overlays", isDirectory: true).path)
+    try? frontend.setSetting(key: "input_overlay", value: assetsDir.appendingPathComponent("overlays/gamepads/flat/retropad.cfg").path)
   }
 
   public func refreshAvailableCores() {
@@ -135,20 +136,35 @@ public final class EmulatorRuntimeModel: ObservableObject {
     }
   }
 
+  private func installBundledAssetsIfNeeded(_ frontend: Retrofront) {
+    let assetsDir = URL(fileURLWithPath: frontend.setting("assets_directory") ?? retroArchRoot.appendingPathComponent("assets").path)
+    let infoProbe = assetsDir.appendingPathComponent("info/mgba_libretro.info")
+    guard !FileManager.default.fileExists(atPath: infoProbe.path) else {
+      applyBundleCoreDirectories(frontend)
+      return
+    }
+    installBundledAssets(frontend, updateStatus: false)
+  }
+
   public func installBundledAssets() {
     guard let frontend else { return }
+    installBundledAssets(frontend, updateStatus: true)
+  }
+
+  private func installBundledAssets(_ frontend: Retrofront, updateStatus: Bool) {
     guard let zipURL = Bundle.main.url(forResource: "assets", withExtension: "zip") else {
-      statusMessage = "assets.zip was not found in the app bundle"
+      if updateStatus { statusMessage = "assets.zip was not found in the app bundle" }
       return
     }
     let assetsDir = URL(fileURLWithPath: frontend.setting("assets_directory") ?? retroArchRoot.appendingPathComponent("assets").path)
     do {
       let report = try frontend.installAssetsZip(from: zipURL.path, to: assetsDir.path)
+      applyBundleCoreDirectories(frontend)
       loadConfiguredOverlay(frontend)
       refresh()
-      statusMessage = "Installed assets: \(report.filesWritten) files"
+      if updateStatus { statusMessage = "Installed assets: \(report.filesWritten) files" }
     } catch {
-      statusMessage = "Assets install failed: \(error)"
+      if updateStatus { statusMessage = "Assets install failed: \(error)" }
     }
   }
 

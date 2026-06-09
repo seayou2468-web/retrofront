@@ -19,7 +19,7 @@ use launch::LaunchDecisionKind;
 use options::CoreOptionsManager;
 pub use options::{CoreOptionDefinition, CoreOptionValue};
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_uint, c_void};
 use std::path::{Path, PathBuf};
@@ -64,6 +64,16 @@ pub struct SystemInfo {
 pub struct GameInfo {
     pub path: PathBuf,
     pub meta: Option<String>,
+}
+
+fn cstr_ptr_to_string(ptr: *const c_char) -> String {
+    if ptr.is_null() {
+        String::new()
+    } else {
+        unsafe { CStr::from_ptr(ptr) }
+            .to_string_lossy()
+            .into_owned()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -146,6 +156,8 @@ pub struct FrontendCore {
     api: Option<CoreApi>,
     system_info: Option<SystemInfo>,
     game: Option<GameInfo>,
+    current_core_path: Option<PathBuf>,
+    env_strings: HashMap<String, CString>,
     events: VecDeque<FrontendEvent>,
     joypad_buttons: [i16; 16],
     pub overlay: overlay::OverlayManager,
@@ -192,6 +204,8 @@ impl FrontendCore {
             api: None,
             system_info: None,
             game: None,
+            current_core_path: None,
+            env_strings: HashMap::new(),
             events: VecDeque::new(),
             joypad_buttons: [0; 16],
             overlay: overlay::OverlayManager::new(),
@@ -293,14 +307,18 @@ impl FrontendCore {
     }
 
     pub fn load_core(&mut self, path: impl AsRef<Path>) -> Result<(), String> {
+        let core_path = path.as_ref().to_path_buf();
         self.unload_game();
         if let Some(api) = self.api.as_ref() {
             unsafe { (api.retro_deinit)() };
             self.api = None;
             self.system_info = None;
+            self.current_core_path = None;
+            self.env_strings.clear();
         }
 
-        let api = CoreApi::load(path)?;
+        self.current_core_path = Some(core_path.clone());
+        let api = CoreApi::load(&core_path)?;
         unsafe {
             (api.retro_set_environment)(Some(Self::retro_environment_callback));
             (api.retro_set_video_refresh)(Some(Self::retro_video_refresh_callback));
@@ -321,15 +339,11 @@ impl FrontendCore {
         unsafe { (api.retro_get_system_info)(&mut sys_info) };
 
         self.system_info = Some(SystemInfo {
-            library_name: unsafe { CStr::from_ptr(sys_info.library_name) }
-                .to_string_lossy()
-                .into_owned(),
-            library_version: unsafe { CStr::from_ptr(sys_info.library_version) }
-                .to_string_lossy()
-                .into_owned(),
-            valid_extensions: unsafe { CStr::from_ptr(sys_info.valid_extensions) }
-                .to_string_lossy()
+            library_name: cstr_ptr_to_string(sys_info.library_name),
+            library_version: cstr_ptr_to_string(sys_info.library_version),
+            valid_extensions: cstr_ptr_to_string(sys_info.valid_extensions)
                 .split('|')
+                .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
                 .collect(),
             need_fullpath: sys_info.need_fullpath,
@@ -458,6 +472,23 @@ impl FrontendCore {
         }
     }
 
+    fn env_path_ptr(&mut self, key: &str, path: PathBuf) -> *const c_char {
+        let value = path.to_string_lossy().into_owned();
+        self.env_string_ptr(key, value)
+    }
+
+    fn env_string_ptr(&mut self, key: &str, value: String) -> *const c_char {
+        let sanitized = value.replace('\0', "");
+        let entry = self
+            .env_strings
+            .entry(key.to_string())
+            .or_insert_with(|| CString::new(sanitized.as_str()).unwrap_or_default());
+        if entry.to_bytes() != sanitized.as_bytes() {
+            *entry = CString::new(sanitized).unwrap_or_default();
+        }
+        entry.as_ptr()
+    }
+
     unsafe extern "C" fn retro_environment_callback(command: c_uint, data: *mut c_void) -> bool {
         with_active_frontend(|core| {
             let res = match command {
@@ -500,6 +531,53 @@ impl FrontendCore {
                 }
                 libretro::RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE => {
                     unsafe { *(data as *mut bool) = core.options.check_updated() };
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY => {
+                    unsafe {
+                        *(data as *mut *const c_char) =
+                            core.env_path_ptr("system_directory", core.settings.system_directory())
+                    };
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY => {
+                    unsafe {
+                        *(data as *mut *const c_char) = core
+                            .env_path_ptr("savefile_directory", core.settings.savefile_directory())
+                    };
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_CORE_ASSETS_DIRECTORY => {
+                    let path = core
+                        .settings
+                        .path_value("core_assets_directory")
+                        .unwrap_or_else(|| core.settings.base_dir.join("downloads"));
+                    unsafe {
+                        *(data as *mut *const c_char) =
+                            core.env_path_ptr("core_assets_directory", path)
+                    };
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_LIBRETRO_PATH => {
+                    let path = core.current_core_path.clone().unwrap_or_default();
+                    unsafe {
+                        *(data as *mut *const c_char) = core.env_path_ptr("libretro_path", path)
+                    };
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME => true,
+                libretro::RETRO_ENVIRONMENT_SET_CONTROLLER_INFO => true,
+                libretro::RETRO_ENVIRONMENT_GET_USERNAME => {
+                    unsafe {
+                        *(data as *mut *const c_char) =
+                            core.env_string_ptr("username", "Player".to_string())
+                    };
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_LANGUAGE => {
+                    unsafe {
+                        *(data as *mut c_uint) = libretro::retro_language_RETRO_LANGUAGE_ENGLISH
+                    };
                     true
                 }
                 libretro::RETRO_ENVIRONMENT_SET_HW_RENDER => {

@@ -27,7 +27,10 @@ pub fn install_assets_zip(
         let Some(safe_name) = safe_zip_path(entry.name()) else {
             continue;
         };
-        let out_path = destination_dir.join(safe_name);
+        if is_macos_metadata_path(&safe_name) {
+            continue;
+        }
+        let out_path = destination_dir.join(normalize_assets_zip_path(&safe_name));
         if entry.is_dir() || entry.name().ends_with('/') {
             if out_path.is_file() {
                 fs::remove_file(&out_path).map_err(|e| format!("replace {:?}: {e}", out_path))?;
@@ -47,6 +50,21 @@ pub fn install_assets_zip(
         report.files_written += 1;
     }
     Ok(report)
+}
+
+fn normalize_assets_zip_path(path: &Path) -> PathBuf {
+    let mut components = path.components();
+    if matches!(components.next(), Some(Component::Normal(part)) if part == "assets") {
+        components.as_path().to_path_buf()
+    } else {
+        path.to_path_buf()
+    }
+}
+
+fn is_macos_metadata_path(path: &Path) -> bool {
+    path.components().any(|component| {
+        matches!(component, Component::Normal(part) if part == "__MACOSX" || part.to_string_lossy().starts_with("._"))
+    })
 }
 
 fn safe_zip_path(name: &str) -> Option<PathBuf> {
@@ -79,5 +97,20 @@ mod tests {
             safe_zip_path("oneui/dark/font.ttf"),
             Some(PathBuf::from("oneui/dark/font.ttf"))
         );
+    }
+
+    #[test]
+    fn normalizes_retroarch_assets_zip_root() {
+        assert_eq!(
+            normalize_assets_zip_path(Path::new("assets/info/mgba_libretro.info")),
+            PathBuf::from("info/mgba_libretro.info")
+        );
+        assert_eq!(
+            normalize_assets_zip_path(Path::new("overlays/gamepads/flat/retropad.cfg")),
+            PathBuf::from("overlays/gamepads/flat/retropad.cfg")
+        );
+        assert!(is_macos_metadata_path(Path::new(
+            "__MACOSX/assets/info/._mgba_libretro.info"
+        )));
     }
 }

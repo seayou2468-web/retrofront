@@ -339,13 +339,26 @@ impl CoreInfoList {
             return None;
         }
 
-        for candidate in Self::info_name_candidates(core_path) {
-            let path = self.info_dir.join(format!("{candidate}.info"));
-            if path.exists() {
-                return Some(path);
+        for dir in self.info_search_dirs() {
+            for candidate in Self::info_name_candidates(core_path) {
+                let path = dir.join(format!("{candidate}.info"));
+                if path.exists() {
+                    return Some(path);
+                }
             }
         }
         None
+    }
+
+    fn info_search_dirs(&self) -> Vec<PathBuf> {
+        let mut dirs = Vec::new();
+        if self.info_dir.as_os_str().is_empty() {
+            return dirs;
+        }
+        Self::push_unique_path(&mut dirs, self.info_dir.clone());
+        Self::push_unique_path(&mut dirs, self.info_dir.join("info"));
+        Self::push_unique_path(&mut dirs, self.info_dir.join("assets/info"));
+        dirs
     }
 
     fn info_name_candidates(core_path: &Path) -> Vec<String> {
@@ -423,6 +436,12 @@ impl CoreInfoList {
 
     fn push_unique(values: &mut Vec<String>, value: String) {
         if !value.is_empty() && !values.iter().any(|existing| existing == &value) {
+            values.push(value);
+        }
+    }
+
+    fn push_unique_path(values: &mut Vec<PathBuf>, value: PathBuf) {
+        if !value.as_os_str().is_empty() && !values.iter().any(|existing| existing == &value) {
             values.push(value);
         }
     }
