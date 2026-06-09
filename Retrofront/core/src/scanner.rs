@@ -22,17 +22,17 @@ impl Scanner {
     }
 
     pub fn scan_directory(&mut self, dir: &Path, extensions: &[String]) {
-        let wanted: Vec<String> = extensions
-            .iter()
-            .map(|ext| ext.trim_start_matches('.').to_lowercase())
-            .filter(|ext| !ext.is_empty())
-            .collect();
+        let wanted = normalize_extensions(extensions);
+        self.scan_directory_inner(dir, &wanted);
+    }
+
+    fn scan_directory_inner(&mut self, dir: &Path, extensions: &[String]) {
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() {
-                    self.scan_directory(&path, &wanted);
-                } else if should_include(&path, &wanted)
+                    self.scan_directory_inner(&path, extensions);
+                } else if should_include(&path, extensions)
                     && !self.games.iter().any(|g| g.path == path)
                 {
                     self.games.push(GameEntry {
@@ -50,6 +50,24 @@ impl Scanner {
     }
 }
 
+fn normalize_extensions(extensions: &[String]) -> Vec<String> {
+    let mut normalized: Vec<String> = extensions
+        .iter()
+        .flat_map(|ext| ext.split('|'))
+        .map(|ext| ext.trim().trim_start_matches('.').to_lowercase())
+        .filter(|ext| !ext.is_empty() && !blocked_non_rom_extensions().contains(&ext.as_str()))
+        .collect();
+    if normalized.is_empty() {
+        normalized = default_rom_extensions()
+            .iter()
+            .map(|ext| ext.to_string())
+            .collect();
+    }
+    normalized.sort();
+    normalized.dedup();
+    normalized
+}
+
 fn should_include(path: &Path, extensions: &[String]) -> bool {
     if path
         .file_name()
@@ -58,15 +76,67 @@ fn should_include(path: &Path, extensions: &[String]) -> bool {
     {
         return false;
     }
-    if extensions.is_empty() {
-        return path.extension().is_some();
+    let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
+        return false;
+    };
+    let ext = ext.to_lowercase();
+    if blocked_non_rom_extensions().contains(&ext.as_str()) {
+        return false;
     }
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| {
-            extensions
-                .iter()
-                .any(|wanted| wanted.eq_ignore_ascii_case(ext))
-        })
-        .unwrap_or(false)
+    extensions
+        .iter()
+        .any(|wanted| wanted.eq_ignore_ascii_case(&ext))
+}
+
+fn blocked_non_rom_extensions() -> &'static [&'static str] {
+    &[
+        "txt", "md", "json", "cfg", "conf", "ini", "log", "png", "jpg", "jpeg", "gif", "bmp",
+        "webp", "mp3", "flac", "wav", "ogg", "mp4", "m4v", "mov", "avi", "mkv", "srt", "pdf",
+        "dylib", "so", "dll", "info", "lpl", "sav", "srm", "state",
+    ]
+}
+
+fn default_rom_extensions() -> &'static [&'static str] {
+    &[
+        "nes", "fds", "smc", "sfc", "fig", "gba", "gb", "gbc", "sgb", "n64", "z64", "v64", "nds",
+        "sms", "gg", "sg", "md", "gen", "smd", "32x", "pce", "cue", "chd", "iso", "cso", "pbp",
+        "bin", "a26", "a52", "a78", "lnx", "ngp", "ngc", "ws", "wsc", "col", "d64", "tap", "prg",
+        "zip", "7z",
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::{self, File};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("retrofront-{name}-{id}"))
+    }
+
+    #[test]
+    fn rejects_non_rom_files_when_extension_filter_is_empty() {
+        let dir = temp_dir("rom-filter");
+        fs::create_dir_all(&dir).unwrap();
+        File::create(dir.join("game.gba")).unwrap();
+        File::create(dir.join("notes.txt")).unwrap();
+        File::create(dir.join("cover.png")).unwrap();
+        File::create(dir.join("core.dylib")).unwrap();
+
+        let mut scanner = Scanner::new();
+        scanner.scan_directory(&dir, &[]);
+
+        let labels: Vec<_> = scanner
+            .games
+            .iter()
+            .map(|game| game.label.as_str())
+            .collect();
+        assert_eq!(labels, vec!["game"]);
+        let _ = fs::remove_dir_all(dir);
+    }
 }

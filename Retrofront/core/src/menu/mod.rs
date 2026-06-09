@@ -24,6 +24,11 @@ pub const ACTION_CHEATS: u32 = 17;
 pub const ACTION_OVERRIDES: u32 = 18;
 pub const ACTION_CONTROLS: u32 = 19;
 pub const ACTION_CORE_INFORMATION: u32 = 20;
+pub const ACTION_CORE_SETTINGS: u32 = 21;
+pub const ACTION_DISPLAY_SETTINGS: u32 = 22;
+pub const ACTION_AUDIO_MIXER: u32 = 23;
+pub const ACTION_DISC_CONTROL: u32 = 24;
+pub const ACTION_INPUT_MAPPING: u32 = 25;
 pub const ACTION_SETTINGS_DRIVERS: u32 = 210;
 pub const ACTION_SETTINGS_VIDEO: u32 = 211;
 pub const ACTION_SETTINGS_AUDIO: u32 = 212;
@@ -34,6 +39,9 @@ pub const ACTION_SETTINGS_SAVING: u32 = 216;
 pub const ACTION_SETTINGS_LATENCY: u32 = 217;
 pub const ACTION_SETTINGS_FRAME_THROTTLE: u32 = 218;
 pub const ACTION_SETTINGS_PLAYLISTS: u32 = 219;
+pub const ACTION_SETTINGS_PLAY_SCREEN: u32 = 220;
+pub const ACTION_SETTINGS_LIBRARY: u32 = 221;
+pub const ACTION_SETTINGS_CORE: u32 = 222;
 pub const ACTION_SKIN_SETTINGS: u32 = 260;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,8 +84,8 @@ impl MenuEngine {
         let mut engine = Self {
             history: Vec::new(),
             skin: MenuSkin {
-                driver: "xmb".to_string(),
-                theme: "monochrome".to_string(),
+                driver: "oneui".to_string(),
+                theme: "dark".to_string(),
                 assets_directory: String::new(),
             },
         };
@@ -88,43 +96,32 @@ impl MenuEngine {
     pub fn push_main_menu(&mut self) {
         self.history.clear();
         self.history.push(MenuList {
-            title: "Main Menu".to_string(),
+            title: "Home".to_string(),
             entries: vec![
-                Self::submenu("Load Core", "Select a libretro core", ACTION_LOAD_CORE),
                 Self::submenu(
-                    "Load Content",
-                    "Browse scanned content",
+                    "Library",
+                    "ROM-only library with direct compatible-core launch",
                     ACTION_LOAD_CONTENT,
                 ),
                 Self::submenu(
+                    "Cores",
+                    "Manage and select libretro cores",
+                    ACTION_LOAD_CORE,
+                ),
+                Self::submenu(
                     "Quick Menu",
-                    "Runtime actions for loaded content",
+                    "In-game actions, display, controls and core settings",
                     ACTION_QUICK_MENU,
                 ),
                 Self::submenu(
-                    "Online Updater",
-                    "Core info, assets and databases",
-                    ACTION_ONLINE_UPDATER,
-                ),
-                Self::submenu(
                     "Settings",
-                    "Drivers, video, audio, input and directories",
+                    "One UI, play screen, library, drivers and paths",
                     ACTION_SETTINGS,
                 ),
                 Self::submenu(
                     "Information",
-                    "Core, content, frontend and system metadata",
+                    "Core, content and runtime metadata",
                     ACTION_INFORMATION,
-                ),
-                Self::submenu(
-                    "Configuration File",
-                    "RetroArch-style configuration actions",
-                    ACTION_CONFIGURATION_FILE,
-                ),
-                Self::submenu(
-                    "Help",
-                    "Basic menu usage and RetroPad controls",
-                    ACTION_HELP,
                 ),
             ],
         });
@@ -132,46 +129,61 @@ impl MenuEngine {
 
     pub fn push_quick_menu(&mut self, has_game: bool) {
         let mut entries = vec![
-            Self::action("Resume", "Continue playing", ACTION_RESUME_CONTENT),
+            Self::action(
+                "Resume",
+                "Return to the running game",
+                ACTION_RESUME_CONTENT,
+            ),
             Self::action(
                 "Restart",
                 "Reset the current content",
                 ACTION_RESTART_CONTENT,
             ),
             Self::submenu(
-                "Core Options",
-                "Adjust variables exposed by the active core",
-                ACTION_CORE_OPTIONS,
+                "Core Settings",
+                "Open options for the active libretro core",
+                ACTION_CORE_SETTINGS,
+            ),
+            Self::submenu(
+                "Display & Orientation",
+                "Portrait, landscape, scaling and filter controls",
+                ACTION_DISPLAY_SETTINGS,
             ),
             Self::submenu(
                 "Controls",
-                "Per-core and per-content input remaps",
+                "Button mapping, remaps, overlays and connected pads",
                 ACTION_CONTROLS,
-            ),
-            Self::submenu(
-                "Shaders",
-                "Configure video shader passes and presets",
-                ACTION_SHADERS,
             ),
             Self::submenu(
                 "Save States",
                 "Save, load and manage state slots",
                 ACTION_SAVE_STATES,
             ),
+            Self::submenu("Shaders", "Video shader passes and presets", ACTION_SHADERS),
             Self::submenu("Cheats", "Load and apply cheat files", ACTION_CHEATS),
             Self::submenu(
                 "Overrides",
                 "Core/content/game override configuration",
                 ACTION_OVERRIDES,
             ),
+            Self::submenu(
+                "Audio",
+                "Mixer, mute and latency shortcuts",
+                ACTION_AUDIO_MIXER,
+            ),
+            Self::submenu(
+                "Disc Control",
+                "Swap/eject virtual discs when a core supports it",
+                ACTION_DISC_CONTROL,
+            ),
             Self::action(
-                "Take Screenshot",
+                "Screenshot",
                 "Write a screenshot to the screenshots directory",
                 ACTION_TAKE_SCREENSHOT,
             ),
             Self::action(
-                "Add to Favorites",
-                "Add current content to Favorites playlist",
+                "Favorite",
+                "Add current ROM to Favorites",
                 ACTION_ADD_TO_FAVORITES,
             ),
             Self::submenu(
@@ -222,7 +234,7 @@ impl MenuEngine {
                 .collect()
         };
         self.history.push(MenuList {
-            title: "Load Core".to_string(),
+            title: "Cores".to_string(),
             entries,
         });
     }
@@ -230,8 +242,8 @@ impl MenuEngine {
     pub fn push_content_list(&mut self, games: &[GameEntry]) {
         let entries = if games.is_empty() {
             vec![Self::action(
-                "No Content Found",
-                "Import or scan ROMs from the configured content directory",
+                "No ROMs Found",
+                "Scan the ROM directory; non-ROM files are excluded",
                 0,
             )]
         } else {
@@ -248,7 +260,41 @@ impl MenuEngine {
                 .collect()
         };
         self.history.push(MenuList {
-            title: "Load Content".to_string(),
+            title: "Library".to_string(),
+            entries,
+        });
+    }
+
+    pub fn push_core_choice(&mut self, content_label: &str, cores: &[CoreInfo]) {
+        let entries = if cores.is_empty() {
+            vec![Self::action(
+                "No Compatible Cores",
+                "Install or scan a core that supports this ROM",
+                0,
+            )]
+        } else {
+            cores
+                .iter()
+                .enumerate()
+                .map(|(i, core)| MenuEntry {
+                    label: core.display_name.clone(),
+                    sublabel: if core.system_name.is_empty() {
+                        core.supported_extensions.join(", ")
+                    } else {
+                        format!(
+                            "{} • {}",
+                            core.system_name,
+                            core.supported_extensions.join(", ")
+                        )
+                    },
+                    kind: MenuEntryKind::Action,
+                    value: core.path.to_string_lossy().into_owned(),
+                    action_id: 100 + i as u32,
+                })
+                .collect()
+        };
+        self.history.push(MenuList {
+            title: format!("Choose Core for {content_label}"),
             entries,
         });
     }
@@ -332,7 +378,7 @@ impl MenuEngine {
 
     pub fn push_help(&mut self) {
         self.history.push(MenuList {
-            title: "Help".to_string(),
+            title: "Controls Help".to_string(),
             entries: vec![
                 Self::setting(
                     "Accept",
@@ -387,14 +433,11 @@ impl MenuEngine {
 
     pub fn apply_skin_from_settings(&mut self, settings: &Settings) {
         self.skin = MenuSkin {
-            driver: settings
-                .get("menu_driver")
-                .cloned()
-                .unwrap_or_else(|| "xmb".to_string()),
+            driver: "oneui".to_string(),
             theme: settings
-                .get("menu_xmb_theme")
+                .get("menu_theme")
                 .cloned()
-                .unwrap_or_else(|| "monochrome".to_string()),
+                .unwrap_or_else(|| "dark".to_string()),
             assets_directory: settings
                 .menu_assets_directory()
                 .to_string_lossy()
@@ -406,20 +449,20 @@ impl MenuEngine {
         self.apply_skin_from_settings(settings);
         let entries = vec![
             Self::setting(
-                "Menu Driver",
-                "RetroArch-compatible menu driver id",
+                "Menu Engine",
+                "Locked to One UI; legacy engines are not exposed",
                 &self.skin.driver,
                 ACTION_SKIN_SETTINGS,
             ),
             Self::setting(
-                "XMB Theme",
-                "Icon and background theme",
+                "Theme",
+                "Dark One UI color theme",
                 &self.skin.theme,
                 ACTION_SKIN_SETTINGS + 1,
             ),
             Self::setting(
-                "Menu Assets",
-                "XMB/Ozone asset root",
+                "Skin Assets",
+                "One UI skin asset root",
                 &self.skin.assets_directory,
                 ACTION_SKIN_SETTINGS + 2,
             ),
@@ -455,9 +498,24 @@ impl MenuEngine {
                     ACTION_SETTINGS_INPUT,
                 ),
                 Self::submenu(
-                    "User Interface",
-                    "Menu driver, XMB theme and assets",
+                    "One UI & Skin",
+                    "Dark mode, density, cards and skin assets",
                     ACTION_SETTINGS_USER_INTERFACE,
+                ),
+                Self::submenu(
+                    "Play Screen",
+                    "Portrait, landscape, scaling and quick menu behavior",
+                    ACTION_SETTINGS_PLAY_SCREEN,
+                ),
+                Self::submenu(
+                    "Library",
+                    "ROM-only scanning, playlists and thumbnails",
+                    ACTION_SETTINGS_LIBRARY,
+                ),
+                Self::submenu(
+                    "Core",
+                    "Core options, BIOS paths and compatibility behavior",
+                    ACTION_SETTINGS_CORE,
                 ),
                 Self::submenu(
                     "Directories",
@@ -481,7 +539,7 @@ impl MenuEngine {
                 ),
                 Self::submenu(
                     "Playlists",
-                    "History, favorites and scanned collections",
+                    "ROM playlists, history and favorites",
                     ACTION_SETTINGS_PLAYLISTS,
                 ),
                 Self::setting(
@@ -519,7 +577,7 @@ impl MenuEngine {
                 Self::setting(
                     "Menu",
                     "menu_driver",
-                    settings.get("menu_driver").map_or("xmb", String::as_str),
+                    settings.get("menu_driver").map_or("oneui", String::as_str),
                     603,
                 ),
             ],
@@ -699,6 +757,138 @@ impl MenuEngine {
         });
     }
 
+    pub fn push_play_screen_settings(&mut self, settings: &Settings) {
+        self.history.push(MenuList {
+            title: "Play Screen".to_string(),
+            entries: vec![
+                Self::setting(
+                    "Orientation",
+                    "Auto, portrait or landscape",
+                    settings
+                        .get("play_screen_orientation")
+                        .map_or("auto", String::as_str),
+                    690,
+                ),
+                Self::setting(
+                    "Portrait Layout",
+                    "Fit screen controls without oversized buttons",
+                    settings
+                        .get("play_screen_portrait_layout")
+                        .map_or("fit", String::as_str),
+                    691,
+                ),
+                Self::setting(
+                    "Landscape Layout",
+                    "Immersive landscape viewport",
+                    settings
+                        .get("play_screen_landscape_layout")
+                        .map_or("immersive", String::as_str),
+                    692,
+                ),
+                Self::setting(
+                    "Quick Menu",
+                    "One UI bottom-sheet style",
+                    settings
+                        .get("quick_menu_style")
+                        .map_or("oneui_sheet", String::as_str),
+                    693,
+                ),
+                Self::setting(
+                    "Scale Mode",
+                    "Keep aspect / integer / stretch",
+                    settings
+                        .get("video_scale_mode")
+                        .map_or("keep_aspect", String::as_str),
+                    694,
+                ),
+            ],
+        });
+    }
+
+    pub fn push_library_settings(&mut self, settings: &Settings) {
+        self.history.push(MenuList {
+            title: "Library".to_string(),
+            entries: vec![
+                Self::setting(
+                    "Mode",
+                    "Only ROM-compatible files are listed",
+                    settings
+                        .get("library_mode")
+                        .map_or("roms_only", String::as_str),
+                    710,
+                ),
+                Self::setting(
+                    "ROM Directory",
+                    "Library scan root",
+                    settings.content_directory().to_string_lossy(),
+                    711,
+                ),
+                Self::setting(
+                    "Playlists",
+                    "ROM history and favorites",
+                    settings
+                        .path_value("playlist_directory")
+                        .unwrap_or_default()
+                        .to_string_lossy(),
+                    712,
+                ),
+                Self::setting(
+                    "Thumbnails",
+                    "Box art and screenshots",
+                    settings.thumbnails_directory().to_string_lossy(),
+                    713,
+                ),
+                Self::setting(
+                    "Core Choice",
+                    "Ask when multiple compatible cores exist",
+                    "On",
+                    714,
+                ),
+            ],
+        });
+    }
+
+    pub fn push_core_settings(&mut self, settings: &Settings) {
+        self.history.push(MenuList {
+            title: "Core".to_string(),
+            entries: vec![
+                Self::setting(
+                    "Core Settings",
+                    "Variables exposed by the active core",
+                    settings
+                        .path_value("core_options_path")
+                        .unwrap_or_default()
+                        .to_string_lossy(),
+                    720,
+                ),
+                Self::setting(
+                    "System/BIOS",
+                    "Firmware directory",
+                    settings.system_directory().to_string_lossy(),
+                    721,
+                ),
+                Self::setting(
+                    "SaveRAM",
+                    "Battery-backed saves",
+                    settings.savefile_directory().to_string_lossy(),
+                    722,
+                ),
+                Self::setting(
+                    "States",
+                    "Instant save states",
+                    settings.savestate_directory().to_string_lossy(),
+                    723,
+                ),
+                Self::setting(
+                    "Preferred Core",
+                    "Remember per-extension core selections",
+                    "On",
+                    724,
+                ),
+            ],
+        });
+    }
+
     pub fn push_placeholder_settings(&mut self, title: &str) {
         self.history.push(MenuList {
             title: title.to_string(),
@@ -778,15 +968,9 @@ mod tests {
     fn main_menu_matches_retroarch_top_level_shape() {
         let engine = MenuEngine::new();
         let current = engine.current().unwrap();
-        assert_eq!(current.title, "Main Menu");
-        assert!(current
-            .entries
-            .iter()
-            .any(|entry| entry.label == "Load Core"));
-        assert!(current
-            .entries
-            .iter()
-            .any(|entry| entry.label == "Load Content"));
+        assert_eq!(current.title, "Home");
+        assert!(current.entries.iter().any(|entry| entry.label == "Cores"));
+        assert!(current.entries.iter().any(|entry| entry.label == "Library"));
         assert!(current
             .entries
             .iter()
@@ -794,7 +978,7 @@ mod tests {
         assert!(current
             .entries
             .iter()
-            .any(|entry| entry.label == "Online Updater"));
+            .any(|entry| entry.label == "Quick Menu"));
     }
 
     #[test]
@@ -814,7 +998,7 @@ mod tests {
             "Video",
             "Audio",
             "Input",
-            "User Interface",
+            "One UI & Skin",
             "Directories",
             "Saving",
             "Latency",
@@ -837,7 +1021,7 @@ mod tests {
         for expected in [
             "Resume",
             "Restart",
-            "Core Options",
+            "Core Settings",
             "Shaders",
             "Save States",
             "Close Content",

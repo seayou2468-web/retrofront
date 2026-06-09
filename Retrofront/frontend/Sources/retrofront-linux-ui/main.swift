@@ -6,15 +6,22 @@ struct TerminalDashboard {
 
   func render() {
     print("""
-    ┌────────────────────────────────────────────┐
-    │ Retrofront Linux                           │
-    │ Empty frontend UI connected to Rust runtime │
-    └────────────────────────────────────────────┘
+    One UI Dark
+    ───────────
+    State       \(frontend.state)
+    Library     ROMs only
+    Core        choose after ROM when needed
+    Play screen portrait / landscape auto
+    Quick menu  core settings, display, controls, states
     """)
-    print("Runtime state : \(frontend.state)")
-    print("Emulator core : not loaded")
-    print("Game content  : not loaded")
-    print("Next step     : pass a libretro core to future loader UI")
+
+    if let menu = frontend.currentMenuList() {
+      print("\n\(menu.title)")
+      for entry in menu.entries {
+        let value = entry.value.isEmpty ? "" : "  \(entry.value)"
+        print("• \(entry.label) — \(entry.sublabel)\(value)")
+      }
+    }
   }
 }
 
@@ -22,6 +29,6 @@ do {
   let frontend = try Retrofront()
   TerminalDashboard(frontend: frontend).render()
 } catch {
-  fputs("Retrofront Linux UI failed to start: \(error)\n", stderr)
+  fputs("UI failed to start: \(error)\n", stderr)
   exit(1)
 }

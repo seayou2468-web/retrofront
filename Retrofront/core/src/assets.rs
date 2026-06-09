@@ -70,8 +70,8 @@ mod tests {
         assert_eq!(safe_zip_path("/absolute"), None);
         assert_eq!(safe_zip_path("x/../../escape"), None);
         assert_eq!(
-            safe_zip_path("xmb/monochrome/font.ttf"),
-            Some(PathBuf::from("xmb/monochrome/font.ttf"))
+            safe_zip_path("oneui/dark/font.ttf"),
+            Some(PathBuf::from("oneui/dark/font.ttf"))
         );
     }
 }

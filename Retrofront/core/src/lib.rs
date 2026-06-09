@@ -1735,121 +1735,216 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
     _frontend: *mut RfFrontend,
     action_id: u32,
 ) -> bool {
-    with_active_frontend(|core| match action_id {
-        menu::ACTION_LOAD_CORE => {
-            let cores = core.core_info.cores.clone();
-            core.menu.push_core_list(&cores);
-            true
+    with_active_frontend(|core| {
+        if (100..300).contains(&action_id) {
+            let index = (action_id - 100) as usize;
+            let current_title = core
+                .menu
+                .current()
+                .map(|list| list.title.clone())
+                .unwrap_or_default();
+
+            if current_title.starts_with("Choose Core for") {
+                let Some(plan) = core.launcher.last_plan.clone() else {
+                    core.menu
+                        .push_status("Core Choice", "No pending ROM launch is available.");
+                    return true;
+                };
+                let Some(core_info) = plan.candidates.get(index).cloned() else {
+                    core.menu
+                        .push_status("Core Choice", "Selected core is no longer available.");
+                    return true;
+                };
+                core.settings
+                    .set_preferred_core_for_extension(&plan.content_extension, &core_info.path);
+                match core.launch_content(&plan.content_path, Some(core_info.path.clone()), None) {
+                    Ok(_) => core.menu.push_quick_menu(true),
+                    Err(error) => core.menu.push_status("Launch Failed", &error),
+                }
+                return true;
+            }
+
+            let Some(core_info) = core.core_info.cores.get(index).cloned() else {
+                return false;
+            };
+            match core.load_core(core_info.path.clone()) {
+                Ok(_) => core
+                    .menu
+                    .push_status("Core Loaded", &core_info.display_name),
+                Err(error) => core.menu.push_status("Core Load Failed", &error),
+            }
+            return true;
         }
-        menu::ACTION_LOAD_CONTENT => {
-            core.menu.push_content_list(&core.scanner.games);
-            true
-        }
-        menu::ACTION_QUICK_MENU => {
-            core.menu.push_quick_menu(core.game_info().is_some());
-            true
-        }
-        menu::ACTION_ONLINE_UPDATER => {
-            core.menu.push_status(
-                "Online Updater",
-                "The RetroArch updater branch is modeled; network update jobs are not wired yet.",
+
+        if (300..600).contains(&action_id) {
+            let index = (action_id - 300) as usize;
+            let Some(game) = core.scanner.games.get(index).cloned() else {
+                return false;
+            };
+            if core.core_info.cores.is_empty() {
+                let dir = core.settings.libretro_directory();
+                core.core_info.scan_directory(&dir);
+            }
+            let plan = core.launcher.plan_content_launch(
+                &game.path,
+                &core.core_info,
+                &core.settings,
+                game.core_path.as_deref(),
             );
-            true
+            match plan.decision {
+                LaunchDecisionKind::Selected => match plan.selected_core.clone() {
+                    Some(core_path) => match core.launch_content(&game.path, Some(core_path), None)
+                    {
+                        Ok(_) => core.menu.push_quick_menu(true),
+                        Err(error) => core.menu.push_status("Launch Failed", &error),
+                    },
+                    None => core
+                        .menu
+                        .push_status("Launch Failed", "No compatible core was selected."),
+                },
+                LaunchDecisionKind::NeedsCoreChoice => {
+                    let candidates = plan.candidates.clone();
+                    core.launcher.last_plan = Some(plan);
+                    core.menu.push_core_choice(&game.label, &candidates);
+                }
+                LaunchDecisionKind::NoCore => {
+                    core.launcher.last_plan = Some(plan.clone());
+                    core.menu.push_status("No Compatible Core", &plan.reason);
+                }
+            }
+            return true;
         }
-        menu::ACTION_SETTINGS => {
-            core.menu.push_settings(&core.settings);
-            true
+
+        match action_id {
+            menu::ACTION_LOAD_CORE => {
+                let cores = core.core_info.cores.clone();
+                core.menu.push_core_list(&cores);
+                true
+            }
+            menu::ACTION_LOAD_CONTENT => {
+                core.menu.push_content_list(&core.scanner.games);
+                true
+            }
+            menu::ACTION_QUICK_MENU => {
+                core.menu.push_quick_menu(core.game_info().is_some());
+                true
+            }
+            menu::ACTION_ONLINE_UPDATER => {
+                core.menu.push_status(
+                    "Updater",
+                    "Asset and database update jobs are available through settings, not the library.",
+                );
+                true
+            }
+            menu::ACTION_SETTINGS => {
+                core.menu.push_settings(&core.settings);
+                true
+            }
+            menu::ACTION_INFORMATION | menu::ACTION_CORE_INFORMATION => {
+                let system_info = core.system_info().cloned();
+                let game_info = core.game_info().cloned();
+                let gfx_status = core.gfx.driver_status().clone();
+                core.menu
+                    .push_information(system_info.as_ref(), game_info.as_ref(), &gfx_status);
+                true
+            }
+            menu::ACTION_CONFIGURATION_FILE => {
+                core.menu.push_configuration_file(&core.settings);
+                true
+            }
+            menu::ACTION_HELP => {
+                core.menu.push_help();
+                true
+            }
+            menu::ACTION_CORE_OPTIONS | menu::ACTION_CORE_SETTINGS => {
+                core.menu.push_core_settings(&core.settings);
+                true
+            }
+            menu::ACTION_DISPLAY_SETTINGS => {
+                core.menu.push_play_screen_settings(&core.settings);
+                true
+            }
+            menu::ACTION_AUDIO_MIXER => {
+                core.menu.push_audio_settings(&core.settings);
+                true
+            }
+            menu::ACTION_CONTROLS | menu::ACTION_INPUT_MAPPING => {
+                core.menu.push_input_settings(&core.settings);
+                true
+            }
+            menu::ACTION_SHADERS => {
+                core.menu.push_status(
+                    "Shaders",
+                    "Shader configuration is represented in the video settings branch.",
+                );
+                true
+            }
+            menu::ACTION_SAVE_STATES => {
+                core.menu.push_core_settings(&core.settings);
+                true
+            }
+            menu::ACTION_CHEATS => {
+                core.menu.push_placeholder_settings("Cheats");
+                true
+            }
+            menu::ACTION_OVERRIDES => {
+                core.menu.push_placeholder_settings("Overrides");
+                true
+            }
+            menu::ACTION_SETTINGS_DRIVERS => {
+                core.menu.push_driver_settings(&core.settings);
+                true
+            }
+            menu::ACTION_SETTINGS_VIDEO => {
+                core.menu.push_video_settings(&core.settings);
+                true
+            }
+            menu::ACTION_SETTINGS_AUDIO => {
+                core.menu.push_audio_settings(&core.settings);
+                true
+            }
+            menu::ACTION_SETTINGS_INPUT => {
+                core.menu.push_input_settings(&core.settings);
+                true
+            }
+            menu::ACTION_SETTINGS_USER_INTERFACE | menu::ACTION_SKIN_SETTINGS..=262 => {
+                core.menu.push_skin_settings(&core.settings);
+                true
+            }
+            menu::ACTION_SETTINGS_DIRECTORIES => {
+                core.menu.push_directory_settings(&core.settings);
+                true
+            }
+            menu::ACTION_SETTINGS_SAVING => {
+                core.menu.push_core_settings(&core.settings);
+                true
+            }
+            menu::ACTION_SETTINGS_LATENCY => {
+                core.menu.push_placeholder_settings("Latency");
+                true
+            }
+            menu::ACTION_SETTINGS_FRAME_THROTTLE => {
+                core.menu.push_placeholder_settings("Frame Throttle");
+                true
+            }
+            menu::ACTION_SETTINGS_PLAYLISTS => {
+                core.menu.push_library_settings(&core.settings);
+                true
+            }
+            menu::ACTION_SETTINGS_PLAY_SCREEN => {
+                core.menu.push_play_screen_settings(&core.settings);
+                true
+            }
+            menu::ACTION_SETTINGS_LIBRARY => {
+                core.menu.push_library_settings(&core.settings);
+                true
+            }
+            menu::ACTION_SETTINGS_CORE => {
+                core.menu.push_core_settings(&core.settings);
+                true
+            }
+            _ => false,
         }
-        menu::ACTION_INFORMATION | menu::ACTION_CORE_INFORMATION => {
-            let system_info = core.system_info().cloned();
-            let game_info = core.game_info().cloned();
-            let gfx_status = core.gfx.driver_status().clone();
-            core.menu
-                .push_information(system_info.as_ref(), game_info.as_ref(), &gfx_status);
-            true
-        }
-        menu::ACTION_CONFIGURATION_FILE => {
-            core.menu.push_configuration_file(&core.settings);
-            true
-        }
-        menu::ACTION_HELP => {
-            core.menu.push_help();
-            true
-        }
-        menu::ACTION_CORE_OPTIONS => {
-            core.menu.push_status(
-                "Core Options",
-                "Core option definitions are exposed through the Rust options manager.",
-            );
-            true
-        }
-        menu::ACTION_CONTROLS => {
-            core.menu.push_placeholder_settings("Controls");
-            true
-        }
-        menu::ACTION_SHADERS => {
-            core.menu.push_status(
-                "Shaders",
-                "Shader configuration is represented in the Rust video menu branch.",
-            );
-            true
-        }
-        menu::ACTION_SAVE_STATES => {
-            core.menu.push_status(
-                "Save States",
-                "Save-state actions are modeled but not executed yet.",
-            );
-            true
-        }
-        menu::ACTION_CHEATS => {
-            core.menu.push_placeholder_settings("Cheats");
-            true
-        }
-        menu::ACTION_OVERRIDES => {
-            core.menu.push_placeholder_settings("Overrides");
-            true
-        }
-        menu::ACTION_SETTINGS_DRIVERS => {
-            core.menu.push_driver_settings(&core.settings);
-            true
-        }
-        menu::ACTION_SETTINGS_VIDEO => {
-            core.menu.push_video_settings(&core.settings);
-            true
-        }
-        menu::ACTION_SETTINGS_AUDIO => {
-            core.menu.push_audio_settings(&core.settings);
-            true
-        }
-        menu::ACTION_SETTINGS_INPUT => {
-            core.menu.push_input_settings(&core.settings);
-            true
-        }
-        menu::ACTION_SETTINGS_USER_INTERFACE | menu::ACTION_SKIN_SETTINGS..=262 => {
-            core.menu.push_skin_settings(&core.settings);
-            true
-        }
-        menu::ACTION_SETTINGS_DIRECTORIES => {
-            core.menu.push_directory_settings(&core.settings);
-            true
-        }
-        menu::ACTION_SETTINGS_SAVING => {
-            core.menu.push_placeholder_settings("Saving");
-            true
-        }
-        menu::ACTION_SETTINGS_LATENCY => {
-            core.menu.push_placeholder_settings("Latency");
-            true
-        }
-        menu::ACTION_SETTINGS_FRAME_THROTTLE => {
-            core.menu.push_placeholder_settings("Frame Throttle");
-            true
-        }
-        menu::ACTION_SETTINGS_PLAYLISTS => {
-            core.menu.push_placeholder_settings("Playlists");
-            true
-        }
-        _ => false,
     })
 }
 
