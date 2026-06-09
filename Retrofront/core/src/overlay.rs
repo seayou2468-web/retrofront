@@ -322,6 +322,29 @@ impl OverlayManager {
         self.clear_touches();
         Ok(())
     }
+
+    pub fn set_preferred_orientation(&mut self, portrait: bool) -> Result<(), String> {
+        if self.overlays.is_empty() {
+            return Err("no overlay loaded".into());
+        }
+        let preferred = if portrait { "portrait" } else { "landscape" };
+        let fallback = self
+            .overlays
+            .iter()
+            .position(|overlay| {
+                overlay.name.contains(preferred) && !overlay.name.contains("hidden")
+            })
+            .or_else(|| {
+                self.overlays
+                    .iter()
+                    .position(|overlay| overlay.name.contains(preferred))
+            })
+            .unwrap_or(0);
+        if self.active_index != fallback {
+            self.set_active(fallback)?;
+        }
+        Ok(())
+    }
     pub fn next_overlay(&mut self) {
         if !self.overlays.is_empty() {
             self.active_index = (self.active_index + 1) % self.overlays.len();
@@ -360,7 +383,7 @@ impl OverlayManager {
                 y: overlay.y,
                 w: overlay.w,
                 h: overlay.h,
-                alpha: self.opacity * overlay.alpha_mod,
+                alpha: (self.opacity * overlay.alpha_mod).clamp(0.0, 1.0),
             });
         }
         for desc in &overlay.descs {
@@ -368,11 +391,11 @@ impl OverlayManager {
                 out.push(OverlayRenderDesc {
                     image_path: image.path.clone(),
                     image_index: desc.image_index.unwrap_or(0),
-                    x: overlay.x + (desc.x_shift - desc.range_x) * overlay.w,
-                    y: overlay.y + (desc.y_shift - desc.range_y) * overlay.h,
+                    x: overlay.x + (desc.x_shift - desc.range_x * self.scale_factor) * overlay.w,
+                    y: overlay.y + (desc.y_shift - desc.range_y * self.scale_factor) * overlay.h,
                     w: (desc.range_x * 2.0) * overlay.w * self.scale_factor,
                     h: (desc.range_y * 2.0) * overlay.h * self.scale_factor,
-                    alpha: self.opacity * desc.alpha_mod,
+                    alpha: (self.opacity * desc.alpha_mod).clamp(0.0, 1.0),
                 });
             }
         }
@@ -396,13 +419,13 @@ impl OverlayManager {
                 overlay.y,
                 overlay.w,
                 overlay.h,
-                self.opacity * overlay.alpha_mod,
+                (self.opacity * overlay.alpha_mod).clamp(0.0, 1.0),
             );
         }
         for desc in &overlay.descs {
             if let Some(image) = &desc.image {
-                let x = overlay.x + (desc.x_shift - desc.range_x) * overlay.w;
-                let y = overlay.y + (desc.y_shift - desc.range_y) * overlay.h;
+                let x = overlay.x + (desc.x_shift - desc.range_x * self.scale_factor) * overlay.w;
+                let y = overlay.y + (desc.y_shift - desc.range_y * self.scale_factor) * overlay.h;
                 let w = desc.range_x * 2.0 * overlay.w * self.scale_factor;
                 let h = desc.range_y * 2.0 * overlay.h * self.scale_factor;
                 blend_image(
@@ -414,7 +437,7 @@ impl OverlayManager {
                     y,
                     w,
                     h,
-                    self.opacity * desc.alpha_mod,
+                    (self.opacity * desc.alpha_mod).clamp(0.0, 1.0),
                 );
             }
         }
@@ -557,7 +580,14 @@ impl OverlayConfig {
             .map_err(|e| format!("failed to read overlay config {}: {e}", path.display()))?;
         let mut values = BTreeMap::new();
         for raw_line in text.lines() {
-            let line = raw_line.split('#').next().unwrap_or("").trim();
+            let line = raw_line
+                .split('#')
+                .next()
+                .unwrap_or("")
+                .split("//")
+                .next()
+                .unwrap_or("")
+                .trim();
             if line.is_empty() {
                 continue;
             }
@@ -1074,6 +1104,34 @@ overlay0_desc1 = "dpad_area,0.2,0.5,rect,0.15,0.15"
         assert_eq!(manager.joypad_button(8), 1);
         manager.set_touch(0, 0.2, 0.35, true).unwrap();
         assert_eq!(manager.joypad_button(4), 1);
+    }
+
+    #[test]
+    fn selects_orientation_named_overlay() {
+        let dir = tempfile_dir();
+        let cfg = dir.join("orientation.cfg");
+        fs::File::create(&cfg)
+            .unwrap()
+            .write_all(
+                br#"
+overlays = 2
+overlay0_name = "landscape"
+overlay0_descs = 1
+overlay0_normalized = true
+overlay0_desc0 = "a,0.8,0.5,radial,0.1,0.1"
+overlay1_name = "portrait"
+overlay1_descs = 1
+overlay1_normalized = true
+overlay1_desc0 = "b,0.2,0.5,radial,0.1,0.1"
+"#,
+            )
+            .unwrap();
+        let mut manager = OverlayManager::new();
+        manager.load(&cfg).unwrap();
+        manager.set_preferred_orientation(true).unwrap();
+        assert_eq!(manager.active_name(), Some("portrait"));
+        manager.set_preferred_orientation(false).unwrap();
+        assert_eq!(manager.active_name(), Some("landscape"));
     }
     fn tempfile_dir() -> PathBuf {
         let mut p = std::env::temp_dir();

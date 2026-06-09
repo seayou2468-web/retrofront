@@ -4,6 +4,12 @@ import UIKit
 import Combine
 import UniformTypeIdentifiers
 
+public struct OverlayChoice: Identifiable, Equatable, Sendable {
+  public let id: String
+  public let path: String
+  public let label: String
+}
+
 @MainActor
 public final class EmulatorRuntimeModel: ObservableObject {
   @Published private(set) var frontendState: FrontendState = .empty
@@ -18,6 +24,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
   @Published private(set) var loadedGameURL: URL?
   @Published private(set) var currentMenu: MenuList?
   @Published private(set) var overlayInfo: OverlayInfo?
+  @Published private(set) var availableOverlays: [OverlayChoice] = []
   @Published private(set) var settings: [RetrofrontSetting] = []
   @Published private(set) var pendingCoreChoices: [CoreInfo] = []
   @Published private(set) var pendingContentURL: URL?
@@ -60,6 +67,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
       try? frontend.setSetting(key: "menu_content_directory", value: downloads.path)
       try? frontend.setSetting(key: "core_assets_directory", value: downloads.path)
       installBundledAssetsIfNeeded(frontend)
+      refreshOverlayChoices()
       try? frontend.setGfxBackend(.bgfx)
       applyVideoSettings(frontend)
       loadConfiguredOverlay(frontend)
@@ -160,6 +168,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
     do {
       let report = try frontend.installAssetsZip(from: zipURL.path, to: assetsDir.path)
       applyBundleCoreDirectories(frontend)
+      refreshOverlayChoices()
       loadConfiguredOverlay(frontend)
       refresh()
       if updateStatus { statusMessage = "Installed assets: \(report.filesWritten) files" }
@@ -259,6 +268,43 @@ public final class EmulatorRuntimeModel: ObservableObject {
     }
     frontend.setOverlayEnabled(enabled)
     overlayInfo = frontend.overlayInfo()
+  }
+
+  public func overlayRenderDescs() -> [OverlayRenderDesc] {
+    frontend?.overlayRenderDescs() ?? []
+  }
+
+  public func setOverlayOrientation(for size: CGSize) {
+    guard size.width > 0, size.height > 0 else { return }
+    do {
+      try frontend?.setOverlayOrientation(portrait: size.height > size.width)
+      overlayInfo = frontend?.overlayInfo()
+    } catch {
+      // Some overlays do not define portrait/landscape variants; keep the current overlay.
+    }
+  }
+
+  public func refreshOverlayChoices() {
+    guard let frontend else { return }
+    let overlayDir = URL(fileURLWithPath: frontend.setting("overlay_directory") ?? retroArchRoot.appendingPathComponent("assets/overlays").path)
+    let fm = FileManager.default
+    guard let enumerator = fm.enumerator(at: overlayDir, includingPropertiesForKeys: nil) else {
+      availableOverlays = []
+      return
+    }
+    var choices: [OverlayChoice] = []
+    for case let url as URL in enumerator where url.pathExtension.lowercased() == "cfg" {
+      let relative = url.path.replacingOccurrences(of: overlayDir.path + "/", with: "")
+      let isGamepad = relative.contains("gamepads/")
+      let label = relative.replacingOccurrences(of: ".cfg", with: "")
+      choices.append(OverlayChoice(id: url.path, path: url.path, label: isGamepad ? label : "Other / \(label)"))
+    }
+    availableOverlays = choices.sorted { left, right in
+      let leftGamepad = left.label.hasPrefix("gamepads/")
+      let rightGamepad = right.label.hasPrefix("gamepads/")
+      if leftGamepad != rightGamepad { return leftGamepad }
+      return left.label.localizedStandardCompare(right.label) == .orderedAscending
+    }
   }
 
   private func applyVideoSettings(_ frontend: Retrofront) {
@@ -409,6 +455,12 @@ public final class EmulatorRuntimeModel: ObservableObject {
     return value.isEmpty ? "70%" : "\(Int((Double(value) ?? 0.70) * 100))%"
   }
 
+  public var overlaySelectionLabel: String {
+    let current = settingValue("input_overlay")
+    if let match = availableOverlays.first(where: { $0.path == current }) { return match.label }
+    return current.isEmpty ? "Not selected" : URL(fileURLWithPath: current).deletingPathExtension().lastPathComponent
+  }
+
   public var videoScaleModeLabel: String {
     switch settingValue("video_scale_mode") {
     case "integer": return "Integer"
@@ -471,6 +523,20 @@ public final class EmulatorRuntimeModel: ObservableObject {
   public func setLibraryAutoScanEnabled(_ enabled: Bool) {
     setSetting(key: "library_auto_scan_on_launch", value: enabled ? "true" : "false")
     statusMessage = enabled ? "Library auto scan enabled" : "Library auto scan disabled"
+  }
+
+  public func cycleOverlaySelection() {
+    refreshOverlayChoices()
+    guard !availableOverlays.isEmpty else {
+      statusMessage = "No overlays found"
+      return
+    }
+    let current = settingValue("input_overlay")
+    let currentIndex = availableOverlays.firstIndex { $0.path == current } ?? -1
+    let next = availableOverlays[(currentIndex + 1) % availableOverlays.count]
+    setSetting(key: "input_overlay", value: next.path)
+    if let frontend { loadConfiguredOverlay(frontend) }
+    statusMessage = "Overlay: \(next.label)"
   }
 
   public func cycleOverlayOpacity() {

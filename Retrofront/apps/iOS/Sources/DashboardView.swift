@@ -1,6 +1,7 @@
 import SwiftUI
 import RetrofrontSwift
 import UniformTypeIdentifiers
+import UIKit
 
 struct DashboardView: View {
     @EnvironmentObject private var runtime: EmulatorRuntimeModel
@@ -218,6 +219,9 @@ struct SettingsView: View {
             SettingsGroup(title: "Controller") {
                 SettingToggleRow(title: "Touch Overlay", subtitle: "画面上コントローラー", isOn: runtime.overlayEnabledSetting) {
                     runtime.setOverlayEnabledSetting($0)
+                }
+                SettingChoiceRow(title: "Overlay Set", subtitle: "RetroArch overlay .cfg", value: runtime.overlaySelectionLabel) {
+                    runtime.cycleOverlaySelection()
                 }
                 SettingChoiceRow(title: "Overlay Opacity", subtitle: "タッチ操作の透明度", value: runtime.overlayOpacityLabel) {
                     runtime.cycleOverlayOpacity()
@@ -619,9 +623,16 @@ struct PlayView: View {
                     .foregroundColor(.white.opacity(0.78))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                PlayerControls { presentationMode.wrappedValue.dismiss() }
-                    .padding(.horizontal, 10)
-                    .background(LinearGradient(colors: [.clear, .black.opacity(0.78)], startPoint: .top, endPoint: .bottom).ignoresSafeArea(edges: .bottom))
+                if runtime.overlayEnabledSetting, runtime.overlayInfo?.enabled == true {
+                    RetroArchOverlayView()
+                    PlayerUtilityBar { presentationMode.wrappedValue.dismiss() }
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 14)
+                } else {
+                    PlayerControls { presentationMode.wrappedValue.dismiss() }
+                        .padding(.horizontal, 10)
+                        .background(LinearGradient(colors: [.clear, .black.opacity(0.78)], startPoint: .top, endPoint: .bottom).ignoresSafeArea(edges: .bottom))
+                }
             }
             .contentShape(Rectangle())
             .gesture(
@@ -634,7 +645,10 @@ struct PlayView: View {
         .statusBar(hidden: true)
         .onReceive(runtime.$menuToken) { token in if token > 0 { isMenuPresented = true } }
         .sheet(isPresented: $isMenuPresented) { RuntimeMenuSheet() }
-        .onAppear { runtime.play() }
+        .onAppear {
+            runtime.setOverlayOrientation(for: UIScreen.main.bounds.size)
+            runtime.play()
+        }
         .onDisappear {
             runtime.clearOverlayTouches()
             runtime.stop()
@@ -642,6 +656,69 @@ struct PlayView: View {
     }
 }
 
+struct RetroArchOverlayView: View {
+    @EnvironmentObject private var runtime: EmulatorRuntimeModel
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .topLeading) {
+                ForEach(Array(runtime.overlayRenderDescs().enumerated()), id: \.offset) { _, desc in
+                    if let image = UIImage(contentsOfFile: desc.imagePath) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .interpolation(.none)
+                            .opacity(Double(desc.alpha))
+                            .frame(width: CGFloat(desc.w) * geometry.size.width, height: CGFloat(desc.h) * geometry.size.height)
+                            .position(
+                                x: CGFloat(desc.x + desc.w * 0.5) * geometry.size.width,
+                                y: CGFloat(desc.y + desc.h * 0.5) * geometry.size.height)
+                    }
+                }
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .allowsHitTesting(false)
+            .onAppear { runtime.setOverlayOrientation(for: geometry.size) }
+            .onChange(of: geometry.size) { newSize in runtime.setOverlayOrientation(for: newSize) }
+        }
+    }
+}
+
+struct PlayerUtilityBar: View {
+    @EnvironmentObject private var runtime: EmulatorRuntimeModel
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Button { runtime.openQuickMenu() } label: {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 48, height: 42)
+                    .background(Capsule().fill(Color.black.opacity(0.38)))
+            }
+            .buttonStyle(.plain)
+            Button { runtime.toggleRunning() } label: {
+                Image(systemName: runtime.isRunning ? "pause.fill" : "play.fill")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 58, height: 42)
+                    .background(Capsule().fill(OneUI.accent.opacity(0.9)))
+            }
+            .buttonStyle(.plain)
+            Button {
+                runtime.stop()
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 48, height: 42)
+                    .background(Capsule().fill(Color.black.opacity(0.38)))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
 
 struct RuntimeMenuSheet: View {
     @EnvironmentObject private var runtime: EmulatorRuntimeModel

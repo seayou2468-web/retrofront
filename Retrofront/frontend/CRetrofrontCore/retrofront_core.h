@@ -170,6 +170,7 @@ bool rf_frontend_load_overlay(RfFrontend *frontend, const char *path);
 void rf_frontend_set_overlay_enabled(RfFrontend *frontend, bool enabled);
 bool rf_frontend_set_overlay_touch(RfFrontend *frontend, uintptr_t slot, float x, float y, bool active);
 void rf_frontend_clear_overlay_touches(RfFrontend *frontend);
+bool rf_frontend_set_overlay_orientation(RfFrontend *frontend, bool portrait);
 bool rf_frontend_consume_overlay_menu_toggle(RfFrontend *frontend);
 bool rf_frontend_overlay_info(RfFrontend *frontend, RfOverlayInfo *out_info);
 uintptr_t rf_frontend_overlay_render_desc_count(RfFrontend *frontend);

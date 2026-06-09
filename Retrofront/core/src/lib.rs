@@ -1121,6 +1121,27 @@ pub unsafe extern "C" fn rf_frontend_clear_overlay_touches(_frontend: *mut RfFro
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn rf_frontend_set_overlay_orientation(
+    frontend: *mut RfFrontend,
+    portrait: bool,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    let res = with_active_frontend(|core| core.overlay.set_preferred_orientation(portrait));
+    match res {
+        Ok(()) => {
+            frontend.last_error = CString::default();
+            true
+        }
+        Err(error) => {
+            set_error(frontend, &error);
+            false
+        }
+    }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn rf_frontend_consume_overlay_menu_toggle(
     _frontend: *mut RfFrontend,
 ) -> bool {

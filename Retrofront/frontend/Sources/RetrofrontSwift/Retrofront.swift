@@ -296,6 +296,12 @@ public final class Retrofront: @unchecked Sendable {
     rf_frontend_clear_overlay_touches(handle)
   }
 
+  public func setOverlayOrientation(portrait: Bool) throws {
+    guard rf_frontend_set_overlay_orientation(handle, portrait) else {
+      throw lastError()
+    }
+  }
+
   public func consumeOverlayMenuToggle() -> Bool {
     rf_frontend_consume_overlay_menu_toggle(handle)
   }
