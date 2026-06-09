@@ -256,7 +256,7 @@ impl Settings {
             ("play_screen_orientation", PathBuf::from("auto")),
             ("play_screen_portrait_layout", PathBuf::from("fit")),
             ("play_screen_landscape_layout", PathBuf::from("immersive")),
-            ("quick_menu_style", PathBuf::from("oneui_sheet")),
+            ("quick_menu_style", PathBuf::from("oneui_fullscreen")),
             ("library_mode", PathBuf::from("roms_only")),
             ("library_sort_mode", PathBuf::from("name_ascending")),
             ("library_show_core_badges", PathBuf::from("true")),

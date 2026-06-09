@@ -29,6 +29,10 @@ pub const ACTION_DISPLAY_SETTINGS: u32 = 22;
 pub const ACTION_AUDIO_MIXER: u32 = 23;
 pub const ACTION_DISC_CONTROL: u32 = 24;
 pub const ACTION_INPUT_MAPPING: u32 = 25;
+pub const ACTION_EXIT_GAME: u32 = 26;
+pub const ACTION_SAVE_STATE_SLOT_0: u32 = 27;
+pub const ACTION_LOAD_STATE_SLOT_0: u32 = 28;
+pub const ACTION_SAVE_SRAM: u32 = 29;
 pub const ACTION_SETTINGS_DRIVERS: u32 = 210;
 pub const ACTION_SETTINGS_VIDEO: u32 = 211;
 pub const ACTION_SETTINGS_AUDIO: u32 = 212;
@@ -194,9 +198,9 @@ impl MenuEngine {
         ];
         if has_game {
             entries.push(Self::action(
-                "Close Content",
-                "Unload the current game",
-                ACTION_CLOSE_CONTENT,
+                "Exit Game",
+                "Save SRAM, unload the current game and return to the library",
+                ACTION_EXIT_GAME,
             ));
         }
         self.history.push(MenuList {
@@ -825,10 +829,10 @@ impl MenuEngine {
                 ),
                 Self::setting(
                     "Quick Menu",
-                    "One UI bottom-sheet style",
+                    "Full-screen translucent One UI overlay",
                     settings
                         .get("quick_menu_style")
-                        .map_or("oneui_sheet", String::as_str),
+                        .map_or("oneui_fullscreen", String::as_str),
                     693,
                 ),
                 Self::setting(
@@ -975,6 +979,57 @@ impl MenuEngine {
         });
     }
 
+    pub fn push_save_state_settings(&mut self, settings: &Settings) {
+        self.history.push(MenuList {
+            title: "Save States".to_string(),
+            entries: vec![
+                Self::action(
+                    "Save State Slot 0",
+                    "Instantly serialize the current gameplay state",
+                    ACTION_SAVE_STATE_SLOT_0,
+                ),
+                Self::action(
+                    "Load State Slot 0",
+                    "Restore the previously saved instant state",
+                    ACTION_LOAD_STATE_SLOT_0,
+                ),
+                Self::action(
+                    "Save SRAM Now",
+                    "Flush battery-backed memory card / SRAM data",
+                    ACTION_SAVE_SRAM,
+                ),
+                Self::setting(
+                    "Auto Save State",
+                    "Save slot 0 when closing content",
+                    settings
+                        .get("savestate_auto_save")
+                        .map_or("false", String::as_str),
+                    725,
+                ),
+                Self::setting(
+                    "Auto Load State",
+                    "Load slot 0 after launching content when present",
+                    settings
+                        .get("savestate_auto_load")
+                        .map_or("false", String::as_str),
+                    726,
+                ),
+                Self::setting(
+                    "Savefile Directory",
+                    "SRAM and memory card saves",
+                    settings.savefile_directory().to_string_lossy(),
+                    722,
+                ),
+                Self::setting(
+                    "Savestate Directory",
+                    "Instant save state files",
+                    settings.savestate_directory().to_string_lossy(),
+                    723,
+                ),
+            ],
+        });
+    }
+
     pub fn push_placeholder_settings(&mut self, title: &str) {
         self.history.push(MenuList {
             title: title.to_string(),
@@ -1110,7 +1165,7 @@ mod tests {
             "Core Settings",
             "Shaders",
             "Save States",
-            "Close Content",
+            "Exit Game",
         ] {
             assert!(labels.contains(&expected), "missing {expected}");
         }

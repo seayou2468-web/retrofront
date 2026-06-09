@@ -455,6 +455,13 @@ impl FrontendCore {
             (LaunchDecisionKind::Selected, Some(core_path)) => {
                 self.load_core(core_path)?;
                 self.load_game(&content_path, meta)?;
+                if self
+                    .settings
+                    .get("savestate_auto_load")
+                    .is_some_and(|value| value == "true")
+                {
+                    let _ = self.load_state(0);
+                }
                 Ok(plan)
             }
             (LaunchDecisionKind::NeedsCoreChoice, _) => Err(plan.reason.clone()),
@@ -464,13 +471,21 @@ impl FrontendCore {
     }
 
     pub fn unload_game(&mut self) {
-        if let Some(api) = self.api.as_ref() {
-            if self.game.is_some() {
-                let _ = self.save_save_ram();
-                unsafe { (api.retro_unload_game)() };
-                self.game = None;
-            }
+        if self.game.is_none() {
+            return;
         }
+        if self
+            .settings
+            .get("savestate_auto_save")
+            .is_some_and(|value| value == "true")
+        {
+            let _ = self.save_state(0);
+        }
+        let _ = self.save_save_ram();
+        if let Some(api) = self.api.as_ref() {
+            unsafe { (api.retro_unload_game)() };
+        }
+        self.game = None;
     }
 
     pub fn reset(&mut self) -> Result<(), String> {
@@ -2297,19 +2312,43 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
                 }
                 true
             }
-            menu::ACTION_CLOSE_CONTENT => {
+            menu::ACTION_CLOSE_CONTENT | menu::ACTION_EXIT_GAME => {
                 core.unload_game();
-                core.menu
-                    .push_status("Content Closed", "The current game was unloaded.");
+                core.menu.push_status(
+                    "Game Exited",
+                    "SRAM was flushed and the current game was unloaded.",
+                );
                 true
             }
             menu::ACTION_SAVE_STATES => {
+                core.menu.push_save_state_settings(&core.settings);
+                true
+            }
+            menu::ACTION_SAVE_STATE_SLOT_0 => {
                 let result = core.save_state(0);
                 match result {
                     Ok(path) => core
                         .menu
                         .push_status("State Saved", &path.to_string_lossy()),
                     Err(error) => core.menu.push_status("State Failed", &error),
+                }
+                true
+            }
+            menu::ACTION_LOAD_STATE_SLOT_0 => {
+                let result = core.load_state(0);
+                match result {
+                    Ok(()) => core
+                        .menu
+                        .push_status("State Loaded", "Slot 0 was restored."),
+                    Err(error) => core.menu.push_status("Load State Failed", &error),
+                }
+                true
+            }
+            menu::ACTION_SAVE_SRAM => {
+                let result = core.save_save_ram();
+                match result {
+                    Ok(path) => core.menu.push_status("SRAM Saved", &path.to_string_lossy()),
+                    Err(error) => core.menu.push_status("SRAM Failed", &error),
                 }
                 true
             }
@@ -2416,7 +2455,7 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
                 true
             }
             menu::ACTION_SETTINGS_SAVING => {
-                core.menu.push_core_settings(&core.settings);
+                core.menu.push_save_state_settings(&core.settings);
                 true
             }
             menu::ACTION_SETTINGS_LATENCY => {

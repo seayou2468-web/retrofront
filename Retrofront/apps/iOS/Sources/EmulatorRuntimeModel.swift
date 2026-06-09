@@ -253,7 +253,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
     let y = Float(max(0, min(1, location.y / size.height)))
     try? frontend?.setOverlayTouch(slot: slot, x: x, y: y, active: active)
     if frontend?.consumeOverlayMenuToggle() == true {
-      refreshMenu()
+      menuAction(8)
       menuToken &+= 1
     }
   }
@@ -347,6 +347,56 @@ public final class EmulatorRuntimeModel: ObservableObject {
     try? frontend?.saveSRAM()
   }
 
+  public func resetContent() {
+    do {
+      try frontend?.reset()
+      statusMessage = "Game reset"
+    } catch {
+      statusMessage = "Reset failed: \(error)"
+    }
+    refresh()
+  }
+
+  public func saveSRAMNow() {
+    do {
+      try frontend?.saveSRAM()
+      statusMessage = "SRAM saved"
+    } catch {
+      statusMessage = "SRAM save failed: \(error)"
+    }
+    refresh()
+  }
+
+  public func saveState(slot: UInt32 = 0) {
+    do {
+      try frontend?.saveState(slot: slot)
+      statusMessage = "State saved to slot \(slot)"
+    } catch {
+      statusMessage = "Save state failed: \(error)"
+    }
+    refresh()
+  }
+
+  public func loadState(slot: UInt32 = 0) {
+    do {
+      try frontend?.loadState(slot: slot)
+      statusMessage = "State loaded from slot \(slot)"
+    } catch {
+      statusMessage = "Load state failed: \(error)"
+    }
+    refresh()
+  }
+
+  public func closeContent() {
+    stop()
+    frontend?.unloadGame()
+    loadedGameURL = nil
+    displayImage = nil
+    frontendState = frontend?.state ?? .empty
+    refresh()
+    statusMessage = "Game exited"
+  }
+
   @discardableResult
   private func runOneFrame() -> Bool {
     guard let frontend else { return true }
@@ -394,6 +444,25 @@ public final class EmulatorRuntimeModel: ObservableObject {
     if handleMenuSettingAction(actionId) {
       refreshMenu()
       return
+    }
+    switch actionId {
+    case 9:
+      resetContent()
+      return
+    case 12, 26:
+      closeContent()
+      return
+    case 27:
+      saveState(slot: 0)
+      return
+    case 28:
+      loadState(slot: 0)
+      return
+    case 29:
+      saveSRAMNow()
+      return
+    default:
+      break
     }
     if frontend.activateMenuAction(actionId) { refreshMenu() }
   }
