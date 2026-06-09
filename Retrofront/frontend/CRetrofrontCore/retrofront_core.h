@@ -123,6 +123,11 @@ typedef struct RfSettingEntry {
     const char *value;
 } RfSettingEntry;
 
+typedef struct RfAssetInstallReport {
+    uintptr_t files_written;
+    uintptr_t directories_created;
+} RfAssetInstallReport;
+
 typedef struct RfLaunchPlan {
     const char *content_path;
     const char *content_extension;
@@ -197,6 +202,7 @@ const char *rf_frontend_get_setting(RfFrontend *frontend, const char *key);
 bool rf_frontend_set_setting(RfFrontend *frontend, const char *key, const char *value);
 uintptr_t rf_frontend_settings_count(const RfFrontend *frontend);
 bool rf_frontend_get_setting_at(RfFrontend *frontend, uintptr_t index, RfSettingEntry *out_setting);
+bool rf_frontend_install_assets_zip(RfFrontend *frontend, const char *zip_path, const char *destination_dir, RfAssetInstallReport *out_report);
 
 #ifdef __cplusplus
 }

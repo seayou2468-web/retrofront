@@ -182,6 +182,11 @@ public struct RetrofrontSetting: Equatable, Sendable {
   public let value: String
 }
 
+public struct AssetInstallReport: Equatable, Sendable {
+  public let filesWritten: Int
+  public let directoriesCreated: Int
+}
+
 public final class Retrofront: @unchecked Sendable {
   private let handle: OpaquePointer
 
@@ -599,6 +604,17 @@ public final class Retrofront: @unchecked Sendable {
     guard key.withCString({ cKey in value.withCString({ cValue in rf_frontend_set_setting(handle, cKey, cValue) }) }) else {
       throw lastError()
     }
+  }
+
+  public func installAssetsZip(from zipPath: String, to destinationDir: String) throws -> AssetInstallReport {
+    var raw = RfAssetInstallReport()
+    let ok = zipPath.withCString { zip in
+      destinationDir.withCString { dest in
+        rf_frontend_install_assets_zip(handle, zip, dest, &raw)
+      }
+    }
+    guard ok else { throw lastError() }
+    return AssetInstallReport(filesWritten: Int(raw.files_written), directoriesCreated: Int(raw.directories_created))
   }
 
   public func settings() -> [RetrofrontSetting] {

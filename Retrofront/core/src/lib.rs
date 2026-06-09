@@ -1,5 +1,6 @@
 //! Retrofront Rust management core.
 
+mod assets;
 mod core_info;
 mod dylib;
 pub mod gfx;
@@ -116,33 +117,27 @@ struct CoreApi {
 impl CoreApi {
     fn load(path: impl AsRef<Path>) -> Result<Self, String> {
         let lib = Library::open(path.as_ref()).map_err(|e| e.to_string())?;
-        unsafe {
-            Ok(Self {
-                retro_set_environment: sym!(lib, "retro_set_environment", RetroSetEnvironment),
-                retro_set_video_refresh: sym!(lib, "retro_set_video_refresh", RetroSetVideoRefresh),
-                retro_set_audio_sample: sym!(lib, "retro_set_audio_sample", RetroSetAudioSample),
-                retro_set_audio_sample_batch: sym!(
-                    lib,
-                    "retro_set_audio_sample_batch",
-                    RetroSetAudioSampleBatch
-                ),
-                retro_set_input_poll: sym!(lib, "retro_set_input_poll", RetroSetInputPoll),
-                retro_set_input_state: sym!(lib, "retro_set_input_state", RetroSetInputState),
-                retro_init: sym!(lib, "retro_init", RetroInit),
-                retro_deinit: sym!(lib, "retro_deinit", RetroDeinit),
-                retro_api_version: sym!(lib, "retro_api_version", RetroApiVersion),
-                retro_get_system_info: sym!(lib, "retro_get_system_info", RetroGetSystemInfo),
-                retro_get_system_av_info: sym!(
-                    lib,
-                    "retro_get_system_av_info",
-                    RetroGetSystemAvInfo
-                ),
-                retro_load_game: sym!(lib, "retro_load_game", RetroLoadGame),
-                retro_unload_game: sym!(lib, "retro_unload_game", RetroUnloadGame),
-                retro_run: sym!(lib, "retro_run", RetroRun),
-                _library: lib,
-            })
-        }
+        Ok(Self {
+            retro_set_environment: sym!(lib, "retro_set_environment", RetroSetEnvironment),
+            retro_set_video_refresh: sym!(lib, "retro_set_video_refresh", RetroSetVideoRefresh),
+            retro_set_audio_sample: sym!(lib, "retro_set_audio_sample", RetroSetAudioSample),
+            retro_set_audio_sample_batch: sym!(
+                lib,
+                "retro_set_audio_sample_batch",
+                RetroSetAudioSampleBatch
+            ),
+            retro_set_input_poll: sym!(lib, "retro_set_input_poll", RetroSetInputPoll),
+            retro_set_input_state: sym!(lib, "retro_set_input_state", RetroSetInputState),
+            retro_init: sym!(lib, "retro_init", RetroInit),
+            retro_deinit: sym!(lib, "retro_deinit", RetroDeinit),
+            retro_api_version: sym!(lib, "retro_api_version", RetroApiVersion),
+            retro_get_system_info: sym!(lib, "retro_get_system_info", RetroGetSystemInfo),
+            retro_get_system_av_info: sym!(lib, "retro_get_system_av_info", RetroGetSystemAvInfo),
+            retro_load_game: sym!(lib, "retro_load_game", RetroLoadGame),
+            retro_unload_game: sym!(lib, "retro_unload_game", RetroUnloadGame),
+            retro_run: sym!(lib, "retro_run", RetroRun),
+            _library: lib,
+        })
     }
 }
 
@@ -1268,7 +1263,10 @@ pub unsafe extern "C" fn rf_frontend_scan_games(
     if let Some(dir_str) = ptr_to_str(directory) {
         if let Some(ext_str) = ptr_to_str(extensions) {
             let exts: Vec<String> = ext_str.split("|").map(|s| s.to_string()).collect();
-            with_active_frontend(|core| core.scanner.scan_directory(Path::new(&dir_str), &exts));
+            with_active_frontend(|core| {
+                core.scanner.clear();
+                core.scanner.scan_directory(Path::new(&dir_str), &exts);
+            });
         }
     }
 }
@@ -1819,5 +1817,41 @@ mod tests {
         assert_eq!(frontend.joypad_button(8), 1);
         frontend.set_joypad_button(8, false).unwrap();
         assert_eq!(frontend.joypad_button(8), 0);
+    }
+}
+#[repr(C)]
+pub struct RfAssetInstallReport {
+    files_written: usize,
+    directories_created: usize,
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_install_assets_zip(
+    frontend: *mut RfFrontend,
+    zip_path: *const c_char,
+    destination_dir: *const c_char,
+    out_report: *mut RfAssetInstallReport,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    let Some(zip_path) = ptr_to_str(zip_path) else {
+        return false;
+    };
+    let Some(destination_dir) = ptr_to_str(destination_dir) else {
+        return false;
+    };
+    match assets::install_assets_zip(Path::new(&zip_path), Path::new(&destination_dir)) {
+        Ok(report) => {
+            if let Some(out) = unsafe { out_report.as_mut() } {
+                out.files_written = report.files_written;
+                out.directories_created = report.directories_created;
+            }
+            true
+        }
+        Err(err) => {
+            set_error(frontend, &err);
+            false
+        }
     }
 }

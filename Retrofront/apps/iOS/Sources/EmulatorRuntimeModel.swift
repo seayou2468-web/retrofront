@@ -18,6 +18,8 @@ public final class EmulatorRuntimeModel: ObservableObject {
   @Published private(set) var loadedGameURL: URL?
   @Published private(set) var currentMenu: MenuList?
   @Published private(set) var settings: [RetrofrontSetting] = []
+  @Published private(set) var pendingCoreChoices: [CoreInfo] = []
+  @Published private(set) var pendingContentURL: URL?
   @Published var statusMessage = "Ready"
 
   private var frontend: Retrofront?
@@ -31,26 +33,25 @@ public final class EmulatorRuntimeModel: ObservableObject {
     refreshMenu()
   }
 
+  private var retroArchRoot: URL {
+    FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+      .appendingPathComponent("RetroArch", isDirectory: true)
+  }
+
   private func setupFrontend() {
     do {
       let frontend = try Retrofront()
       self.frontend = frontend
 
-      let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-      let configPath = docs.appendingPathComponent("retroarch.cfg").path
-      try? frontend.setBaseDirectory(docs.path)
+      let root = retroArchRoot
+      try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+      let configPath = root.appendingPathComponent("config/retroarch.cfg").path
+      try? frontend.setBaseDirectory(root.path)
+      applyBundleCoreDirectories(frontend)
       try? frontend.loadSettings(at: configPath)
-
-      if let resourceURL = Bundle.main.resourceURL {
-          let bundledInfo = resourceURL.appendingPathComponent("info")
-          if FileManager.default.fileExists(atPath: bundledInfo.path) {
-              frontend.setInfoDir(bundledInfo.path)
-          }
-      }
-
-      // Prefer the hardware-capable bgfx path. Rust automatically falls back to
-      // copyable software frames until an iOS OpenGL ES / MoltenVK host renderer
-      // supplies valid host handles.
+      applyBundleCoreDirectories(frontend)
+      try? frontend.setSetting(key: "content_directory", value: root.path)
+      try? frontend.setSetting(key: "core_assets_directory", value: root.appendingPathComponent("downloads").path)
       try? frontend.setGfxBackend(.bgfx)
       frontend.saveSettings()
       refresh()
@@ -59,77 +60,78 @@ public final class EmulatorRuntimeModel: ObservableObject {
     }
   }
 
+  private func applyBundleCoreDirectories(_ frontend: Retrofront) {
+    if let frameworksURL = Bundle.main.privateFrameworksURL {
+      try? frontend.setSetting(key: "libretro_directory", value: frameworksURL.path)
+    }
+    if let resourceURL = Bundle.main.resourceURL {
+      let info = resourceURL.appendingPathComponent("info", isDirectory: true)
+      if FileManager.default.fileExists(atPath: info.path) {
+        frontend.setInfoDir(info.path)
+        try? frontend.setSetting(key: "libretro_info_path", value: info.path)
+      }
+    }
+  }
+
   public func refreshAvailableCores() {
     guard let frontend else { return }
     if let frameworksURL = Bundle.main.privateFrameworksURL {
-        frontend.scanCores(in: frameworksURL.path)
+      frontend.scanCores(in: frameworksURL.path)
     }
     if let resourceURL = Bundle.main.resourceURL {
-        frontend.scanCores(in: resourceURL.path)
+      frontend.scanCores(in: resourceURL.path)
+      frontend.scanCores(in: resourceURL.appendingPathComponent("dylibs").path)
     }
     frontend.scanConfiguredCores()
-    self.availableCores = frontend.availableCores()
+    availableCores = frontend.availableCores()
   }
 
   public func refreshGames() {
-      guard let frontend else { return }
-      let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-      let romsDir = URL(fileURLWithPath: frontend.setting("content_directory") ?? docs.appendingPathComponent("Roms").path)
-      try? FileManager.default.createDirectory(at: romsDir, withIntermediateDirectories: true)
-      let detectedExtensions = frontend.allSupportedExtensions()
-      let exts = detectedExtensions.isEmpty ? "gba|gb|gbc|sfc|smc|nes|bin|gen|md|sms|gg" : detectedExtensions.joined(separator: "|")
-      frontend.scanGames(in: romsDir.path, extensions: exts)
-      self.availableGames = frontend.availableGames()
+    guard let frontend else { return }
+    let contentDir = URL(fileURLWithPath: frontend.setting("content_directory") ?? retroArchRoot.path)
+    try? FileManager.default.createDirectory(at: contentDir, withIntermediateDirectories: true)
+    let exts = frontend.allSupportedExtensions().joined(separator: "|")
+    frontend.scanGames(in: contentDir.path, extensions: exts)
+    availableGames = frontend.availableGames()
   }
 
   public func importFile(at url: URL) {
-      if url.pathExtension.lowercased() == "dylib" {
-          importCore(at: url)
-      } else {
-          importGame(at: url)
-      }
+    importGame(at: url)
   }
 
   public func importGame(at url: URL) {
-      guard let frontend else { return }
-      let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-      let romsDir = URL(fileURLWithPath: frontend.setting("content_directory") ?? docs.appendingPathComponent("Roms").path)
-      try? FileManager.default.createDirectory(at: romsDir, withIntermediateDirectories: true)
-      let destination = romsDir.appendingPathComponent(url.lastPathComponent)
-      let success = url.startAccessingSecurityScopedResource()
-      defer { if success { url.stopAccessingSecurityScopedResource() } }
-      do {
-          if FileManager.default.fileExists(atPath: destination.path) {
-              try FileManager.default.removeItem(at: destination)
-          }
-          try FileManager.default.copyItem(at: url, to: destination)
-          statusMessage = "Imported \(url.lastPathComponent)"
-          refreshGames()
-      } catch {
-          statusMessage = "Import failed: \(error)"
+    guard let frontend else { return }
+    let destinationDir = URL(fileURLWithPath: frontend.setting("core_assets_directory") ?? retroArchRoot.appendingPathComponent("downloads").path)
+    try? FileManager.default.createDirectory(at: destinationDir, withIntermediateDirectories: true)
+    let destination = destinationDir.appendingPathComponent(url.lastPathComponent)
+    let success = url.startAccessingSecurityScopedResource()
+    defer { if success { url.stopAccessingSecurityScopedResource() } }
+    do {
+      if FileManager.default.fileExists(atPath: destination.path) {
+        try FileManager.default.removeItem(at: destination)
       }
+      try FileManager.default.copyItem(at: url, to: destination)
+      statusMessage = "Imported \(url.lastPathComponent) to downloads"
+      refreshGames()
+    } catch {
+      statusMessage = "Import failed: \(error)"
+    }
   }
 
-  public func importCore(at url: URL) {
-      guard let frontend else { return }
-      let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-      let coresDir = URL(fileURLWithPath: frontend.setting("libretro_directory") ?? docs.appendingPathComponent("Cores").path)
-      try? FileManager.default.createDirectory(at: coresDir, withIntermediateDirectories: true)
-      let destination = coresDir.appendingPathComponent(url.lastPathComponent)
-      let success = url.startAccessingSecurityScopedResource()
-      defer { if success { url.stopAccessingSecurityScopedResource() } }
-      do {
-          if FileManager.default.fileExists(atPath: destination.path) {
-              try FileManager.default.removeItem(at: destination)
-          }
-          try FileManager.default.copyItem(at: url, to: destination)
-          try? frontend.setSetting(key: "libretro_directory", value: coresDir.path)
-          frontend.saveSettings()
-          refreshAvailableCores()
-          statusMessage = "Imported core: \(url.lastPathComponent)"
-      } catch {
-          statusMessage = "Core import failed: \(error)"
-      }
+  public func installBundledAssets() {
+    guard let frontend else { return }
+    guard let zipURL = Bundle.main.url(forResource: "assets", withExtension: "zip") else {
+      statusMessage = "assets.zip was not found in the app bundle"
+      return
+    }
+    let assetsDir = URL(fileURLWithPath: frontend.setting("assets_directory") ?? retroArchRoot.appendingPathComponent("assets").path)
+    do {
+      let report = try frontend.installAssetsZip(from: zipURL.path, to: assetsDir.path)
+      refresh()
+      statusMessage = "Installed assets: \(report.filesWritten) files"
+    } catch {
+      statusMessage = "Assets install failed: \(error)"
+    }
   }
 
   public func loadCore(_ core: CoreInfo) {
@@ -139,7 +141,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
       systemInfo = try frontend.loadCore(at: core.path)
       corePath = core.path
       refresh()
-      statusMessage = "Loaded core: \(systemInfo?.libraryName ?? "Unknown")"
+      statusMessage = "Loaded core: \(systemInfo?.libraryName ?? core.displayName)"
     } catch {
       statusMessage = "Core load failed: \(error)"
     }
@@ -147,18 +149,42 @@ public final class EmulatorRuntimeModel: ObservableObject {
 
   public func loadGame(at url: URL) {
     guard let frontend else { return }
-    if frontendState == .empty {
-        let ext = url.pathExtension.lowercased()
-        if let suitableCore = availableCores.first(where: { $0.supportedExtensions.contains(ext) }) {
-            loadCore(suitableCore)
-        } else {
-            statusMessage = "No suitable core found for .\(ext)"
-            return
-        }
+    guard let plan = frontend.planContentLaunch(path: url.path) else {
+      statusMessage = "Could not create launch plan"
+      return
     }
+    switch plan.decision {
+    case .selected:
+      doLaunch(url, preferredCore: plan.selectedCorePath)
+    case .needsCoreChoice:
+      pendingContentURL = url
+      pendingCoreChoices = frontend.launchCandidates()
+      statusMessage = "Select a core for .\(plan.contentExtension)"
+    case .noCore:
+      statusMessage = "No compatible core found for .\(plan.contentExtension)"
+    }
+  }
+
+  public func launchPendingContent(with core: CoreInfo) {
+    guard let url = pendingContentURL else { return }
+    pendingContentURL = nil
+    pendingCoreChoices = []
+    doLaunch(url, preferredCore: core.path)
+  }
+
+  public func cancelCoreChoice() {
+    pendingContentURL = nil
+    pendingCoreChoices = []
+  }
+
+  private func doLaunch(_ url: URL, preferredCore: String?) {
+    guard let frontend else { return }
     do {
-      try frontend.loadGame(at: url.path)
+      stop()
+      try frontend.launchContent(at: url.path, preferredCore: preferredCore)
       loadedGameURL = url
+      systemInfo = try? frontend.systemInfo()
+      corePath = preferredCore ?? frontend.planContentLaunch(path: url.path)?.selectedCorePath
       refresh()
       statusMessage = "Loaded game: \(url.lastPathComponent)"
     } catch {
@@ -170,28 +196,19 @@ public final class EmulatorRuntimeModel: ObservableObject {
     try? frontend?.setJoypadButton(button, pressed: pressed)
   }
 
-  public func toggleRunning() {
-    isRunning ? stop() : play()
-  }
+  public func toggleRunning() { isRunning ? stop() : play() }
 
   public func play() {
     guard frontendState == .gameLoaded, !isRunning else { return }
     isRunning = true
-runTask = Task.detached(priority: .userInitiated) { [weak self] in
-  while !Task.isCancelled {
-    guard let self = self else { break }
-
-    let shouldStop = await MainActor.run {
-      self.runOneFrame()
+    runTask = Task.detached(priority: .userInitiated) { [weak self] in
+      while !Task.isCancelled {
+        guard let self = self else { break }
+        let shouldStop = await MainActor.run { self.runOneFrame() }
+        if shouldStop { break }
+        try? await Task.sleep(nanoseconds: 16_666_667)
+      }
     }
-
-    if shouldStop {
-      break
-    }
-
-    try? await Task.sleep(nanoseconds: 16_666_667)
-  }
-}
   }
 
   public func stop() {
@@ -220,8 +237,8 @@ runTask = Task.detached(priority: .userInitiated) { [weak self] in
       return false
     } catch {
       Task { @MainActor in
-          self.stop()
-          self.statusMessage = "Run error: \(error)"
+        self.stop()
+        self.statusMessage = "Run error: \(error)"
       }
       return true
     }
@@ -233,30 +250,21 @@ runTask = Task.detached(priority: .userInitiated) { [weak self] in
     coreOptions = frontend.coreOptions()
     settings = frontend.settings()
     if let config = frontend.gfxVideoConfig() {
-        if config.aspectRatio > 0 {
-            aspectRatio = Double(config.aspectRatio)
-        } else if config.baseHeight > 0 {
-            aspectRatio = Double(config.baseWidth) / Double(config.baseHeight)
-        }
+      if config.aspectRatio > 0 { aspectRatio = Double(config.aspectRatio) }
+      else if config.baseHeight > 0 { aspectRatio = Double(config.baseWidth) / Double(config.baseHeight) }
     }
     refreshMenu()
   }
 
-  public func refreshMenu() {
-      currentMenu = frontend?.currentMenuList()
-  }
+  public func refreshMenu() { currentMenu = frontend?.currentMenuList() }
 
   public func menuAction(_ actionId: UInt32) {
-      guard let frontend else { return }
-      if frontend.activateMenuAction(actionId) {
-          refreshMenu()
-      }
+    guard let frontend else { return }
+    if frontend.activateMenuAction(actionId) { refreshMenu() }
   }
 
   public func menuPop() {
-      if frontend?.menuPop() == true {
-          refreshMenu()
-      }
+    if frontend?.menuPop() == true { refreshMenu() }
   }
 
   public func setOption(key: String, value: String) {
@@ -275,9 +283,7 @@ runTask = Task.detached(priority: .userInitiated) { [weak self] in
       bitsPerPixel: 32,
       bytesPerRow: width * 4,
       space: CGColorSpaceCreateDeviceRGB(),
-      bitmapInfo: CGBitmapInfo.byteOrder32Big.union(
-        CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
-      ),
+      bitmapInfo: CGBitmapInfo.byteOrder32Big.union(CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)),
       provider: provider,
       decode: nil,
       shouldInterpolate: false,

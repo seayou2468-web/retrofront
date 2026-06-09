@@ -166,7 +166,10 @@ impl CoreInfoList {
             if let Some(val) = map.get("corename") {
                 info.core_name = val.clone();
             }
-            if let Some(val) = map.get("system_manufacturer") {
+            if let Some(val) = map
+                .get("manufacturer")
+                .or_else(|| map.get("system_manufacturer"))
+            {
                 info.system_manufacturer = val.clone();
             }
             if let Some(val) = map.get("systemname") {
@@ -193,7 +196,7 @@ impl CoreInfoList {
             if let Some(val) = map.get("description") {
                 info.description = val.clone();
             }
-            if let Some(val) = map.get("database") {
+            if let Some(val) = map.get("database").or_else(|| map.get("databases")) {
                 info.database = val.clone();
             }
             info.firmware_count = map

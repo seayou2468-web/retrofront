@@ -20,8 +20,13 @@ impl Settings {
     pub fn load(&mut self, path: &Path) {
         self.path = path.to_path_buf();
         if let Some(parent) = path.parent() {
-            self.base_dir = parent.to_path_buf();
-            self.apply_retroarch_defaults(parent);
+            let base_dir = if parent.file_name().and_then(|name| name.to_str()) == Some("config") {
+                parent.parent().unwrap_or(parent)
+            } else {
+                parent
+            };
+            self.base_dir = base_dir.to_path_buf();
+            self.apply_retroarch_defaults(base_dir);
         }
         if !path.exists() {
             return;
@@ -175,6 +180,27 @@ impl Settings {
             ("savestate_directory", base_dir.join("states")),
             ("system_directory", base_dir.join("system")),
             ("playlist_directory", base_dir.join("playlists")),
+            ("menu_content_directory", base_dir.to_path_buf()),
+            (
+                "content_favorites_path",
+                base_dir.join("playlists/content_favorites.lpl"),
+            ),
+            (
+                "content_history_path",
+                base_dir.join("playlists/content_history.lpl"),
+            ),
+            (
+                "content_image_history_path",
+                base_dir.join("playlists/content_image_history.lpl"),
+            ),
+            (
+                "content_music_history_path",
+                base_dir.join("playlists/content_music_history.lpl"),
+            ),
+            (
+                "content_video_history_path",
+                base_dir.join("playlists/content_video_history.lpl"),
+            ),
             ("core_assets_directory", base_dir.join("downloads")),
             ("assets_directory", base_dir.join("assets")),
             ("menu_assets_directory", base_dir.join("assets")),
@@ -183,12 +209,20 @@ impl Settings {
             ("cache_directory", base_dir.join("cache")),
             ("screenshot_directory", base_dir.join("screenshots")),
             ("input_remapping_directory", base_dir.join("remaps")),
-            ("cheat_database_path", base_dir.join("cheats")),
+            ("cheat_database_path", base_dir.join("cht")),
+            ("content_database_path", base_dir.join("database/rdb")),
             ("overlay_directory", base_dir.join("overlays")),
             ("joypad_autoconfig_dir", base_dir.join("autoconfig")),
+            ("video_shader_dir", base_dir.join("shaders")),
             ("video_filter_dir", base_dir.join("filters/video")),
             ("audio_filter_dir", base_dir.join("filters/audio")),
             ("log_dir", base_dir.join("logs")),
+            ("recording_output_directory", base_dir.join("records")),
+            (
+                "recording_config_directory",
+                base_dir.join("records_config"),
+            ),
+            ("dynamic_wallpapers_directory", base_dir.join("wallpapers")),
             ("video_driver", PathBuf::from("bgfx")),
             ("audio_driver", PathBuf::from("swift")),
             ("input_driver", PathBuf::from("swift")),
@@ -221,6 +255,12 @@ impl Settings {
             "savestate_directory",
             "system_directory",
             "playlist_directory",
+            "menu_content_directory",
+            "content_favorites_path",
+            "content_history_path",
+            "content_image_history_path",
+            "content_music_history_path",
+            "content_video_history_path",
             "core_assets_directory",
             "assets_directory",
             "menu_assets_directory",
@@ -230,16 +270,49 @@ impl Settings {
             "screenshot_directory",
             "input_remapping_directory",
             "cheat_database_path",
+            "content_database_path",
             "overlay_directory",
             "joypad_autoconfig_dir",
+            "video_shader_dir",
             "video_filter_dir",
             "audio_filter_dir",
             "log_dir",
+            "recording_output_directory",
+            "recording_config_directory",
+            "dynamic_wallpapers_directory",
         ]
     }
 
     fn directory_keys() -> &'static [&'static str] {
-        &Self::managed_default_keys()[6..]
+        &[
+            "libretro_directory",
+            "libretro_info_path",
+            "content_directory",
+            "savefile_directory",
+            "savestate_directory",
+            "system_directory",
+            "playlist_directory",
+            "menu_content_directory",
+            "core_assets_directory",
+            "assets_directory",
+            "menu_assets_directory",
+            "thumbnails_directory",
+            "runtime_directory",
+            "cache_directory",
+            "screenshot_directory",
+            "input_remapping_directory",
+            "cheat_database_path",
+            "content_database_path",
+            "overlay_directory",
+            "joypad_autoconfig_dir",
+            "video_shader_dir",
+            "video_filter_dir",
+            "audio_filter_dir",
+            "log_dir",
+            "recording_output_directory",
+            "recording_config_directory",
+            "dynamic_wallpapers_directory",
+        ]
     }
 
     fn unquote(value: &str) -> String {
