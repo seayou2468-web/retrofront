@@ -228,6 +228,7 @@ pub struct OverlayManager {
     overlays: Vec<Overlay>,
     touches: [OverlayTouch; OVERLAY_MAX_TOUCH],
     input_state: OverlayInputState,
+    menu_toggle_requested: bool,
     last_path: Option<PathBuf>,
 }
 impl Default for OverlayManager {
@@ -247,6 +248,7 @@ impl OverlayManager {
             overlays: Vec::new(),
             touches: [OverlayTouch::default(); OVERLAY_MAX_TOUCH],
             input_state: OverlayInputState::default(),
+            menu_toggle_requested: false,
             last_path: None,
         }
     }
@@ -306,6 +308,11 @@ impl OverlayManager {
         } else {
             0
         }
+    }
+    pub fn consume_menu_toggle(&mut self) -> bool {
+        let requested = self.menu_toggle_requested;
+        self.menu_toggle_requested = false;
+        requested
     }
     pub fn set_active(&mut self, index: usize) -> Result<(), String> {
         if index >= self.overlays.len() {
@@ -427,6 +434,7 @@ impl OverlayManager {
             return;
         };
         let mut next_target = None;
+        let mut menu_toggle_requested = false;
         for touch in self.touches.iter().filter(|t| t.active) {
             state.pointer = Some((touch.x, touch.y));
             let local_x = if overlay.w.abs() > f32::EPSILON {
@@ -451,6 +459,9 @@ impl OverlayManager {
                             }
                             if button == 16 {
                                 next_target = Some(desc.next_index);
+                            }
+                            if button == 17 {
+                                menu_toggle_requested = true;
                             }
                         }
                     }
@@ -480,6 +491,9 @@ impl OverlayManager {
             }
         }
         self.input_state = state;
+        if menu_toggle_requested {
+            self.menu_toggle_requested = true;
+        }
         if let Some(index) = next_target.filter(|i| *i < self.overlays.len()) {
             self.active_index = index;
             self.clear_touches();
@@ -1028,6 +1042,7 @@ fn bind_id(name: &str) -> Option<u32> {
         "l3" => Some(14),
         "r3" => Some(15),
         "overlay_next" => Some(16),
+        "menu_toggle" | "menu" => Some(17),
         _ => None,
     }
 }

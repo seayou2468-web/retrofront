@@ -1,5 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Default)]
@@ -97,13 +99,52 @@ impl CoreInfoList {
         if wanted.is_empty() {
             return Vec::new();
         }
+        self.compatible_cores_for_extensions([wanted])
+    }
+
+    pub fn compatible_cores_for_content_path(&self, content_path: &Path) -> Vec<CoreInfo> {
+        let mut wanted = Vec::new();
+        if let Some(ext) = content_path.extension().and_then(|ext| ext.to_str()) {
+            let ext = ext.trim_start_matches('.').to_lowercase();
+            if !ext.is_empty() {
+                wanted.push(ext);
+            }
+        }
+
+        if content_path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"))
+        {
+            wanted.extend(zip_member_extensions(content_path));
+        }
+
+        wanted.sort();
+        wanted.dedup();
+        self.compatible_cores_for_extensions(wanted)
+    }
+
+    fn compatible_cores_for_extensions<I>(&self, extensions: I) -> Vec<CoreInfo>
+    where
+        I: IntoIterator<Item = String>,
+    {
+        let wanted: Vec<String> = extensions
+            .into_iter()
+            .map(|ext| ext.trim_start_matches('.').to_lowercase())
+            .filter(|ext| !ext.is_empty())
+            .collect();
+        if wanted.is_empty() {
+            return Vec::new();
+        }
 
         self.cores
             .iter()
             .filter(|core| {
-                core.supported_extensions
-                    .iter()
-                    .any(|ext| ext.trim_start_matches('.').eq_ignore_ascii_case(&wanted))
+                wanted.iter().any(|wanted_ext| {
+                    core.supported_extensions
+                        .iter()
+                        .any(|ext| ext.trim_start_matches('.').eq_ignore_ascii_case(wanted_ext))
+                })
             })
             .cloned()
             .collect()
@@ -324,4 +365,34 @@ mod tests {
             vec!["gba", "gb", "gbc"]
         );
     }
+}
+
+fn zip_member_extensions(path: &Path) -> Vec<String> {
+    let Ok(file) = File::open(path) else {
+        return Vec::new();
+    };
+    let Ok(mut archive) = zip::ZipArchive::new(file) else {
+        return Vec::new();
+    };
+    let mut extensions = Vec::new();
+    for i in 0..archive.len() {
+        let Ok(mut entry) = archive.by_index(i) else {
+            continue;
+        };
+        if entry.is_dir() || entry.name().ends_with('/') {
+            continue;
+        }
+        let mut probe = [0_u8; 1];
+        let _ = entry.read(&mut probe);
+        if let Some(ext) = Path::new(entry.name())
+            .extension()
+            .and_then(|ext| ext.to_str())
+        {
+            let ext = ext.trim_start_matches('.').to_lowercase();
+            if !ext.is_empty() {
+                extensions.push(ext);
+            }
+        }
+    }
+    extensions
 }

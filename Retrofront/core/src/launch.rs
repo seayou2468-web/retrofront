@@ -60,7 +60,7 @@ impl LaunchManager {
                 .into_iter()
                 .collect()
         } else {
-            core_info.compatible_cores_for_extension(&content_extension)
+            core_info.compatible_cores_for_content_path(content_path)
         };
 
         let preferred = settings.preferred_core_for_extension(&content_extension);

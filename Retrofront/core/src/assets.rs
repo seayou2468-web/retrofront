@@ -29,9 +29,15 @@ pub fn install_assets_zip(
         };
         let out_path = destination_dir.join(safe_name);
         if entry.is_dir() || entry.name().ends_with('/') {
+            if out_path.is_file() {
+                fs::remove_file(&out_path).map_err(|e| format!("replace {:?}: {e}", out_path))?;
+            }
             fs::create_dir_all(&out_path).map_err(|e| format!("create {:?}: {e}", out_path))?;
             report.directories_created += 1;
             continue;
+        }
+        if out_path.is_dir() {
+            fs::remove_dir_all(&out_path).map_err(|e| format!("replace {:?}: {e}", out_path))?;
         }
         if let Some(parent) = out_path.parent() {
             fs::create_dir_all(parent).map_err(|e| format!("create {:?}: {e}", parent))?;

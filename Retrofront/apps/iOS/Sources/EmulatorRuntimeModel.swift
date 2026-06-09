@@ -22,6 +22,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
   @Published private(set) var pendingCoreChoices: [CoreInfo] = []
   @Published private(set) var pendingContentURL: URL?
   @Published private(set) var launchToken: UInt = 0
+  @Published private(set) var menuToken: UInt = 0
   @Published var statusMessage = "Ready"
 
   private var frontend: Retrofront?
@@ -225,6 +226,10 @@ public final class EmulatorRuntimeModel: ObservableObject {
     let x = Float(max(0, min(1, location.x / size.width)))
     let y = Float(max(0, min(1, location.y / size.height)))
     try? frontend?.setOverlayTouch(slot: slot, x: x, y: y, active: active)
+    if frontend?.consumeOverlayMenuToggle() == true {
+      refreshMenu()
+      menuToken &+= 1
+    }
   }
 
   public func clearOverlayTouches() {
@@ -323,6 +328,11 @@ public final class EmulatorRuntimeModel: ObservableObject {
   public func menuAction(_ actionId: UInt32) {
     guard let frontend else { return }
     if frontend.activateMenuAction(actionId) { refreshMenu() }
+  }
+
+  public func openQuickMenu() {
+    menuAction(8)
+    menuToken &+= 1
   }
 
   public func menuPop() {

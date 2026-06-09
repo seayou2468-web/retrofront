@@ -288,6 +288,10 @@ impl FrontendCore {
         self.overlay.clear_touches();
     }
 
+    pub fn consume_overlay_menu_toggle(&mut self) -> bool {
+        self.overlay.consume_menu_toggle()
+    }
+
     pub fn load_core(&mut self, path: impl AsRef<Path>) -> Result<(), String> {
         self.unload_game();
         if let Some(api) = self.api.as_ref() {
@@ -1036,6 +1040,13 @@ pub unsafe extern "C" fn rf_frontend_set_overlay_touch(
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_clear_overlay_touches(_frontend: *mut RfFrontend) {
     with_active_frontend(|core| core.clear_overlay_touches());
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_consume_overlay_menu_toggle(
+    _frontend: *mut RfFrontend,
+) -> bool {
+    with_active_frontend(|core| core.consume_overlay_menu_toggle())
 }
 
 #[no_mangle]

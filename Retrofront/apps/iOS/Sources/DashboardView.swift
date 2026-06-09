@@ -23,6 +23,9 @@ struct DashboardView: View {
                 .tag(2)
         }
         .accentColor(OneUI.accent)
+        .preferredColorScheme(.dark)
+        .toolbarBackground(OneUI.surface, for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
         .background(OneUI.background.ignoresSafeArea())
         .fullScreenCover(isPresented: $isPlayViewActive) { PlayView() }
         .fileImporter(isPresented: $isFilePickerPresented, allowedContentTypes: [.item]) { result in
@@ -38,15 +41,15 @@ struct DashboardView: View {
 }
 
 enum OneUI {
-    static let background = Color(red: 0.948, green: 0.956, blue: 0.976)
-    static let surface = Color.white
-    static let elevated = Color(red: 0.985, green: 0.989, blue: 0.997)
-    static let ink = Color(red: 0.055, green: 0.064, blue: 0.090)
-    static let secondary = Color(red: 0.365, green: 0.396, blue: 0.455)
-    static let muted = Color(red: 0.600, green: 0.635, blue: 0.690)
-    static let accent = Color(red: 0.055, green: 0.435, blue: 0.980)
-    static let teal = Color(red: 0.000, green: 0.655, blue: 0.760)
-    static let violet = Color(red: 0.455, green: 0.325, blue: 0.950)
+    static let background = Color(red: 0.030, green: 0.036, blue: 0.055)
+    static let surface = Color(red: 0.075, green: 0.088, blue: 0.125)
+    static let elevated = Color(red: 0.105, green: 0.122, blue: 0.170)
+    static let ink = Color(red: 0.930, green: 0.950, blue: 0.990)
+    static let secondary = Color(red: 0.650, green: 0.700, blue: 0.790)
+    static let muted = Color(red: 0.430, green: 0.490, blue: 0.610)
+    static let accent = Color(red: 0.250, green: 0.600, blue: 1.000)
+    static let teal = Color(red: 0.130, green: 0.830, blue: 0.830)
+    static let violet = Color(red: 0.620, green: 0.500, blue: 1.000)
     static let radius: CGFloat = 24
     static let compactRadius: CGFloat = 18
 }
@@ -119,7 +122,8 @@ struct LibraryView: View {
                 } else {
                     VStack(spacing: 10) {
                         ForEach(runtime.availableCores, id: \.path) { core in
-                            CoreRow(core: core)
+                            Button { runtime.loadCore(core) } label: { CoreRow(core: core) }
+                                .buttonStyle(.plain)
                         }
                     }
                 }
@@ -209,6 +213,24 @@ struct SettingsView: View {
                 }
                 SettingChoiceRow(title: "Overlay Opacity", subtitle: "タッチ操作の透明度", value: runtime.overlayOpacityLabel) {
                     runtime.cycleOverlayOpacity()
+                }
+            }
+
+            SettingsGroup(title: "Loaded Core") {
+                SettingInfoRow(title: "Current Core", value: runtime.systemInfo?.libraryName ?? runtime.corePath ?? "Not loaded")
+                if runtime.coreOptions.isEmpty {
+                    SettingInfoRow(title: "Core Options", value: "Load a core to edit its options")
+                } else {
+                    ForEach(runtime.coreOptions, id: \.key) { option in
+                        SettingChoiceRow(title: option.desc.isEmpty ? option.key : option.desc, subtitle: option.info.isEmpty ? option.key : option.info, value: option.value) {
+                            guard let current = option.values.firstIndex(where: { $0.value == option.value }) else {
+                                if let next = option.values.first { runtime.setOption(key: option.key, value: next.value) }
+                                return
+                            }
+                            let next = option.values[(current + 1) % option.values.count]
+                            runtime.setOption(key: option.key, value: next.value)
+                        }
+                    }
                 }
             }
 
@@ -517,49 +539,77 @@ struct PlayView: View {
     @EnvironmentObject private var runtime: EmulatorRuntimeModel
     @Environment(\.presentationMode) private var presentationMode
 
+    @State private var isMenuPresented = false
+
     var body: some View {
         GeometryReader { outer in
-            VStack(spacing: 14) {
-                ZStack(alignment: .topLeading) {
-                    Color.black
-                    if let image = runtime.displayImage {
-                        Image(uiImage: image)
-                            .resizable()
-                            .interpolation(.none)
-                            .scaledToFit()
-                    } else {
-                        VStack(spacing: 10) {
-                            Image(systemName: "gamecontroller")
-                                .font(.system(size: 42, weight: .semibold))
-                            Text("Starting video…")
-                                .font(.headline)
-                        }
-                        .foregroundColor(.white.opacity(0.78))
+            ZStack(alignment: .bottom) {
+                Color.black.ignoresSafeArea()
+                if let image = runtime.displayImage {
+                    Image(uiImage: image)
+                        .resizable()
+                        .interpolation(.none)
+                        .scaledToFit()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    VStack(spacing: 10) {
+                        Image(systemName: "gamecontroller")
+                            .font(.system(size: 42, weight: .semibold))
+                        Text("Starting video…")
+                            .font(.headline)
                     }
+                    .foregroundColor(.white.opacity(0.78))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { value in runtime.setOverlayTouch(slot: 0, location: value.location, in: outer.size, active: true) }
-                        .onEnded { _ in runtime.setOverlayTouch(slot: 0, location: .zero, in: outer.size, active: false) }
-                )
-                .aspectRatio(runtime.aspectRatio, contentMode: .fit)
-                .frame(maxWidth: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .padding(.horizontal, 12)
-
                 PlayerControls { presentationMode.wrappedValue.dismiss() }
+                    .padding(.horizontal, 10)
+                    .background(LinearGradient(colors: [.clear, .black.opacity(0.78)], startPoint: .top, endPoint: .bottom).ignoresSafeArea(edges: .bottom))
             }
-            .padding(.top, 10)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.black.ignoresSafeArea())
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in runtime.setOverlayTouch(slot: 0, location: value.location, in: outer.size, active: true) }
+                    .onEnded { _ in runtime.setOverlayTouch(slot: 0, location: .zero, in: outer.size, active: false) }
+            )
         }
+        .background(Color.black.ignoresSafeArea())
+        .statusBar(hidden: true)
+        .onReceive(runtime.$menuToken) { token in if token > 0 { isMenuPresented = true } }
+        .sheet(isPresented: $isMenuPresented) { RuntimeMenuSheet() }
         .onAppear { runtime.play() }
         .onDisappear {
             runtime.clearOverlayTouches()
             runtime.stop()
         }
+    }
+}
+
+
+struct RuntimeMenuSheet: View {
+    @EnvironmentObject private var runtime: EmulatorRuntimeModel
+    @Environment(\.presentationMode) private var presentationMode
+
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(runtime.currentMenu?.entries ?? [], id: \.actionId) { entry in
+                    Button {
+                        runtime.menuAction(entry.actionId)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(entry.label).foregroundColor(OneUI.ink)
+                            if !entry.sublabel.isEmpty { Text(entry.sublabel).font(.caption).foregroundColor(OneUI.secondary) }
+                        }
+                    }
+                    .listRowBackground(OneUI.surface)
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(OneUI.background)
+            .navigationBarTitle(runtime.currentMenu?.title ?? "Menu", displayMode: .inline)
+            .navigationBarItems(leading: Button("Back") { runtime.menuPop() }, trailing: Button("Done") { presentationMode.wrappedValue.dismiss() })
+        }
+        .preferredColorScheme(.dark)
     }
 }
 
@@ -594,6 +644,14 @@ struct PlayerControls: View {
 
             HStack(spacing: 18) {
                 UtilityButton(label: "Select", button: .select)
+                Button { runtime.openQuickMenu() } label: {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 44, height: 42)
+                        .background(Capsule().fill(Color.white.opacity(0.14)))
+                }
+                .buttonStyle(.plain)
                 Button { runtime.toggleRunning() } label: {
                     Image(systemName: runtime.isRunning ? "pause.fill" : "play.fill")
                         .font(.system(size: 18, weight: .bold))

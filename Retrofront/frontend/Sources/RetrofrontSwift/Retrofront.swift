@@ -296,6 +296,10 @@ public final class Retrofront: @unchecked Sendable {
     rf_frontend_clear_overlay_touches(handle)
   }
 
+  public func consumeOverlayMenuToggle() -> Bool {
+    rf_frontend_consume_overlay_menu_toggle(handle)
+  }
+
   public func overlayInfo() -> OverlayInfo? {
     var raw = RfOverlayInfo()
     guard rf_frontend_overlay_info(handle, &raw) else { return nil }
