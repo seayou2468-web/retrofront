@@ -21,6 +21,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
   @Published private(set) var settings: [RetrofrontSetting] = []
   @Published private(set) var pendingCoreChoices: [CoreInfo] = []
   @Published private(set) var pendingContentURL: URL?
+  @Published private(set) var launchToken: UInt = 0
   @Published var statusMessage = "Ready"
 
   private var frontend: Retrofront?
@@ -48,13 +49,17 @@ public final class EmulatorRuntimeModel: ObservableObject {
       let root = retroArchRoot
       try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
       let configPath = root.appendingPathComponent("config/retroarch.cfg").path
+      let downloads = root.appendingPathComponent("downloads", isDirectory: true)
+      try FileManager.default.createDirectory(at: downloads, withIntermediateDirectories: true)
       try? frontend.setBaseDirectory(root.path)
       applyBundleCoreDirectories(frontend)
       try? frontend.loadSettings(at: configPath)
       applyBundleCoreDirectories(frontend)
-      try? frontend.setSetting(key: "content_directory", value: root.path)
-      try? frontend.setSetting(key: "core_assets_directory", value: root.appendingPathComponent("downloads").path)
+      try? frontend.setSetting(key: "content_directory", value: downloads.path)
+      try? frontend.setSetting(key: "menu_content_directory", value: downloads.path)
+      try? frontend.setSetting(key: "core_assets_directory", value: downloads.path)
       try? frontend.setGfxBackend(.bgfx)
+      applyVideoSettings(frontend)
       loadConfiguredOverlay(frontend)
       frontend.saveSettings()
       refresh()
@@ -91,11 +96,19 @@ public final class EmulatorRuntimeModel: ObservableObject {
 
   public func refreshGames() {
     guard let frontend else { return }
-    let contentDir = URL(fileURLWithPath: frontend.setting("content_directory") ?? retroArchRoot.path)
+    refreshAvailableCores()
+    let contentDir = URL(fileURLWithPath: frontend.setting("content_directory") ?? retroArchRoot.appendingPathComponent("downloads").path)
     try? FileManager.default.createDirectory(at: contentDir, withIntermediateDirectories: true)
     let exts = frontend.allSupportedExtensions().joined(separator: "|")
     frontend.scanGames(in: contentDir.path, extensions: exts)
     availableGames = frontend.availableGames()
+  }
+
+  public func rescanLibrary() {
+    refreshAvailableCores()
+    refreshGames()
+    refresh()
+    statusMessage = "Library refreshed"
   }
 
   public func importFile(at url: URL) {
@@ -104,7 +117,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
 
   public func importGame(at url: URL) {
     guard let frontend else { return }
-    let destinationDir = URL(fileURLWithPath: frontend.setting("core_assets_directory") ?? retroArchRoot.appendingPathComponent("downloads").path)
+    let destinationDir = URL(fileURLWithPath: frontend.setting("content_directory") ?? retroArchRoot.appendingPathComponent("downloads").path)
     try? FileManager.default.createDirectory(at: destinationDir, withIntermediateDirectories: true)
     let destination = destinationDir.appendingPathComponent(url.lastPathComponent)
     let success = url.startAccessingSecurityScopedResource()
@@ -114,7 +127,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
         try FileManager.default.removeItem(at: destination)
       }
       try FileManager.default.copyItem(at: url, to: destination)
-      statusMessage = "Imported \(url.lastPathComponent) to downloads"
+      statusMessage = "Imported \(url.lastPathComponent)"
       refreshGames()
     } catch {
       statusMessage = "Import failed: \(error)"
@@ -153,6 +166,12 @@ public final class EmulatorRuntimeModel: ObservableObject {
 
   public func loadGame(at url: URL) {
     guard let frontend else { return }
+    refreshAvailableCores()
+    guard FileManager.default.fileExists(atPath: url.path) else {
+      statusMessage = "Game file missing: \(url.lastPathComponent)"
+      refreshGames()
+      return
+    }
     guard let plan = frontend.planContentLaunch(path: url.path) else {
       statusMessage = "Could not create launch plan"
       return
@@ -190,6 +209,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
       systemInfo = try? frontend.systemInfo()
       corePath = preferredCore ?? frontend.planContentLaunch(path: url.path)?.selectedCorePath
       refresh()
+      launchToken &+= 1
       statusMessage = "Loaded game: \(url.lastPathComponent)"
     } catch {
       statusMessage = "Game load failed: \(error)"
@@ -212,11 +232,29 @@ public final class EmulatorRuntimeModel: ObservableObject {
   }
 
   private func loadConfiguredOverlay(_ frontend: Retrofront) {
+    let enabled = frontend.setting("input_overlay_enable") != "false"
     if let path = frontend.setting("input_overlay"), FileManager.default.fileExists(atPath: path) {
       try? frontend.loadOverlay(at: path)
-      frontend.setOverlayEnabled(true)
     }
+    frontend.setOverlayEnabled(enabled)
     overlayInfo = frontend.overlayInfo()
+  }
+
+  private func applyVideoSettings(_ frontend: Retrofront) {
+    var config = frontend.gfxVideoConfig() ?? GfxVideoConfig(baseWidth: 0, baseHeight: 0)
+    config = GfxVideoConfig(
+      baseWidth: config.baseWidth,
+      baseHeight: config.baseHeight,
+      maxWidth: config.maxWidth,
+      maxHeight: config.maxHeight,
+      aspectRatio: config.aspectRatio,
+      outputWidth: config.outputWidth,
+      outputHeight: config.outputHeight,
+      scaleMode: scaleModeFromSetting(frontend.setting("video_scale_mode")),
+      filterMode: filterModeFromSetting(frontend.setting("video_filter_mode")),
+      rotationQuarters: config.rotationQuarters,
+      vsync: frontend.setting("video_vsync") != "false")
+    try? frontend.setGfxVideoConfig(config)
   }
 
   public func toggleRunning() { isRunning ? stop() : play() }
@@ -289,6 +327,105 @@ public final class EmulatorRuntimeModel: ObservableObject {
 
   public func menuPop() {
     if frontend?.menuPop() == true { refreshMenu() }
+  }
+
+  public func settingValue(_ key: String) -> String {
+    frontend?.setting(key) ?? settings.first(where: { $0.key == key })?.value ?? ""
+  }
+
+  public var overlayEnabledSetting: Bool {
+    settingValue("input_overlay_enable") != "false"
+  }
+
+  public var overlayOpacityLabel: String {
+    let value = settingValue("input_overlay_opacity")
+    return value.isEmpty ? "70%" : "\(Int((Double(value) ?? 0.70) * 100))%"
+  }
+
+  public var videoScaleModeLabel: String {
+    switch settingValue("video_scale_mode") {
+    case "integer": return "Integer"
+    case "stretch": return "Stretch"
+    default: return "Aspect"
+    }
+  }
+
+  public var videoFilterLabel: String {
+    settingValue("video_filter_mode") == "linear" ? "Linear" : "Nearest"
+  }
+
+  public var vsyncEnabled: Bool {
+    settingValue("video_vsync") != "false"
+  }
+
+  public func setOverlayEnabledSetting(_ enabled: Bool) {
+    setSetting(key: "input_overlay_enable", value: enabled ? "true" : "false")
+    frontend?.setOverlayEnabled(enabled)
+    refresh()
+    statusMessage = enabled ? "Touch overlay enabled" : "Touch overlay disabled"
+  }
+
+  public func cycleOverlayOpacity() {
+    let values = ["0.45", "0.70", "0.90"]
+    cycleSetting(key: "input_overlay_opacity", values: values)
+    if let frontend { loadConfiguredOverlay(frontend) }
+    statusMessage = "Overlay opacity: \(overlayOpacityLabel)"
+  }
+
+  public func cycleVideoScaleMode() {
+    let values = ["keep_aspect", "integer", "stretch"]
+    cycleSetting(key: "video_scale_mode", values: values)
+    if let frontend { applyVideoSettings(frontend) }
+    refresh()
+    statusMessage = "Video scale: \(videoScaleModeLabel)"
+  }
+
+  public func toggleVideoFilter() {
+    setSetting(key: "video_filter_mode", value: settingValue("video_filter_mode") == "linear" ? "nearest" : "linear")
+    if let frontend { applyVideoSettings(frontend) }
+    refresh()
+    statusMessage = "Video filter: \(videoFilterLabel)"
+  }
+
+  public func setVsyncEnabled(_ enabled: Bool) {
+    setSetting(key: "video_vsync", value: enabled ? "true" : "false")
+    if let frontend { applyVideoSettings(frontend) }
+    refresh()
+    statusMessage = enabled ? "VSync enabled" : "VSync disabled"
+  }
+
+  public func setSetting(key: String, value: String) {
+    guard let frontend else { return }
+    do {
+      try frontend.setSetting(key: key, value: value)
+      frontend.saveSettings()
+      refresh()
+    } catch {
+      statusMessage = "Setting failed: \(error)"
+    }
+  }
+
+  private func cycleSetting(key: String, values: [String]) {
+    let current = settingValue(key)
+    let next: String
+    if let index = values.firstIndex(of: current) {
+      next = values[(index + 1) % values.count]
+    } else {
+      next = values.first ?? current
+    }
+    setSetting(key: key, value: next)
+  }
+
+  private func scaleModeFromSetting(_ value: String?) -> GfxScaleMode {
+    switch value {
+    case "integer": return .integer
+    case "stretch": return .stretch
+    default: return .keepAspect
+    }
+  }
+
+  private func filterModeFromSetting(_ value: String?) -> GfxFilterMode {
+    value == "linear" ? .linear : .nearest
   }
 
   public func setOption(key: String, value: String) {
