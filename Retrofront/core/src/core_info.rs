@@ -213,9 +213,7 @@ impl CoreInfoList {
             let path = entry.path();
             if path.is_dir() {
                 if Self::is_framework_dir(&path) {
-                    if let Some(binary) = Self::framework_binary_path(&path) {
-                        paths.push(binary);
-                    }
+                    paths.push(path);
                 } else {
                     Self::collect_core_paths(&path, paths, depth + 1);
                 }
@@ -229,12 +227,6 @@ impl CoreInfoList {
         path.extension()
             .and_then(|ext| ext.to_str())
             .is_some_and(|ext| ext.eq_ignore_ascii_case("framework"))
-    }
-
-    fn framework_binary_path(path: &Path) -> Option<PathBuf> {
-        let stem = path.file_stem()?.to_str()?;
-        let binary = path.join(stem);
-        binary.is_file().then_some(binary)
     }
 
     fn is_libretro_library(path: &Path) -> bool {
@@ -426,6 +418,10 @@ impl CoreInfoList {
         if let Some(core_name) = name.strip_suffix("_libretro") {
             Self::push_unique(candidates, core_name.to_string());
         }
+
+        if let Some(core_name) = name.strip_suffix(".libretro") {
+            Self::push_unique(candidates, core_name.to_string());
+        }
     }
 
     fn parse_info_file(content: &str) -> HashMap<String, String> {
@@ -502,7 +498,7 @@ mod tests {
         list.scan_directory(&dir);
 
         assert_eq!(list.cores.len(), 1);
-        assert_eq!(list.cores[0].path, framework.join("mgba_libretro_ios"));
+        assert_eq!(list.cores[0].path, framework);
         assert!(list.cores[0].supported_extensions.is_empty());
         let _ = fs::remove_dir_all(dir);
     }
@@ -521,6 +517,14 @@ mod tests {
         assert!(candidates.contains(&"mgba_libretro_ios".to_string()));
         assert!(candidates.contains(&"mgba_libretro".to_string()));
         assert!(candidates.contains(&"mgba".to_string()));
+    }
+
+    #[test]
+    fn derives_retroarch_info_candidates_for_framework_names() {
+        let candidates =
+            CoreInfoList::info_name_candidates(Path::new("/cores/azahar.libretro.framework"));
+        assert!(candidates.contains(&"azahar.libretro".to_string()));
+        assert!(candidates.contains(&"azahar".to_string()));
     }
 
     #[test]

@@ -45,14 +45,26 @@ targets:
           set -eu
           CORES_SRC="${SRCROOT}/cores"
           CORES_DST="${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks"
+
+          sign_core() {
+            if [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
+              codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" --preserve-metadata=identifier,entitlements "$1"
+            fi
+          }
+
           mkdir -p "${CORES_DST}"
           if [ -d "${CORES_SRC}" ]; then
             find "${CORES_SRC}" -maxdepth 1 -type f -name '*.dylib' -print | while IFS= read -r core; do
               destination="${CORES_DST}/$(basename "${core}")"
               cp -f "${core}" "${destination}"
-              if [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
-                codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" --preserve-metadata=identifier,entitlements "${destination}"
-              fi
+              sign_core "${destination}"
+            done
+
+            find "${CORES_SRC}" -maxdepth 1 -type d -name '*.framework' -print | while IFS= read -r core; do
+              destination="${CORES_DST}/$(basename "${core}")"
+              rm -rf "${destination}"
+              ditto "${core}" "${destination}"
+              sign_core "${destination}"
             done
           fi
     settings:

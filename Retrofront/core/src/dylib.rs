@@ -43,13 +43,13 @@ impl<T: Copy> Symbol<T> {
 impl Library {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, String> {
         let path = path.as_ref();
-        let c_path = CString::new(path.as_os_str().to_string_lossy().as_bytes())
-            .map_err(|_| format!("path contains an interior NUL: {}", path.display()))?;
+        let load_path = library_load_path(path);
+        let c_path = CString::new(load_path.as_os_str().to_string_lossy().as_bytes())
+            .map_err(|_| format!("path contains an interior NUL: {}", load_path.display()))?;
         let handle = unsafe { dlopen(c_path.as_ptr(), RTLD_NOW) };
         if handle.is_null() {
-            return Err(
-                last_dl_error().unwrap_or_else(|| format!("failed to open {}", path.display()))
-            );
+            return Err(last_dl_error()
+                .unwrap_or_else(|| format!("failed to open {}", load_path.display())));
         }
         Ok(Self {
             handle,
@@ -85,6 +85,26 @@ impl Drop for Library {
     }
 }
 
+fn library_load_path(path: &Path) -> PathBuf {
+    if is_framework_dir(path) {
+        if let Some(binary_path) = framework_binary_path(path) {
+            return binary_path;
+        }
+    }
+    path.to_path_buf()
+}
+
+fn is_framework_dir(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("framework"))
+}
+
+fn framework_binary_path(path: &Path) -> Option<PathBuf> {
+    let stem = path.file_stem()?.to_str()?;
+    Some(path.join(stem))
+}
+
 fn last_dl_error() -> Option<String> {
     let err = unsafe { dlerror() };
     if err.is_null() {
@@ -95,5 +115,34 @@ fn last_dl_error() -> Option<String> {
                 .to_string_lossy()
                 .into_owned(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolves_framework_bundle_to_inner_binary() {
+        assert_eq!(
+            library_load_path(Path::new("/cores/mgba_libretro_ios.framework")),
+            PathBuf::from("/cores/mgba_libretro_ios.framework/mgba_libretro_ios")
+        );
+    }
+
+    #[test]
+    fn resolves_dotted_framework_bundle_to_dotted_inner_binary() {
+        assert_eq!(
+            library_load_path(Path::new("/cores/azahar.libretro.framework")),
+            PathBuf::from("/cores/azahar.libretro.framework/azahar.libretro")
+        );
+    }
+
+    #[test]
+    fn leaves_plain_dynamic_library_paths_unchanged() {
+        assert_eq!(
+            library_load_path(Path::new("/cores/mgba_libretro_ios.dylib")),
+            PathBuf::from("/cores/mgba_libretro_ios.dylib")
+        );
     }
 }
