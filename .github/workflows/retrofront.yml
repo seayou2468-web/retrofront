@@ -125,7 +125,7 @@ jobs:
         working-directory: Retrofront
         shell: bash
         run: |
-          test -f cores/mgba_libretro_ios.dylib
+          test -f archifacts/ios/mgba_libretro_ios.dylib
 
       - name: Build app for generic iOS device
         working-directory: Retrofront
