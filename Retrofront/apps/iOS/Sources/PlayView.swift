@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import RetrofrontSwift
 
 struct PlayView: View {
     @EnvironmentObject private var runtime: EmulatorRuntimeModel
