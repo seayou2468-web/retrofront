@@ -87,34 +87,12 @@ jobs:
         shell: bash
         run: |
           find .build -type f -executable
-
-      - name: Package Linux build
-        working-directory: Retrofront
-        shell: bash
-        run: |
-          APP=$(find .build/release -type f -executable | head -n 1)
-
-          if [ -z "$APP" ]; then
-            echo "No executable found"
-            exit 1
-          fi
-
-          echo "Found executable:"
-          echo "$APP"
-
-          test -f dist/Retrofront-x86_64.AppImage
-          tar -czf retrofront-linux.tar.gz -C dist Retrofront.AppDir Retrofront-x86_64.AppImage
-
-          ls -lah retrofront-linux.tar.gz dist/Retrofront-x86_64.AppImage
-
-      - name: Upload Linux artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Retrofront-Linux-AppImage
-          path: |
-            Retrofront/dist/Retrofront-x86_64.AppImage
-            Retrofront/retrofront-linux.tar.gz
-          if-no-files-found: error
+          
+          - name: Upload Linux artifact
+            uses: actions/upload-artifact@v4
+            with:
+            name: Retrofront-Linux-AppImage
+            path: Retrofront/dist/Retrofront-x86_64.AppImage
 
   ios-device:
     name: iOS Device Build
