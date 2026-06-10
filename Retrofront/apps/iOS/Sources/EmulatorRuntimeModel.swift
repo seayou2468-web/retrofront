@@ -241,10 +241,50 @@ public final class EmulatorRuntimeModel: ObservableObject {
     return files
   }
 
+  private func installFrontendAssetPackagesAsync(
+  _ frontend: Retrofront,
+  packageURL: (FrontendAssetPackage) async throws -> URL?
+) async throws -> Int {
+
+  var files = 0
+  var missing: [String] = []
+
+  for package in FrontendAssetPackage.bundled {
+    guard let url = try await packageURL(package) else {
+      missing.append("\(package.name).zip")
+      continue
+    }
+
+    let destination = storageLayout[keyPath: package.destination]
+
+    try FileManager.default.createDirectory(
+      at: destination,
+      withIntermediateDirectories: true
+    )
+
+    let report = try frontend.installAssetsZip(
+      from: url.path,
+      to: destination.path
+    )
+
+    files += report.filesWritten
+  }
+
+  if files == 0, !missing.isEmpty {
+    throw RetrofrontError.operationFailed(
+      "Missing bundled asset archives: \(missing.joined(separator: ", "))"
+    )
+  }
+
+  return files
+}
+
+  
+
   private func downloadAndInstallFrontendAssets(_ frontend: Retrofront) async throws -> Int {
     let cache = storageLayout.cacheDirectory.appendingPathComponent("frontend-assets", isDirectory: true)
     try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
-    return try installFrontendAssetPackages(frontend) { package in
+    return try await installFrontendAssetPackagesAsync(frontend) { package in
       let url = URL(string: "https://buildbot.libretro.com/assets/frontend/\(package.name).zip")!
       let destination = cache.appendingPathComponent("\(package.name).zip")
       let (downloaded, response) = try await URLSession.shared.download(from: url)
