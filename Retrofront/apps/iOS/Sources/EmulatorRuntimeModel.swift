@@ -10,6 +10,17 @@ public struct OverlayChoice: Identifiable, Equatable, Sendable {
   public let label: String
 }
 
+private struct FrontendAssetPackage {
+  let name: String
+  let destination: KeyPath<RetroArchStorageLayout, URL>
+
+  static let bundled: [FrontendAssetPackage] = [
+    FrontendAssetPackage(name: "assets", destination: \.assetsDirectory),
+    FrontendAssetPackage(name: "info", destination: \.infoDirectory),
+    FrontendAssetPackage(name: "overlays", destination: \.overlaysDirectory),
+  ]
+}
+
 @MainActor
 public final class EmulatorRuntimeModel: ObservableObject {
   @Published private(set) var frontendState: FrontendState = .empty
@@ -179,20 +190,72 @@ public final class EmulatorRuntimeModel: ObservableObject {
   }
 
   private func installBundledAssets(_ frontend: Retrofront, updateStatus: Bool) {
-    guard let zipURL = Bundle.main.url(forResource: "assets", withExtension: "zip") else {
-      if updateStatus { statusMessage = "assets.zip was not found in the app bundle" }
-      return
-    }
-    let installRoot = storageLayout.root
     do {
-      let report = try frontend.installAssetsZip(from: zipURL.path, to: installRoot.path)
+      let files = try installFrontendAssetPackages(frontend, packageURL: { package in
+        Bundle.main.url(forResource: package.name, withExtension: "zip")
+      })
       applyBundleCoreDirectories(frontend)
       refreshOverlayChoices()
       loadConfiguredOverlay(frontend)
       refresh()
-      if updateStatus { statusMessage = "Installed assets: \(report.filesWritten) files" }
+      if updateStatus { statusMessage = "Installed bundled frontend assets: \(files) files" }
     } catch {
       if updateStatus { statusMessage = "Assets install failed: \(error)" }
+    }
+  }
+
+  public func updateFrontendAssetsFromBuildbot() {
+    guard let frontend else { return }
+    statusMessage = "Downloading latest RetroArch frontend assets…"
+    Task { [weak self] in
+      guard let self else { return }
+      do {
+        let files = try await self.downloadAndInstallFrontendAssets(frontend)
+        self.applyBundleCoreDirectories(frontend)
+        self.refreshOverlayChoices()
+        self.loadConfiguredOverlay(frontend)
+        self.refresh()
+        self.statusMessage = "Updated frontend assets: \(files) files"
+      } catch {
+        self.statusMessage = "Asset update failed: \(error)"
+      }
+    }
+  }
+
+  private func installFrontendAssetPackages(_ frontend: Retrofront, packageURL: (FrontendAssetPackage) throws -> URL?) throws -> Int {
+    var files = 0
+    var missing: [String] = []
+    for package in FrontendAssetPackage.bundled {
+      guard let url = try packageURL(package) else {
+        missing.append("\(package.name).zip")
+        continue
+      }
+      let destination = storageLayout[keyPath: package.destination]
+      try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+      let report = try frontend.installAssetsZip(from: url.path, to: destination.path)
+      files += report.filesWritten
+    }
+    if files == 0, !missing.isEmpty {
+      throw RetrofrontError.operationFailed("Missing bundled asset archives: \(missing.joined(separator: ", "))")
+    }
+    return files
+  }
+
+  private func downloadAndInstallFrontendAssets(_ frontend: Retrofront) async throws -> Int {
+    let cache = storageLayout.cacheDirectory.appendingPathComponent("frontend-assets", isDirectory: true)
+    try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+    return try installFrontendAssetPackages(frontend) { package in
+      let url = URL(string: "https://buildbot.libretro.com/assets/frontend/\(package.name).zip")!
+      let destination = cache.appendingPathComponent("\(package.name).zip")
+      let (downloaded, response) = try await URLSession.shared.download(from: url)
+      if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+        throw RetrofrontError.operationFailed("Download failed for \(package.name).zip: HTTP \(http.statusCode)")
+      }
+      if FileManager.default.fileExists(atPath: destination.path) {
+        try FileManager.default.removeItem(at: destination)
+      }
+      try FileManager.default.moveItem(at: downloaded, to: destination)
+      return destination
     }
   }
 
@@ -315,12 +378,14 @@ public final class EmulatorRuntimeModel: ObservableObject {
     for case let url as URL in enumerator where url.pathExtension.lowercased() == "cfg" {
       let relative = url.path.replacingOccurrences(of: overlayDir.path + "/", with: "")
       let isGamepad = relative.contains("gamepads/")
-      let label = relative.replacingOccurrences(of: ".cfg", with: "")
-      choices.append(OverlayChoice(id: url.path, path: url.path, label: isGamepad ? label : "Other / \(label)"))
+      let fileLabel = url.deletingPathExtension().lastPathComponent
+        .replacingOccurrences(of: "_", with: " ")
+        .replacingOccurrences(of: "-", with: " ")
+      choices.append(OverlayChoice(id: url.path, path: url.path, label: isGamepad ? fileLabel : "Other: \(fileLabel)"))
     }
     availableOverlays = choices.sorted { left, right in
-      let leftGamepad = left.label.hasPrefix("gamepads/")
-      let rightGamepad = right.label.hasPrefix("gamepads/")
+      let leftGamepad = !left.label.hasPrefix("Other:")
+      let rightGamepad = !right.label.hasPrefix("Other:")
       if leftGamepad != rightGamepad { return leftGamepad }
       return left.label.localizedStandardCompare(right.label) == .orderedAscending
     }
@@ -595,6 +660,8 @@ public final class EmulatorRuntimeModel: ObservableObject {
     let current = settingValue("input_overlay")
     if let match = availableOverlays.first(where: { $0.path == current }) { return match.label }
     return current.isEmpty ? "Not selected" : URL(fileURLWithPath: current).deletingPathExtension().lastPathComponent
+      .replacingOccurrences(of: "_", with: " ")
+      .replacingOccurrences(of: "-", with: " ")
   }
 
   public var videoScaleModeLabel: String {

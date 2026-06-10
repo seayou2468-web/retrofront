@@ -30,7 +30,7 @@ pub fn install_assets_zip(
         if is_macos_metadata_path(&safe_name) {
             continue;
         }
-        let out_path = destination_dir.join(normalize_assets_zip_path(&safe_name));
+        let out_path = destination_dir.join(normalize_frontend_asset_zip_path(&safe_name));
         if entry.is_dir() || entry.name().ends_with('/') {
             if out_path.is_file() {
                 fs::remove_file(&out_path).map_err(|e| format!("replace {:?}: {e}", out_path))?;
@@ -52,18 +52,22 @@ pub fn install_assets_zip(
     Ok(report)
 }
 
-fn normalize_assets_zip_path(path: &Path) -> PathBuf {
+fn normalize_frontend_asset_zip_path(path: &Path) -> PathBuf {
     let mut components = path.components();
-    let mut stripped = false;
-    while matches!(components.clone().next(), Some(Component::Normal(part)) if part == "assets") {
+    let Some(Component::Normal(first)) = components.clone().next() else {
+        return path.to_path_buf();
+    };
+    if first == "assets" {
+        while matches!(components.clone().next(), Some(Component::Normal(part)) if part == "assets") {
+            components.next();
+        }
+        return components.as_path().to_path_buf();
+    }
+    if first == "info" || first == "overlays" {
         components.next();
-        stripped = true;
+        return components.as_path().to_path_buf();
     }
-    if stripped {
-        components.as_path().to_path_buf()
-    } else {
-        path.to_path_buf()
-    }
+    path.to_path_buf()
 }
 
 fn is_macos_metadata_path(path: &Path) -> bool {
@@ -105,18 +109,26 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_retroarch_assets_zip_root() {
+    fn normalizes_retroarch_frontend_asset_zip_roots() {
         assert_eq!(
-            normalize_assets_zip_path(Path::new("assets/info/mgba_libretro.info")),
+            normalize_frontend_asset_zip_path(Path::new("assets/info/mgba_libretro.info")),
             PathBuf::from("info/mgba_libretro.info")
         );
         assert_eq!(
-            normalize_assets_zip_path(Path::new("assets/assets/info/azahar_libretro.info")),
+            normalize_frontend_asset_zip_path(Path::new("assets/assets/info/azahar_libretro.info")),
             PathBuf::from("info/azahar_libretro.info")
         );
         assert_eq!(
-            normalize_assets_zip_path(Path::new("overlays/gamepads/flat/retropad.cfg")),
-            PathBuf::from("overlays/gamepads/flat/retropad.cfg")
+            normalize_frontend_asset_zip_path(Path::new("info/mgba_libretro.info")),
+            PathBuf::from("mgba_libretro.info")
+        );
+        assert_eq!(
+            normalize_frontend_asset_zip_path(Path::new("overlays/gamepads/flat/retropad.cfg")),
+            PathBuf::from("gamepads/flat/retropad.cfg")
+        );
+        assert_eq!(
+            normalize_frontend_asset_zip_path(Path::new("xmb/monochrome/font.ttf")),
+            PathBuf::from("xmb/monochrome/font.ttf")
         );
         assert!(is_macos_metadata_path(Path::new(
             "__MACOSX/assets/info/._mgba_libretro.info"

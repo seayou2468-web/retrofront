@@ -107,6 +107,18 @@ struct SettingsView: View {
                         .clipShape(RoundedRectangle(cornerRadius: OneUI.compactRadius, style: .continuous))
                 }
                 .buttonStyle(.plain)
+                Button {
+                    runtime.updateFrontendAssetsFromBuildbot()
+                } label: {
+                    Label("Update latest frontend assets", systemImage: "arrow.clockwise")
+                        .font(.subheadline.bold())
+                        .foregroundColor(OneUI.accent)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        .background(OneUI.elevated)
+                        .clipShape(RoundedRectangle(cornerRadius: OneUI.compactRadius, style: .continuous))
+                }
+                .buttonStyle(.plain)
             }
         }
     }

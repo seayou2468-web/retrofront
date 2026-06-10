@@ -17,7 +17,7 @@ final class RetrofrontTests: XCTestCase {
   func testRetroArchStyleSettingsAreExposed() throws {
     let frontend = try Retrofront()
     try frontend.setBaseDirectory("/tmp/RetrofrontTests")
-    XCTAssertEqual(frontend.setting("libretro_directory"), "/tmp/RetrofrontTests/Cores")
+    XCTAssertEqual(frontend.setting("libretro_directory"), "/tmp/RetrofrontTests/cores")
     XCTAssertTrue(frontend.settings().contains { $0.key == "core_options_path" })
   }
 

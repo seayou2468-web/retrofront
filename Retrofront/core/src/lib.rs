@@ -3144,11 +3144,11 @@ pub unsafe extern "C" fn rf_frontend_set_base_dir(
         core.settings.set_base_dir(&base_dir);
         core.settings.set(
             "libretro_directory",
-            &base_dir.join("Cores").to_string_lossy(),
+            &base_dir.join("cores").to_string_lossy(),
         );
         core.settings.set(
             "libretro_info_path",
-            &base_dir.join("info").to_string_lossy(),
+            &base_dir.join("cores").to_string_lossy(),
         );
         core.settings.set(
             "core_options_path",

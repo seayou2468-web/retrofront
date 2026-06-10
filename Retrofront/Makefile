@@ -1,4 +1,4 @@
-.PHONY: all rust swift test clean linux-ui ios-rust xcodegen ios-device-build ios-info
+.PHONY: all rust swift test clean linux-ui linux-appimage frontend-assets ios-rust xcodegen ios-device-build ios-info
 
 all: rust swift
 
@@ -13,7 +13,13 @@ test: rust
 	swift test
 
 linux-ui: rust
-	swift build --product retrofront-linux-ui
+	swift build -c release --product retrofront-linux-ui
+
+linux-appimage: frontend-assets
+	./scripts/build-linux-appimage.sh
+
+frontend-assets:
+	./scripts/fetch-frontend-assets.sh apps/iOS/Resources
 
 ios-rust:
 	./scripts/build-rust-ios.sh

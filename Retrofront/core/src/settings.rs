@@ -187,7 +187,7 @@ impl Settings {
     fn apply_retroarch_defaults(&mut self, base_dir: &Path) {
         let defaults = [
             ("libretro_directory", base_dir.join("cores")),
-            ("libretro_info_path", base_dir.join("info")),
+            ("libretro_info_path", base_dir.join("cores")),
             (
                 "core_options_path",
                 base_dir.join("retroarch-core-options.cfg"),
@@ -436,7 +436,7 @@ mod tests {
         );
         assert_eq!(
             settings.libretro_info_path(),
-            PathBuf::from("/tmp/Retrofront/info")
+            PathBuf::from("/tmp/Retrofront/cores")
         );
     }
 }
