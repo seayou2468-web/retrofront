@@ -117,7 +117,7 @@ impl Settings {
 
     pub fn libretro_info_path(&self) -> PathBuf {
         self.path_value("libretro_info_path")
-            .unwrap_or_else(|| self.menu_assets_directory().join("info"))
+            .unwrap_or_else(|| self.base_dir.join("info"))
     }
 
     pub fn libretro_directory(&self) -> PathBuf {
@@ -186,8 +186,8 @@ impl Settings {
 
     fn apply_retroarch_defaults(&mut self, base_dir: &Path) {
         let defaults = [
-            ("libretro_directory", base_dir.join("Cores")),
-            ("libretro_info_path", base_dir.join("assets/info")),
+            ("libretro_directory", base_dir.join("cores")),
+            ("libretro_info_path", base_dir.join("info")),
             (
                 "core_options_path",
                 base_dir.join("retroarch-core-options.cfg"),
@@ -228,10 +228,10 @@ impl Settings {
             ("input_remapping_directory", base_dir.join("remaps")),
             ("cheat_database_path", base_dir.join("cht")),
             ("content_database_path", base_dir.join("database/rdb")),
-            ("overlay_directory", base_dir.join("assets/overlays")),
+            ("overlay_directory", base_dir.join("overlays")),
             (
                 "input_overlay",
-                base_dir.join("assets/overlays/gamepads/flat/retropad.cfg"),
+                base_dir.join("overlays/gamepads/flat/retropad.cfg"),
             ),
             ("joypad_autoconfig_dir", base_dir.join("autoconfig")),
             ("video_shader_dir", base_dir.join("shaders")),
@@ -418,7 +418,7 @@ mod tests {
         settings.set_base_dir(Path::new("/tmp/RetrofrontB"));
         assert_eq!(
             settings.libretro_directory(),
-            PathBuf::from("/tmp/RetrofrontB/Cores")
+            PathBuf::from("/tmp/RetrofrontB/cores")
         );
     }
 
@@ -428,7 +428,7 @@ mod tests {
         settings.set_base_dir(Path::new("/tmp/Retrofront"));
         assert_eq!(
             settings.libretro_directory(),
-            PathBuf::from("/tmp/Retrofront/Cores")
+            PathBuf::from("/tmp/Retrofront/cores")
         );
         assert_eq!(
             settings.system_directory(),
@@ -436,7 +436,7 @@ mod tests {
         );
         assert_eq!(
             settings.libretro_info_path(),
-            PathBuf::from("/tmp/Retrofront/assets/info")
+            PathBuf::from("/tmp/Retrofront/info")
         );
     }
 }

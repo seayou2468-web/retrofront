@@ -96,6 +96,7 @@ type RetroSetAudioSample = unsafe extern "C" fn(libretro::retro_audio_sample_t);
 type RetroSetAudioSampleBatch = unsafe extern "C" fn(libretro::retro_audio_sample_batch_t);
 type RetroSetInputPoll = unsafe extern "C" fn(libretro::retro_input_poll_t);
 type RetroSetInputState = unsafe extern "C" fn(libretro::retro_input_state_t);
+type RetroSetControllerPortDevice = unsafe extern "C" fn(c_uint, c_uint);
 type RetroInit = unsafe extern "C" fn();
 type RetroDeinit = unsafe extern "C" fn();
 type RetroApiVersion = unsafe extern "C" fn() -> c_uint;
@@ -174,6 +175,7 @@ struct CoreApi {
     retro_set_audio_sample_batch: RetroSetAudioSampleBatch,
     retro_set_input_poll: RetroSetInputPoll,
     retro_set_input_state: RetroSetInputState,
+    retro_set_controller_port_device: RetroSetControllerPortDevice,
     retro_init: RetroInit,
     retro_deinit: RetroDeinit,
     #[allow(dead_code)]
@@ -207,6 +209,11 @@ impl CoreApi {
             ),
             retro_set_input_poll: sym!(lib, "retro_set_input_poll", RetroSetInputPoll),
             retro_set_input_state: sym!(lib, "retro_set_input_state", RetroSetInputState),
+            retro_set_controller_port_device: sym!(
+                lib,
+                "retro_set_controller_port_device",
+                RetroSetControllerPortDevice
+            ),
             retro_init: sym!(lib, "retro_init", RetroInit),
             retro_deinit: sym!(lib, "retro_deinit", RetroDeinit),
             retro_api_version: sym!(lib, "retro_api_version", RetroApiVersion),
@@ -232,6 +239,7 @@ pub struct FrontendCore {
     game: Option<GameInfo>,
     current_core_path: Option<PathBuf>,
     game_info_ext: Option<libretro::retro_game_info_ext>,
+    game_data: Option<Vec<u8>>,
     env_strings: HashMap<String, CString>,
     events: VecDeque<FrontendEvent>,
     joypad_buttons: [i16; 16],
@@ -611,6 +619,7 @@ impl FrontendCore {
             game: None,
             current_core_path: None,
             game_info_ext: None,
+            game_data: None,
             env_strings: HashMap::new(),
             events: VecDeque::new(),
             joypad_buttons: [0; 16],
@@ -726,6 +735,7 @@ impl FrontendCore {
             (api.retro_set_audio_sample_batch)(Some(Self::retro_audio_sample_batch_callback));
             (api.retro_set_input_poll)(Some(Self::retro_input_poll_callback));
             (api.retro_set_input_state)(Some(Self::retro_input_state_callback));
+            (api.retro_set_controller_port_device)(0, libretro::RETRO_DEVICE_JOYPAD);
             (api.retro_init)();
         }
 
@@ -771,9 +781,10 @@ impl FrontendCore {
         path: impl AsRef<Path>,
         meta: Option<String>,
     ) -> Result<(), String> {
-        let path_buf = path.as_ref().to_path_buf();
+        let original_path = path.as_ref().to_path_buf();
 
         self.unload_game();
+        self.game_data = None;
 
         let (retro_load_game, retro_get_system_av_info) = {
             let Some(api) = self.api.as_ref() else {
@@ -782,17 +793,43 @@ impl FrontendCore {
             (api.retro_load_game, api.retro_get_system_av_info)
         };
 
+        let path_buf = self.prepare_content_path_for_core(&original_path)?;
+        let need_fullpath = self
+            .system_info
+            .as_ref()
+            .map(|info| info.need_fullpath)
+            .unwrap_or(true);
+
+        if !need_fullpath {
+            match fs::read(&path_buf) {
+                Ok(data) => self.game_data = Some(data),
+                Err(error) => {
+                    self.game_data = None;
+                    self.last_error = Some(format!(
+                        "failed to read content into memory {}: {error}",
+                        path_buf.display()
+                    ));
+                    return Err(self.last_error.clone().unwrap_or_default());
+                }
+            }
+        }
+
         self.prepare_game_info_ext(&path_buf, meta.as_deref());
         let path_ptr = self.env_path_ptr("game_info_path", path_buf.clone());
         let meta_ptr = meta
             .as_ref()
             .map(|meta| self.env_string_ptr("game_info_meta", meta.clone()))
             .unwrap_or(ptr::null());
+        let (data_ptr, data_size) = self
+            .game_data
+            .as_ref()
+            .map(|data| (data.as_ptr().cast::<c_void>(), data.len()))
+            .unwrap_or((ptr::null(), 0));
 
         let game_info = libretro::retro_game_info {
             path: path_ptr,
-            data: ptr::null(),
-            size: 0,
+            data: data_ptr,
+            size: data_size,
             meta: meta_ptr,
         };
 
@@ -822,8 +859,98 @@ impl FrontendCore {
             Ok(())
         } else {
             self.game_info_ext = None;
-            Err("core failed to load game".to_string())
+            self.game_data = None;
+            let core_name = self
+                .system_info
+                .as_ref()
+                .map(|info| info.library_name.as_str())
+                .unwrap_or("core");
+            Err(format!(
+                "core failed to load game: {core_name} rejected {}",
+                path_buf.display()
+            ))
         }
+    }
+
+    fn prepare_content_path_for_core(&self, path: &Path) -> Result<PathBuf, String> {
+        if !path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"))
+        {
+            return Ok(path.to_path_buf());
+        }
+
+        let Some(info) = self.system_info.as_ref() else {
+            return Ok(path.to_path_buf());
+        };
+        if info.block_extract
+            || info
+                .valid_extensions
+                .iter()
+                .any(|ext| ext.eq_ignore_ascii_case("zip"))
+        {
+            return Ok(path.to_path_buf());
+        }
+
+        self.extract_compatible_zip_member(path, &info.valid_extensions)
+            .map(|extracted| extracted.unwrap_or_else(|| path.to_path_buf()))
+    }
+
+    fn extract_compatible_zip_member(
+        &self,
+        archive_path: &Path,
+        valid_extensions: &[String],
+    ) -> Result<Option<PathBuf>, String> {
+        let file = File::open(archive_path).map_err(|error| {
+            format!("failed to open archive {}: {error}", archive_path.display())
+        })?;
+        let mut archive = zip::ZipArchive::new(file).map_err(|error| {
+            format!("failed to read archive {}: {error}", archive_path.display())
+        })?;
+        let wanted: Vec<String> = valid_extensions
+            .iter()
+            .map(|ext| ext.trim_start_matches('.').to_ascii_lowercase())
+            .collect();
+        for index in 0..archive.len() {
+            let mut entry = archive
+                .by_index(index)
+                .map_err(|error| format!("failed to read archive entry {index}: {error}"))?;
+            if entry.is_dir() {
+                continue;
+            }
+            let Some(name) = Path::new(entry.name()).file_name().map(PathBuf::from) else {
+                continue;
+            };
+            let Some(ext) = name.extension().and_then(|ext| ext.to_str()) else {
+                continue;
+            };
+            if !wanted.iter().any(|wanted| wanted.eq_ignore_ascii_case(ext)) {
+                continue;
+            }
+            let archive_stem = archive_path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("archive");
+            let out_dir = self.settings.cache_directory().join(archive_stem);
+            fs::create_dir_all(&out_dir).map_err(|error| {
+                format!(
+                    "failed to create archive cache {}: {error}",
+                    out_dir.display()
+                )
+            })?;
+            let out_path = out_dir.join(name);
+            let mut out_file = File::create(&out_path).map_err(|error| {
+                format!(
+                    "failed to create extracted content {}: {error}",
+                    out_path.display()
+                )
+            })?;
+            std::io::copy(&mut entry, &mut out_file)
+                .map_err(|error| format!("failed to extract {}: {error}", entry.name()))?;
+            return Ok(Some(out_path));
+        }
+        Ok(None)
     }
 
     fn prepare_game_info_ext(&mut self, path: &Path, meta: Option<&str>) {
@@ -920,6 +1047,7 @@ impl FrontendCore {
         }
         self.game = None;
         self.game_info_ext = None;
+        self.game_data = None;
     }
 
     pub fn reset(&mut self) -> Result<(), String> {

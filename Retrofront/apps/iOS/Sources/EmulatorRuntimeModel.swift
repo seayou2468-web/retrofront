@@ -44,28 +44,24 @@ public final class EmulatorRuntimeModel: ObservableObject {
     overlayInfo = frontend?.overlayInfo()
   }
 
-  private var retroArchRoot: URL {
-    FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("RetroArch", isDirectory: true)
-  }
+  private var storageLayout: RetroArchStorageLayout { .current }
+
+  private var retroArchRoot: URL { storageLayout.root }
 
   private func setupFrontend() {
     do {
       let frontend = try Retrofront()
       self.frontend = frontend
 
-      let root = retroArchRoot
-      try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-      let configPath = root.appendingPathComponent("config/retroarch.cfg").path
-      let downloads = root.appendingPathComponent("downloads", isDirectory: true)
-      try FileManager.default.createDirectory(at: downloads, withIntermediateDirectories: true)
+      let layout = storageLayout
+      let root = layout.root
+      try layout.createWritableDirectories()
+      let configPath = layout.configFile.path
       try? frontend.setBaseDirectory(root.path)
       applyBundleCoreDirectories(frontend)
       try? frontend.loadSettings(at: configPath)
       applyBundleCoreDirectories(frontend)
-      try? frontend.setSetting(key: "content_directory", value: downloads.path)
-      try? frontend.setSetting(key: "menu_content_directory", value: downloads.path)
-      try? frontend.setSetting(key: "core_assets_directory", value: downloads.path)
+      applyRetroArchStorageSettings(frontend, layout: layout)
       installBundledAssetsIfNeeded(frontend)
       refreshOverlayChoices()
       applyRendererSetting(frontend)
@@ -79,16 +75,38 @@ public final class EmulatorRuntimeModel: ObservableObject {
   }
 
   private func applyBundleCoreDirectories(_ frontend: Retrofront) {
-    if let frameworksURL = Bundle.main.privateFrameworksURL {
-      try? frontend.setSetting(key: "libretro_directory", value: frameworksURL.path)
+    let layout = storageLayout
+    if let coreDirectory = layout.bundledCoreDirectory {
+      try? frontend.setSetting(key: "libretro_directory", value: coreDirectory.path)
     }
-    let assetsDir = URL(fileURLWithPath: frontend.setting("assets_directory") ?? retroArchRoot.appendingPathComponent("assets").path)
-    let info = assetsDir.appendingPathComponent("info", isDirectory: true)
-    frontend.setInfoDir(info.path)
-    try? frontend.setSetting(key: "libretro_info_path", value: info.path)
-    try? frontend.setSetting(key: "menu_assets_directory", value: assetsDir.path)
-    try? frontend.setSetting(key: "overlay_directory", value: assetsDir.appendingPathComponent("overlays", isDirectory: true).path)
-    try? frontend.setSetting(key: "input_overlay", value: assetsDir.appendingPathComponent("overlays/gamepads/flat/retropad.cfg").path)
+    frontend.setInfoDir(layout.infoDirectory.path)
+    try? frontend.setSetting(key: "libretro_info_path", value: layout.infoDirectory.path)
+    try? frontend.setSetting(key: "assets_directory", value: layout.assetsDirectory.path)
+    try? frontend.setSetting(key: "menu_assets_directory", value: layout.assetsDirectory.path)
+    try? frontend.setSetting(key: "overlay_directory", value: layout.overlaysDirectory.path)
+    try? frontend.setSetting(key: "input_overlay", value: layout.overlayConfig.path)
+  }
+
+  private func applyRetroArchStorageSettings(_ frontend: Retrofront, layout: RetroArchStorageLayout) {
+    let values: [(String, URL)] = [
+      ("content_directory", layout.contentDirectory),
+      ("menu_content_directory", layout.root),
+      ("core_assets_directory", layout.downloadsDirectory),
+      ("savefile_directory", layout.savesDirectory),
+      ("savestate_directory", layout.statesDirectory),
+      ("system_directory", layout.systemDirectory),
+      ("playlist_directory", layout.playlistsDirectory),
+      ("cache_directory", layout.cacheDirectory),
+      ("assets_directory", layout.assetsDirectory),
+      ("menu_assets_directory", layout.assetsDirectory),
+      ("libretro_info_path", layout.infoDirectory),
+      ("overlay_directory", layout.overlaysDirectory),
+    ]
+    for (key, url) in values { try? frontend.setSetting(key: key, value: url.path) }
+    try? frontend.setSetting(key: "input_overlay", value: layout.overlayConfig.path)
+    if let coreDirectory = layout.bundledCoreDirectory {
+      try? frontend.setSetting(key: "libretro_directory", value: coreDirectory.path)
+    }
   }
 
   public func refreshAvailableCores() {
@@ -100,6 +118,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
       frontend.scanCores(in: resourceURL.path)
       frontend.scanCores(in: resourceURL.appendingPathComponent("dylibs").path)
     }
+    frontend.scanCores(in: retroArchRoot.appendingPathComponent("cores", isDirectory: true).path)
     frontend.scanCores(in: retroArchRoot.appendingPathComponent("Cores", isDirectory: true).path)
     frontend.scanConfiguredCores()
     availableCores = frontend.availableCores()
@@ -108,7 +127,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
   public func refreshGames() {
     guard let frontend else { return }
     refreshAvailableCores()
-    let contentDir = URL(fileURLWithPath: frontend.setting("content_directory") ?? retroArchRoot.appendingPathComponent("downloads").path)
+    let contentDir = URL(fileURLWithPath: frontend.setting("content_directory") ?? storageLayout.contentDirectory.path)
     try? FileManager.default.createDirectory(at: contentDir, withIntermediateDirectories: true)
     let exts = frontend.allSupportedExtensions().joined(separator: "|")
     frontend.scanGames(in: contentDir.path, extensions: exts)
@@ -128,7 +147,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
 
   public func importGame(at url: URL) {
     guard let frontend else { return }
-    let destinationDir = URL(fileURLWithPath: frontend.setting("content_directory") ?? retroArchRoot.appendingPathComponent("downloads").path)
+    let destinationDir = URL(fileURLWithPath: frontend.setting("content_directory") ?? storageLayout.contentDirectory.path)
     try? FileManager.default.createDirectory(at: destinationDir, withIntermediateDirectories: true)
     let destination = destinationDir.appendingPathComponent(url.lastPathComponent)
     let success = url.startAccessingSecurityScopedResource()
@@ -146,8 +165,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
   }
 
   private func installBundledAssetsIfNeeded(_ frontend: Retrofront) {
-    let assetsDir = URL(fileURLWithPath: frontend.setting("assets_directory") ?? retroArchRoot.appendingPathComponent("assets").path)
-    let infoProbe = assetsDir.appendingPathComponent("info/mgba_libretro.info")
+    let infoProbe = storageLayout.infoDirectory.appendingPathComponent("mgba_libretro.info")
     guard !FileManager.default.fileExists(atPath: infoProbe.path) else {
       applyBundleCoreDirectories(frontend)
       return
@@ -165,9 +183,9 @@ public final class EmulatorRuntimeModel: ObservableObject {
       if updateStatus { statusMessage = "assets.zip was not found in the app bundle" }
       return
     }
-    let assetsDir = URL(fileURLWithPath: frontend.setting("assets_directory") ?? retroArchRoot.appendingPathComponent("assets").path)
+    let installRoot = storageLayout.root
     do {
-      let report = try frontend.installAssetsZip(from: zipURL.path, to: assetsDir.path)
+      let report = try frontend.installAssetsZip(from: zipURL.path, to: installRoot.path)
       applyBundleCoreDirectories(frontend)
       refreshOverlayChoices()
       loadConfiguredOverlay(frontend)
@@ -287,7 +305,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
 
   public func refreshOverlayChoices() {
     guard let frontend else { return }
-    let overlayDir = URL(fileURLWithPath: frontend.setting("overlay_directory") ?? retroArchRoot.appendingPathComponent("assets/overlays").path)
+    let overlayDir = URL(fileURLWithPath: frontend.setting("overlay_directory") ?? storageLayout.overlaysDirectory.path)
     let fm = FileManager.default
     guard let enumerator = fm.enumerator(at: overlayDir, includingPropertiesForKeys: nil) else {
       availableOverlays = []
