@@ -1,6 +1,0 @@
-framework module Citra {
-  umbrella header "Citra.h"
-  export *
-
-  module * { export * }
-}
