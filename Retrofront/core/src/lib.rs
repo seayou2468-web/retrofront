@@ -89,6 +89,32 @@ static PERF_INTERFACE: libretro::retro_perf_callback = libretro::retro_perf_call
 static RUMBLE_INTERFACE: libretro::retro_rumble_interface = libretro::retro_rumble_interface {
     set_rumble_state: Some(set_rumble_state),
 };
+static LED_INTERFACE: libretro::retro_led_interface = libretro::retro_led_interface {
+    set_led_state: Some(set_led_state),
+};
+static MIDI_INTERFACE: libretro::retro_midi_interface = libretro::retro_midi_interface {
+    input_enabled: Some(midi_input_enabled),
+    output_enabled: Some(midi_output_enabled),
+    read: Some(midi_read),
+    write: Some(midi_write),
+    flush: Some(midi_flush),
+};
+static SENSOR_INTERFACE: libretro::retro_sensor_interface = libretro::retro_sensor_interface {
+    set_sensor_state: Some(sensor_set_state),
+    get_sensor_input: Some(sensor_get_input),
+};
+static LOCATION_INTERFACE: libretro::retro_location_callback = libretro::retro_location_callback {
+    start: Some(location_start),
+    stop: Some(location_stop),
+    get_position: Some(location_get_position),
+    set_interval: Some(location_set_interval),
+    initialized: None,
+    deinitialized: None,
+};
+static PROC_ADDRESS_INTERFACE: libretro::retro_get_proc_address_interface =
+    libretro::retro_get_proc_address_interface {
+        get_proc_address: Some(get_proc_address),
+    };
 
 type RetroSetEnvironment = unsafe extern "C" fn(libretro::retro_environment_t);
 type RetroSetVideoRefresh = unsafe extern "C" fn(libretro::retro_video_refresh_t);
@@ -608,6 +634,72 @@ unsafe extern "C" fn set_rumble_state(
     true
 }
 
+unsafe extern "C" fn set_led_state(_led: c_int, _state: c_int) {}
+
+unsafe extern "C" fn midi_input_enabled() -> bool {
+    false
+}
+
+unsafe extern "C" fn midi_output_enabled() -> bool {
+    false
+}
+
+unsafe extern "C" fn midi_read(_byte: *mut u8) -> bool {
+    false
+}
+
+unsafe extern "C" fn midi_write(_byte: u8, _delta_time: u32) -> bool {
+    false
+}
+
+unsafe extern "C" fn midi_flush() -> bool {
+    true
+}
+
+unsafe extern "C" fn sensor_set_state(
+    _port: c_uint,
+    _action: libretro::retro_sensor_action,
+    _rate: c_uint,
+) -> bool {
+    false
+}
+
+unsafe extern "C" fn sensor_get_input(_port: c_uint, _id: c_uint) -> f32 {
+    0.0
+}
+
+unsafe extern "C" fn location_start() -> bool {
+    false
+}
+
+unsafe extern "C" fn location_stop() {}
+
+unsafe extern "C" fn location_set_interval(_interval_ms: c_uint, _interval_distance: c_uint) {}
+
+unsafe extern "C" fn location_get_position(
+    lat: *mut f64,
+    lon: *mut f64,
+    horiz_accuracy: *mut f64,
+    vert_accuracy: *mut f64,
+) -> bool {
+    for out in [lat, lon, horiz_accuracy, vert_accuracy] {
+        if !out.is_null() {
+            unsafe { *out = 0.0 };
+        }
+    }
+    false
+}
+
+unsafe extern "C" fn camera_start() -> bool {
+    false
+}
+
+unsafe extern "C" fn camera_stop() {}
+
+unsafe extern "C" fn get_proc_address(_sym: *const c_char) -> libretro::retro_proc_address_t {
+    None
+}
+
 unsafe extern "C" fn perf_get_time_usec() -> libretro::retro_time_t {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -851,6 +943,71 @@ impl FrontendCore {
             .collect();
         settings.sort_by(|left, right| left.key.cmp(&right.key));
         settings
+    }
+
+    pub fn runtime_summaries(&self) -> Vec<UiSettingEntry> {
+        let mut rows = vec![
+            UiSettingEntry {
+                key: "Session".to_string(),
+                value: format!("{:?}", self.state()),
+            },
+            UiSettingEntry {
+                key: "Video frames".to_string(),
+                value: self.gfx.frame_counter().to_string(),
+            },
+            UiSettingEntry {
+                key: "Pixel format".to_string(),
+                value: format!("{}", self.gfx.last_frame().source_format.code()),
+            },
+            UiSettingEntry {
+                key: "Core options".to_string(),
+                value: self.options.definitions().len().to_string(),
+            },
+            UiSettingEntry {
+                key: "Environment events".to_string(),
+                value: self.events.len().to_string(),
+            },
+        ];
+        if let Some(info) = self.system_info() {
+            rows.push(UiSettingEntry {
+                key: "Libretro core".to_string(),
+                value: format!("{} {}", info.library_name, info.library_version),
+            });
+            rows.push(UiSettingEntry {
+                key: "Content ABI".to_string(),
+                value: format!(
+                    "{} extensions • fullpath={} • block_extract={}",
+                    info.valid_extensions.len(),
+                    info.need_fullpath,
+                    info.block_extract
+                ),
+            });
+        }
+        if let Some(game) = self.game_info() {
+            rows.push(UiSettingEntry {
+                key: "Loaded content".to_string(),
+                value: game.path.display().to_string(),
+            });
+        }
+        rows
+    }
+
+    pub fn libretro_api_summaries(&self) -> Vec<UiSettingEntry> {
+        vec![
+            ("Core lifecycle", "init/deinit, API version, system info, AV info, load/unload, reset, run"),
+            ("Video", "software frames, pixel formats, geometry/rotation, HW render negotiation stubs"),
+            ("Audio", "sample, batch, audio callback requests, latency and buffer status acknowledgements"),
+            ("Input", "joypad bitmasks, descriptors, max users, controller info, rumble, sensors"),
+            ("Storage", "SaveRAM, savestates, VFS v4, content/save/system/core asset/playlists directories"),
+            ("Options", "v0/v1/v2/intl core options, live updates, display callbacks"),
+            ("Platform", "performance, LEDs, MIDI stubs, camera/location stubs, proc-address stub, throttle context"),
+        ]
+        .into_iter()
+        .map(|(key, value)| UiSettingEntry {
+            key: key.to_string(),
+            value: value.to_string(),
+        })
+        .collect()
     }
 
     pub fn current_menu_summary(&self) -> Option<UiMenuList> {
@@ -1434,6 +1591,13 @@ impl FrontendCore {
                         .set_definitions_v2(us.definitions, us.categories);
                     true
                 }
+                libretro::RETRO_ENVIRONMENT_SET_CORE_OPTIONS_INTL => {
+                    let intl = unsafe { &*(data as *const libretro::retro_core_options_intl) };
+                    let us = unsafe { &*intl.us };
+                    core.options.set_definitions_v1(us);
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY => true,
                 libretro::RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE => {
                     unsafe { *(data as *mut bool) = core.options.check_updated() };
                     true
@@ -1519,6 +1683,15 @@ impl FrontendCore {
                 | libretro::RETRO_ENVIRONMENT_SET_DISK_CONTROL_EXT_INTERFACE => true,
                 libretro::RETRO_ENVIRONMENT_SET_FRAME_TIME_CALLBACK
                 | libretro::RETRO_ENVIRONMENT_SET_AUDIO_CALLBACK => true,
+                libretro::RETRO_ENVIRONMENT_SET_PROC_ADDRESS_CALLBACK => {
+                    if !data.is_null() {
+                        unsafe {
+                            *(data as *mut libretro::retro_get_proc_address_interface) =
+                                PROC_ADDRESS_INTERFACE
+                        };
+                    }
+                    true
+                }
                 libretro::RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE => {
                     if !data.is_null() {
                         unsafe {
@@ -1532,6 +1705,48 @@ impl FrontendCore {
                         unsafe { *(data as *mut libretro::retro_perf_callback) = PERF_INTERFACE };
                     }
                     true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_LED_INTERFACE => {
+                    if !data.is_null() {
+                        unsafe { *(data as *mut libretro::retro_led_interface) = LED_INTERFACE };
+                    }
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_MIDI_INTERFACE => {
+                    if !data.is_null() {
+                        unsafe { *(data as *mut libretro::retro_midi_interface) = MIDI_INTERFACE };
+                    }
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_SENSOR_INTERFACE => {
+                    if !data.is_null() {
+                        unsafe {
+                            *(data as *mut libretro::retro_sensor_interface) = SENSOR_INTERFACE
+                        };
+                    }
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_LOCATION_INTERFACE => {
+                    if !data.is_null() {
+                        unsafe {
+                            *(data as *mut libretro::retro_location_callback) = LOCATION_INTERFACE
+                        };
+                    }
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_CAMERA_INTERFACE => {
+                    if data.is_null() {
+                        false
+                    } else {
+                        let callback =
+                            unsafe { &mut *(data as *mut libretro::retro_camera_callback) };
+                        callback.start = Some(camera_start);
+                        callback.stop = Some(camera_stop);
+                        if let Some(initialized) = callback.initialized {
+                            unsafe { initialized() };
+                        }
+                        true
+                    }
                 }
                 libretro::RETRO_ENVIRONMENT_GET_INPUT_DEVICE_CAPABILITIES => {
                     unsafe {
@@ -1602,6 +1817,18 @@ impl FrontendCore {
                     };
                     true
                 }
+                libretro::RETRO_ENVIRONMENT_GET_CURRENT_SOFTWARE_FRAMEBUFFER
+                | libretro::RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE => false,
+                libretro::RETRO_ENVIRONMENT_GET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_SUPPORT => {
+                    if !data.is_null() {
+                        let iface = unsafe {
+                            &mut *(data
+                                as *mut libretro::retro_hw_render_context_negotiation_interface)
+                        };
+                        iface.interface_version = 0;
+                    }
+                    true
+                }
                 libretro::RETRO_ENVIRONMENT_GET_DISK_CONTROL_INTERFACE_VERSION => {
                     unsafe { *(data as *mut c_uint) = 1 };
                     true
@@ -1637,9 +1864,25 @@ impl FrontendCore {
                         .set_definitions_v0(data as *const libretro::retro_variable);
                     true
                 }
-                libretro::RETRO_ENVIRONMENT_GET_THROTTLE_STATE
-                | libretro::RETRO_ENVIRONMENT_GET_SAVESTATE_CONTEXT
-                | libretro::RETRO_ENVIRONMENT_GET_JIT_CAPABLE
+                libretro::RETRO_ENVIRONMENT_GET_THROTTLE_STATE => {
+                    if !data.is_null() {
+                        let throttle =
+                            unsafe { &mut *(data as *mut libretro::retro_throttle_state) };
+                        throttle.mode = libretro::RETRO_THROTTLE_NONE;
+                        throttle.rate = 0.0;
+                    }
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_SAVESTATE_CONTEXT => {
+                    if !data.is_null() {
+                        unsafe {
+                            *(data as *mut libretro::retro_savestate_context) =
+                                libretro::retro_savestate_context_RETRO_SAVESTATE_CONTEXT_NORMAL
+                        };
+                    }
+                    true
+                }
+                libretro::RETRO_ENVIRONMENT_GET_JIT_CAPABLE
                 | libretro::RETRO_ENVIRONMENT_GET_NETPLAY_CLIENT_INDEX => {
                     unsafe { *(data as *mut c_uint) = 0 };
                     true

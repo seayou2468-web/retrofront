@@ -524,6 +524,15 @@ fn refresh_window(window: &MainWindow, frontend: &SharedFrontend, status: &Rc<Re
     window.set_settings(row_model(
         core.setting_summaries().iter().map(setting_row).collect(),
     ));
+    window.set_runtime_stats(row_model(
+        core.runtime_summaries().iter().map(setting_row).collect(),
+    ));
+    window.set_api_rows(row_model(
+        core.libretro_api_summaries()
+            .iter()
+            .map(setting_row)
+            .collect(),
+    ));
     if let Some(menu) = core.current_menu_summary() {
         window.set_menu_title(menu.title.clone().into());
         window.set_menu_entries(row_model(menu_entries(&menu)));

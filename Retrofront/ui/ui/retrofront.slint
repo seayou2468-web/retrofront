@@ -1,46 +1,96 @@
-import { Button, TabWidget, ScrollView, VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { Button, TabWidget, ScrollView } from "std-widgets.slint";
 
 export struct UiRow {
     title: string,
     subtitle: string,
 }
 
+component FrostPanel inherits Rectangle {
+    in property <length> panel-radius: 28px;
+    in property <brush> panel-bg: #121a2b;
+    border-radius: panel-radius;
+    background: panel-bg;
+    border-width: 1px;
+    border-color: #ffffff14;
+    drop-shadow-color: #00000066;
+    drop-shadow-blur: 24px;
+    drop-shadow-offset-y: 8px;
+}
+
 component ClickRow inherits Rectangle {
     in property <string> title;
     in property <string> subtitle;
+    in property <string> badge;
     callback clicked;
-    height: 68px;
-    border-radius: 14px;
-    background: ta.pressed ? #2b5fb8 : (ta.has-hover ? #223756 : #172238);
+    height: 76px;
+    border-radius: 22px;
+    background: ta.pressed ? #3478f6 : (ta.has-hover ? #24314c : #172033);
     border-width: 1px;
-    border-color: #304569;
+    border-color: ta.has-hover ? #5b8dff88 : #ffffff12;
 
-    VerticalLayout {
+    HorizontalLayout {
         padding-left: 16px;
-        padding-right: 16px;
-        padding-top: 10px;
-        padding-bottom: 8px;
-        spacing: 4px;
-        Text { text: root.title; color: #eef4ff; font-size: 16px; font-weight: 700; overflow: elide; }
-        Text { text: root.subtitle; color: #9fb4d6; font-size: 12px; overflow: elide; }
+        padding-right: 14px;
+        spacing: 14px;
+        Rectangle {
+            width: 42px;
+            height: 42px;
+            border-radius: 15px;
+            background: @linear-gradient(135deg, #5f8cff 0%, #62e3ff 100%);
+            Text { text: root.badge; color: white; font-size: 15px; font-weight: 900; horizontal-alignment: center; vertical-alignment: center; }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 4px;
+            Text { text: root.title; color: #f7fbff; font-size: 17px; font-weight: 800; overflow: elide; }
+            Text { text: root.subtitle; color: #aab7cf; font-size: 12px; overflow: elide; }
+        }
     }
 
     ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+component MetricCard inherits FrostPanel {
+    in property <string> title;
+    in property <string> value;
+    in property <string> accent;
+    width: 190px;
+    height: 112px;
+    panel-radius: 26px;
+    panel-bg: #151f34;
+    VerticalLayout {
+        padding: 18px;
+        spacing: 8px;
+        Text { text: root.accent; color: #7ed7ff; font-size: 13px; font-weight: 800; }
+        Text { text: root.title; color: #d8e4f8; font-size: 13px; }
+        Text { text: root.value; color: white; font-size: 22px; font-weight: 900; overflow: elide; }
+    }
 }
 
 component SectionTitle inherits Text {
     in property <string> label;
     text: label;
     color: #f7fbff;
-    font-size: 24px;
-    font-weight: 800;
+    font-size: 25px;
+    font-weight: 900;
+}
+
+component Pill inherits Rectangle {
+    in property <string> label;
+    height: 34px;
+    min-width: 112px;
+    border-radius: 17px;
+    background: #ffffff12;
+    border-width: 1px;
+    border-color: #ffffff22;
+    Text { text: root.label; color: #e8f2ff; font-size: 12px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
 }
 
 export component MainWindow inherits Window {
-    title: "Retrofront Slint";
-    preferred-width: 1100px;
-    preferred-height: 760px;
-    background: #0c1320;
+    title: "Retrofront Studio";
+    preferred-width: 1280px;
+    preferred-height: 820px;
+    background: @linear-gradient(155deg, #08111f 0%, #11192a 40%, #162d47 100%);
 
     in property <string> status_text;
     in property <string> state_text;
@@ -51,6 +101,8 @@ export component MainWindow inherits Window {
     in property <[UiRow]> games;
     in property <[UiRow]> settings;
     in property <[UiRow]> menu_entries;
+    in property <[UiRow]> runtime_stats;
+    in property <[UiRow]> api_rows;
     in property <string> menu_title;
 
     callback refresh_requested;
@@ -72,112 +124,74 @@ export component MainWindow inherits Window {
     callback show_quick_menu_requested;
 
     VerticalLayout {
-        padding: 18px;
-        spacing: 14px;
+        padding: 22px;
+        spacing: 18px;
 
-        Rectangle {
-            height: 96px;
-            border-radius: 22px;
-            background: @linear-gradient(110deg, #16335d 0%, #1e63d6 54%, #53d8ff 100%);
+        FrostPanel {
+            height: 130px;
+            panel-radius: 34px;
+            panel-bg: @linear-gradient(110deg, #173057 0%, #245fcf 55%, #75dfff 100%);
             HorizontalLayout {
-                padding-left: 24px;
-                padding-right: 24px;
-                spacing: 16px;
+                padding-left: 26px;
+                padding-right: 22px;
+                spacing: 18px;
                 VerticalLayout {
                     alignment: center;
-                    Text { text: "Retrofront"; color: white; font-size: 34px; font-weight: 900; }
-                    Text { text: "Linux + iOS Slint UI"; color: #e6f6ff; font-size: 14px; }
+                    spacing: 5px;
+                    Text { text: "Retrofront Studio"; color: white; font-size: 38px; font-weight: 900; }
+                    Text { text: "Desktop-class libretro control center • Slint / Rust"; color: #eaf7ff; font-size: 14px; font-weight: 700; }
                 }
                 Rectangle { width: 1px; background: #ffffff55; }
                 VerticalLayout {
                     alignment: center;
-                    Text { text: root.state_text; color: white; font-size: 18px; font-weight: 700; }
-                    Text { text: root.status_text; color: #eaf6ff; font-size: 13px; overflow: elide; }
-                    Text { text: root.current_core_text + " • " + root.current_game_text; color: #d4ecff; font-size: 12px; overflow: elide; }
+                    spacing: 7px;
+                    HorizontalLayout { spacing: 8px; Pill { label: root.state_text; } Pill { label: "One UI inspired"; } }
+                    Text { text: root.status_text; color: white; font-size: 16px; font-weight: 800; overflow: elide; }
+                    Text { text: root.current_core_text + "  •  " + root.current_game_text; color: #d7ecff; font-size: 12px; overflow: elide; }
                 }
                 Button { text: "Refresh"; clicked => { root.refresh_requested(); } }
                 Button { text: "Scan ROMs"; clicked => { root.scan_games_requested(); } }
+                Button { text: "Play / Pause"; clicked => { root.play_pause_requested(); } }
             }
+        }
+
+        HorizontalLayout {
+            spacing: 18px;
+            MetricCard { accent: "CORE"; title: "Active runtime"; value: root.state_text; }
+            MetricCard { accent: "CONTENT"; title: "Current game"; value: root.current_game_text; }
+            MetricCard { accent: "LIBRETRO"; title: "Connected APIs"; value: "VFS / AV / Input"; }
+            MetricCard { accent: "UI"; title: "Shell mode"; value: "Studio"; }
         }
 
         TabWidget {
             Tab {
-                title: "Library";
+                title: "Dashboard";
                 HorizontalLayout {
-                    spacing: 14px;
-                    Rectangle {
-                        border-radius: 18px;
-                        background: #10192a;
+                    spacing: 16px;
+                    FrostPanel {
+                        width: 390px;
+                        panel-bg: #111a2c;
                         VerticalLayout {
-                            padding: 16px;
-                            spacing: 10px;
-                            SectionTitle { label: "Games"; }
-                            ScrollView {
-                                VerticalLayout {
-                                    spacing: 8px;
-                                    for game[index] in root.games: ClickRow {
-                                        title: game.title;
-                                        subtitle: game.subtitle;
-                                        clicked => { root.launch_game_requested(index); }
-                                    }
-                                }
-                            }
+                            padding: 18px;
+                            spacing: 12px;
+                            SectionTitle { label: "Runtime telemetry"; }
+                            ScrollView { VerticalLayout { spacing: 9px; for row[index] in root.runtime_stats: ClickRow { title: row.title; subtitle: row.subtitle; badge: "R"; } } }
                         }
                     }
-                    Rectangle {
-                        width: 360px;
-                        border-radius: 18px;
-                        background: #10192a;
-                        VerticalLayout {
-                            padding: 16px;
-                            spacing: 10px;
-                            SectionTitle { label: "Cores"; }
-                            ScrollView {
-                                VerticalLayout {
-                                    spacing: 8px;
-                                    for core[index] in root.cores: ClickRow {
-                                        title: core.title;
-                                        subtitle: core.subtitle;
-                                        clicked => { root.load_core_requested(index); }
-                                    }
-                                }
-                            }
-                        }
+                    FrostPanel {
+                        panel-bg: #05070c;
+                        Image { source: root.video_frame; image-fit: contain; width: parent.width; height: parent.height; }
+                        Rectangle { x: 18px; y: 18px; width: parent.width - 36px; height: 58px; border-radius: 18px; background: #00000080; }
+                        Text { x: 36px; y: 30px; text: root.current_game_text; color: white; font-size: 18px; font-weight: 900; overflow: elide; }
                     }
-                }
-            }
-            Tab {
-                title: "Play";
-                HorizontalLayout {
-                    spacing: 14px;
-                    Rectangle {
-                        border-radius: 18px;
-                        background: #05070c;
-                        Image {
-                            source: root.video_frame;
-                            image-fit: contain;
-                            width: parent.width;
-                            height: parent.height;
-                        }
-                        Text {
-                            text: root.current_game_text;
-                            color: #ffffffaa;
-                            x: 18px;
-                            y: 18px;
-                            font-size: 16px;
-                            font-weight: 700;
-                        }
-                    }
-                    Rectangle {
-                        width: 260px;
-                        border-radius: 18px;
-                        background: #10192a;
+                    FrostPanel {
+                        width: 255px;
+                        panel-bg: #111a2c;
                         VerticalLayout {
-                            padding: 16px;
+                            padding: 18px;
                             spacing: 10px;
-                            SectionTitle { label: "Runtime"; }
+                            SectionTitle { label: "Transport"; }
                             Button { text: "Run Frame"; clicked => { root.frame_requested(); } }
-                            Button { text: "Play / Pause"; clicked => { root.play_pause_requested(); } }
                             Button { text: "Reset"; clicked => { root.reset_requested(); } }
                             Button { text: "Save State"; clicked => { root.save_state_requested(); } }
                             Button { text: "Load State"; clicked => { root.load_state_requested(); } }
@@ -188,58 +202,53 @@ export component MainWindow inherits Window {
                 }
             }
             Tab {
+                title: "Library";
+                HorizontalLayout {
+                    spacing: 16px;
+                    FrostPanel {
+                        panel-bg: #111a2c;
+                        VerticalLayout { padding: 18px; spacing: 12px; SectionTitle { label: "Games"; } ScrollView { VerticalLayout { spacing: 9px; for game[index] in root.games: ClickRow { title: game.title; subtitle: game.subtitle; badge: "G"; clicked => { root.launch_game_requested(index); } } } } }
+                    }
+                    FrostPanel {
+                        width: 430px;
+                        panel-bg: #111a2c;
+                        VerticalLayout { padding: 18px; spacing: 12px; SectionTitle { label: "Cores"; } ScrollView { VerticalLayout { spacing: 9px; for core[index] in root.cores: ClickRow { title: core.title; subtitle: core.subtitle; badge: "C"; clicked => { root.load_core_requested(index); } } } } }
+                    }
+                }
+            }
+            Tab {
+                title: "libretro API";
+                FrostPanel {
+                    panel-bg: #111a2c;
+                    VerticalLayout {
+                        padding: 20px;
+                        spacing: 13px;
+                        SectionTitle { label: "Connected frontend interfaces"; }
+                        Text { text: "Lifecycle, VFS, AV, input, options, save memory, platform services, and graceful stubs are wired from the UI shell into the Rust frontend core."; color: #aab7cf; font-size: 14px; }
+                        ScrollView { VerticalLayout { spacing: 9px; for api[index] in root.api_rows: ClickRow { title: api.title; subtitle: api.subtitle; badge: "A"; } } }
+                    }
+                }
+            }
+            Tab {
                 title: "Menu";
                 HorizontalLayout {
-                    spacing: 14px;
-                    Rectangle {
-                        width: 260px;
-                        border-radius: 18px;
-                        background: #10192a;
-                        VerticalLayout {
-                            padding: 16px;
-                            spacing: 10px;
-                            SectionTitle { label: "Navigation"; }
-                            Button { text: "Home"; clicked => { root.show_home_requested(); } }
-                            Button { text: "Cores"; clicked => { root.show_core_menu_requested(); } }
-                            Button { text: "Library"; clicked => { root.show_content_menu_requested(); } }
-                            Button { text: "Settings"; clicked => { root.show_settings_menu_requested(); } }
-                            Button { text: "Quick Menu"; clicked => { root.show_quick_menu_requested(); } }
-                            Button { text: "Back"; clicked => { root.menu_back_requested(); } }
-                        }
+                    spacing: 16px;
+                    FrostPanel {
+                        width: 285px;
+                        panel-bg: #111a2c;
+                        VerticalLayout { padding: 18px; spacing: 10px; SectionTitle { label: "Navigation"; } Button { text: "Home"; clicked => { root.show_home_requested(); } } Button { text: "Cores"; clicked => { root.show_core_menu_requested(); } } Button { text: "Library"; clicked => { root.show_content_menu_requested(); } } Button { text: "Settings"; clicked => { root.show_settings_menu_requested(); } } Button { text: "Quick Menu"; clicked => { root.show_quick_menu_requested(); } } Button { text: "Back"; clicked => { root.menu_back_requested(); } } }
                     }
-                    Rectangle {
-                        border-radius: 18px;
-                        background: #10192a;
-                        VerticalLayout {
-                            padding: 16px;
-                            spacing: 10px;
-                            SectionTitle { label: root.menu_title; }
-                            ScrollView {
-                                VerticalLayout {
-                                    spacing: 8px;
-                                    for entry in root.menu_entries: ClickRow { title: entry.title; subtitle: entry.subtitle; }
-                                }
-                            }
-                        }
+                    FrostPanel {
+                        panel-bg: #111a2c;
+                        VerticalLayout { padding: 18px; spacing: 12px; SectionTitle { label: root.menu_title; } ScrollView { VerticalLayout { spacing: 9px; for entry[index] in root.menu_entries: ClickRow { title: entry.title; subtitle: entry.subtitle; badge: "M"; } } } }
                     }
                 }
             }
             Tab {
                 title: "Settings";
-                Rectangle {
-                    border-radius: 18px;
-                    background: #10192a;
-                    VerticalLayout {
-                        padding: 16px;
-                        spacing: 10px;
-                        SectionTitle { label: "RetroArch-compatible storage and options"; }
-                        ScrollView {
-                            VerticalLayout {
-                                spacing: 8px;
-                                for setting in root.settings: ClickRow { title: setting.title; subtitle: setting.subtitle; }
-                            }
-                        }
-                    }
+                FrostPanel {
+                    panel-bg: #111a2c;
+                    VerticalLayout { padding: 18px; spacing: 12px; SectionTitle { label: "RetroArch-compatible storage and options"; } ScrollView { VerticalLayout { spacing: 9px; for setting[index] in root.settings: ClickRow { title: setting.title; subtitle: setting.subtitle; badge: "S"; } } } }
                 }
             }
         }
