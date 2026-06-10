@@ -2,26 +2,21 @@ name: Retrofront
 
 on:
   workflow_dispatch:
-
   push:
-
   pull_request:
 
 permissions:
   contents: read
 
 jobs:
-
   linux:
     name: Linux Swift/Rust UI
-
     runs-on: ubuntu-latest
 
     container:
       image: swift:6.0-jammy
 
     steps:
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -63,22 +58,49 @@ jobs:
 
           make linux-ui
 
-      - name: Upload Linux artifacts
+      - name: Locate executable
+        working-directory: Retrofront
+        shell: bash
+        run: |
+          find .build -type f -executable
+
+      - name: Package Linux build
+        working-directory: Retrofront
+        shell: bash
+        run: |
+          APP=$(find .build/release -type f -executable | head -n 1)
+
+          if [ -z "$APP" ]; then
+            echo "No executable found"
+            exit 1
+          fi
+
+          echo "Found executable:"
+          echo "$APP"
+
+          rm -rf dist
+          mkdir -p dist
+
+          cp "$APP" dist/Retrofront
+
+          chmod +x dist/Retrofront
+
+          tar -czf retrofront-linux.tar.gz dist
+
+          ls -lah retrofront-linux.tar.gz
+
+      - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
-          name: retrofront-linux-ui
-          path: |
-            Retrofront/.build
-            Retrofront/build
-          if-no-files-found: warn
+          name: Retrofront-Linux
+          path: Retrofront/retrofront-linux.tar.gz
+          if-no-files-found: error
 
   ios-device:
     name: iOS Device Build
-
     runs-on: macos-15
 
     steps:
-
       - name: Checkout
         uses: actions/checkout@v4
 
