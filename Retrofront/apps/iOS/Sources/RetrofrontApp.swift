@@ -1,13 +1,11 @@
-import SwiftUI
+import Foundation
+
+@_silgen_name("retrofront_slint_ios_main")
+func retrofront_slint_ios_main() -> Int32
 
 @main
-struct RetrofrontApp: App {
-  @StateObject private var runtime = EmulatorRuntimeModel()
-
-  var body: some Scene {
-    WindowGroup {
-      DashboardView()
-        .environmentObject(runtime)
-    }
+struct RetrofrontApp {
+  static func main() {
+    exit(retrofront_slint_ios_main())
   }
 }

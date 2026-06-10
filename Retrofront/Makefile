@@ -12,8 +12,8 @@ test: rust
 	cargo test --manifest-path Cargo.toml
 	swift test
 
-linux-ui: rust
-	swift build -c release --product retrofront-linux-ui
+linux-ui:
+	cargo build --manifest-path Cargo.toml --release -p retrofront-ui --bin retrofront
 
 linux-appimage: frontend-assets
 	./scripts/build-linux-appimage.sh
@@ -38,5 +38,5 @@ clean:
 #   rustup target add aarch64-apple-ios
 #   make ios-info IOS_TARGET=aarch64-apple-ios
 ios-info:
-	@echo "Build iOS Rust core with: cargo build --manifest-path Cargo.toml --release --target $${IOS_TARGET:-aarch64-apple-ios}"
-	@echo "Then link libretrofront_core.a into your iOS app target and import RetrofrontSwift."
+	@echo "Build iOS Slint UI with: cargo build --manifest-path Cargo.toml --release -p retrofront-ui --lib --target $${IOS_TARGET:-aarch64-apple-ios}"
+	@echo "Then link libretrofront_ui.a into the iOS app target; SwiftUI is not used."

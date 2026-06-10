@@ -17,7 +17,7 @@ mkdir -p \
   "${APPDIR}/usr/share/icons/hicolor/256x256/apps" \
   "${APPDIR}/usr/share/retrofront/assets"
 
-cp .build/release/retrofront-linux-ui "${APPDIR}/usr/bin/retrofront"
+cp target/release/retrofront "${APPDIR}/usr/bin/retrofront"
 if compgen -G "archifacts/linux/*.so" > /dev/null; then
   cp archifacts/linux/*.so "${APPDIR}/usr/lib/retrofront/cores/"
 fi
@@ -41,7 +41,7 @@ Name=Retrofront
 Exec=retrofront
 Icon=retrofront
 Categories=Game;Emulator;
-Terminal=true
+Terminal=false
 DESKTOP
 cp "${APPDIR}/retrofront.desktop" "${APPDIR}/usr/share/applications/retrofront.desktop"
 

@@ -1,0 +1,26 @@
+[package]
+name = "retrofront-ui"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Slint UI shell for Retrofront on Linux and iOS"
+build = "build.rs"
+
+[lib]
+name = "retrofront_ui"
+crate-type = ["staticlib", "rlib"]
+
+[[bin]]
+name = "retrofront"
+path = "src/main.rs"
+
+[features]
+default = ["slint/backend-winit", "slint/renderer-femtovg"]
+ios = []
+
+[dependencies]
+retrofront-core = { path = "../core" }
+slint = { version = "=1.15.1", default-features = false, features = ["compat-1-2", "std"] }
+
+[build-dependencies]
+slint-build = "=1.15.1"

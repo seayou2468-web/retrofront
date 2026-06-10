@@ -113,6 +113,46 @@ type RetroGetMemoryData = unsafe extern "C" fn(c_uint) -> *mut c_void;
 type RetroGetMemorySize = unsafe extern "C" fn(c_uint) -> usize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiCoreInfo {
+    pub path: PathBuf,
+    pub display_name: String,
+    pub system_name: String,
+    pub supported_extensions: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiGameEntry {
+    pub path: PathBuf,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiSettingEntry {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiMenuEntry {
+    pub label: String,
+    pub sublabel: String,
+    pub value: String,
+    pub action_id: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiMenuList {
+    pub title: String,
+    pub entries: Vec<UiMenuEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiAssetInstallReport {
+    pub files_written: usize,
+    pub directories_created: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemInfo {
     pub library_name: String,
     pub library_version: String,
@@ -720,6 +760,134 @@ impl FrontendCore {
 
     pub fn consume_overlay_menu_toggle(&mut self) -> bool {
         self.overlay.consume_menu_toggle()
+    }
+
+    pub fn load_settings(&mut self, path: impl AsRef<Path>) {
+        self.settings.load(path.as_ref());
+        self.configure_from_settings();
+    }
+
+    pub fn save_settings(&self) {
+        self.settings.save();
+    }
+
+    pub fn set_base_dir(&mut self, path: impl AsRef<Path>) {
+        self.settings.set_base_dir(path.as_ref());
+        self.configure_from_settings();
+    }
+
+    pub fn set_setting(&mut self, key: &str, value: &str) {
+        self.settings.set(key, value);
+        self.configure_from_settings();
+    }
+
+    pub fn setting(&self, key: &str) -> Option<String> {
+        self.settings.get(key).cloned()
+    }
+
+    pub fn scan_cores(&mut self, path: impl AsRef<Path>) {
+        self.core_info.scan_directory(path.as_ref());
+    }
+
+    pub fn scan_configured_cores(&mut self) {
+        let dir = self.settings.libretro_directory();
+        self.core_info.scan_directory(&dir);
+    }
+
+    pub fn scan_games(&mut self, path: impl AsRef<Path>) {
+        let extensions = self.core_info.all_extensions.clone();
+        self.scanner.scan_directory(path.as_ref(), &extensions);
+    }
+
+    pub fn set_info_dir(&mut self, path: impl AsRef<Path>) {
+        self.core_info.set_info_dir(path.as_ref().to_path_buf());
+    }
+
+    pub fn install_assets_zip(
+        &mut self,
+        zip_path: impl AsRef<Path>,
+        destination_dir: impl AsRef<Path>,
+    ) -> Result<UiAssetInstallReport, String> {
+        let report = assets::install_assets_zip(zip_path.as_ref(), destination_dir.as_ref())?;
+        Ok(UiAssetInstallReport {
+            files_written: report.files_written,
+            directories_created: report.directories_created,
+        })
+    }
+
+    pub fn core_summaries(&self) -> Vec<UiCoreInfo> {
+        self.core_info
+            .cores
+            .iter()
+            .map(|core| UiCoreInfo {
+                path: core.path.clone(),
+                display_name: core.display_name.clone(),
+                system_name: core.system_name.clone(),
+                supported_extensions: core.supported_extensions.clone(),
+            })
+            .collect()
+    }
+
+    pub fn game_summaries(&self) -> Vec<UiGameEntry> {
+        self.scanner
+            .games
+            .iter()
+            .map(|game| UiGameEntry {
+                path: game.path.clone(),
+                label: game.label.clone(),
+            })
+            .collect()
+    }
+
+    pub fn setting_summaries(&self) -> Vec<UiSettingEntry> {
+        let mut settings: Vec<_> = self
+            .settings
+            .values
+            .iter()
+            .map(|(key, value)| UiSettingEntry {
+                key: key.clone(),
+                value: value.clone(),
+            })
+            .collect();
+        settings.sort_by(|left, right| left.key.cmp(&right.key));
+        settings
+    }
+
+    pub fn current_menu_summary(&self) -> Option<UiMenuList> {
+        self.menu.current().map(|list| UiMenuList {
+            title: list.title.clone(),
+            entries: list
+                .entries
+                .iter()
+                .map(|entry| UiMenuEntry {
+                    label: entry.label.clone(),
+                    sublabel: entry.sublabel.clone(),
+                    value: entry.value.clone(),
+                    action_id: entry.action_id,
+                })
+                .collect(),
+        })
+    }
+
+    pub fn push_core_menu(&mut self) {
+        let cores = self.core_info.cores.clone();
+        self.menu.push_core_list(&cores);
+    }
+
+    pub fn push_content_menu(&mut self) {
+        self.menu.push_content_list(&self.scanner.games);
+    }
+
+    pub fn push_settings_menu(&mut self) {
+        self.menu.push_settings(&self.settings);
+    }
+
+    pub fn push_quick_menu(&mut self) {
+        self.menu.push_quick_menu(self.game_info().is_some());
+    }
+
+    pub fn pop_menu(&mut self) -> bool {
+        self.menu.pop().is_some()
     }
 
     pub fn load_core(&mut self, path: impl AsRef<Path>) -> Result<(), String> {

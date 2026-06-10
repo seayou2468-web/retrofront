@@ -58,7 +58,8 @@ fn normalize_frontend_asset_zip_path(path: &Path) -> PathBuf {
         return path.to_path_buf();
     };
     if first == "assets" {
-        while matches!(components.clone().next(), Some(Component::Normal(part)) if part == "assets") {
+        while matches!(components.clone().next(), Some(Component::Normal(part)) if part == "assets")
+        {
             components.next();
         }
         return components.as_path().to_path_buf();
