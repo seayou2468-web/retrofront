@@ -82,17 +82,12 @@ jobs:
           APPIMAGETOOL="$PWD/appimagetool-x86_64.AppImage" make linux-appimage
           file dist/Retrofront-x86_64.AppImage
 
-      - name: Locate executable
-        working-directory: Retrofront
-        shell: bash
-        run: |
-          find .build -type f -executable
-          
-          - name: Upload Linux artifact
-            uses: actions/upload-artifact@v4
-            with:
-            name: Retrofront-Linux-AppImage
-            path: Retrofront/dist/Retrofront-x86_64.AppImage
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Retrofront-Linux-AppImage
+          path: Retrofront/dist/Retrofront-x86_64.AppImage
+          if-no-files-found: error
 
   ios-device:
     name: iOS Device Build
