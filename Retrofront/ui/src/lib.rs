@@ -232,13 +232,18 @@ fn feature_rows(core: &FrontendCore, layout: &StorageLayout) -> Vec<UiSettingEnt
     let game_count = core.game_summaries().len();
     let runtime = core.runtime_summaries();
     vec![
-        UiSettingEntry { key: "iOS launch backend".into(), value: "Slint winit + software renderer selected by ios feature; no empty backend startup failure".into() },
-        UiSettingEntry { key: "Bundle size controls".into(), value: "Release LTO, panic=abort, strip, dead-strip, no bundled MoltenVK/OpenGLES dependency".into() },
+        UiSettingEntry { key: "iOS launch backend".into(), value: "Slint winit + software renderer selected by ios feature; SwiftUI launch surface removed and replaced with Rust-owned UI".into() },
+        UiSettingEntry { key: "Linux launch backend".into(), value: "The desktop binary keeps the same Slint file and Rust callback graph through winit + femtovg".into() },
+        UiSettingEntry { key: "SwiftUI hero parity".into(), value: "Hero, live status, current state, current core/game and refresh controls are exposed as Slint properties".into() },
+        UiSettingEntry { key: "SwiftUI metrics parity".into(), value: "State, core count, game count, settings count and API count are live Rust-backed metric cards".into() },
+        UiSettingEntry { key: "SwiftUI command parity".into(), value: "Run frame, reset, save state, load state, SRAM save and stop all execute from Slint callbacks".into() },
         UiSettingEntry { key: "Core policy".into(), value: format!("{core_count} discovered cores; archifacts/ios copying remains unfiltered") },
         UiSettingEntry { key: "Library".into(), value: format!("{game_count} scanned entries from {}", layout.content_dir.display()) },
+        UiSettingEntry { key: "Files app storage".into(), value: "iOS Documents/RetroArch/Roms mirrors the previous Files drop-zone and Linux uses XDG config storage".into() },
         UiSettingEntry { key: "Save data".into(), value: "SRAM, savestates, save/system directories and RetroArch-compatible config paths".into() },
         UiSettingEntry { key: "Input".into(), value: "Joypad bitmasks, keyboard callback, descriptors, max users, rumble, sensors, overlays, MFi/GameController link".into() },
-        UiSettingEntry { key: "Media".into(), value: "Software frame ingest, audio samples/batches, frame stepping, playback timer and screenshots directory".into() },
+        UiSettingEntry { key: "Media".into(), value: "Software frame ingest, Slint image viewport, audio samples/batches, frame stepping, playback timer and screenshots directory".into() },
+        UiSettingEntry { key: "Menu activation".into(), value: "RetroArch-style core/content/settings/quick-menu rows are clickable and execute Rust menu actions".into() },
         UiSettingEntry { key: "Environment".into(), value: "Core options v0/v1/v2/intl, VFS v4, directories, messages, geometry, rotation, perf, MIDI, location/camera stubs".into() },
         UiSettingEntry { key: "Runtime telemetry".into(), value: format!("{} rows exported to the dashboard", runtime.len()) },
     ]
@@ -537,6 +542,27 @@ fn wire_callbacks(
             refresh_weak(&ui_handle, &core, &status);
         });
     });
+
+    on(window, &frontend, &status, |ui, core, status| {
+        let ui_handle = ui.as_weak();
+        ui.on_activate_menu_entry_requested(move |index| {
+            let action_id = core.borrow().current_menu_summary().and_then(|menu| {
+                menu.entries
+                    .get(index as usize)
+                    .map(|entry| entry.action_id)
+            });
+            match action_id {
+                Some(action_id) if core.borrow_mut().activate_menu_action(action_id) => {
+                    *status.borrow_mut() = format!("Activated menu action {action_id}");
+                }
+                Some(action_id) => {
+                    *status.borrow_mut() = format!("Menu action {action_id} is not available");
+                }
+                None => *status.borrow_mut() = "Selected menu row is no longer available".into(),
+            }
+            refresh_weak(&ui_handle, &core, &status);
+        });
+    });
 }
 
 fn on<F>(window: &MainWindow, frontend: &SharedFrontend, status: &Rc<RefCell<String>>, f: F)
@@ -565,37 +591,41 @@ fn refresh_window(window: &MainWindow, frontend: &SharedFrontend, status: &Rc<Re
     window.set_state_text(state_text(core.state()).into());
     window.set_current_core_text(current_core_text(&core).into());
     window.set_current_game_text(current_game_text(&core).into());
-    window.set_cores(row_model(
-        core.core_summaries().iter().map(core_row).collect(),
-    ));
-    window.set_games(row_model(
-        core.game_summaries().iter().map(game_row).collect(),
-    ));
-    window.set_settings(row_model(
-        core.setting_summaries().iter().map(setting_row).collect(),
-    ));
-    window.set_runtime_stats(row_model(
-        core.runtime_summaries().iter().map(setting_row).collect(),
-    ));
-    window.set_api_rows(row_model(
-        core.libretro_api_summaries()
-            .iter()
-            .map(setting_row)
-            .collect(),
-    ));
-    window.set_directory_rows(row_model(
-        layout_for_refresh()
-            .ui_directory_rows()
-            .iter()
-            .map(setting_row)
-            .collect(),
-    ));
-    window.set_feature_rows(row_model(
-        feature_rows(&core, &layout_for_refresh())
-            .iter()
-            .map(setting_row)
-            .collect(),
-    ));
+
+    let layout = layout_for_refresh();
+    let core_rows: Vec<_> = core.core_summaries().iter().map(core_row).collect();
+    let game_rows: Vec<_> = core.game_summaries().iter().map(game_row).collect();
+    let setting_rows: Vec<_> = core.setting_summaries().iter().map(setting_row).collect();
+    let runtime_rows: Vec<_> = core.runtime_summaries().iter().map(setting_row).collect();
+    let api_rows: Vec<_> = core
+        .libretro_api_summaries()
+        .iter()
+        .map(setting_row)
+        .collect();
+    let directory_rows: Vec<_> = layout.ui_directory_rows().iter().map(setting_row).collect();
+    let feature_rows: Vec<_> = feature_rows(&core, &layout)
+        .iter()
+        .map(setting_row)
+        .collect();
+
+    window.set_cores_count_text(core_rows.len().to_string().into());
+    window.set_games_count_text(game_rows.len().to_string().into());
+    window.set_settings_count_text(setting_rows.len().to_string().into());
+    window.set_runtime_count_text(runtime_rows.len().to_string().into());
+    window.set_api_count_text(api_rows.len().to_string().into());
+    window.set_storage_count_text(directory_rows.len().to_string().into());
+    window.set_feature_count_text(feature_rows.len().to_string().into());
+    window.set_shell_mode_text(shell_mode_text().into());
+    window.set_library_hint_text(library_hint(&layout).into());
+    window.set_core_hint_text(core_hint(&layout).into());
+
+    window.set_cores(row_model(core_rows));
+    window.set_games(row_model(game_rows));
+    window.set_settings(row_model(setting_rows));
+    window.set_runtime_stats(row_model(runtime_rows));
+    window.set_api_rows(row_model(api_rows));
+    window.set_directory_rows(row_model(directory_rows));
+    window.set_feature_rows(row_model(feature_rows));
     if let Some(menu) = core.current_menu_summary() {
         window.set_menu_title(menu.title.clone().into());
         window.set_menu_entries(row_model(menu_entries(&menu)));
@@ -685,6 +715,37 @@ fn current_game_text(core: &FrontendCore) -> String {
             )
         })
         .unwrap_or_else(|| "Game: none".into())
+}
+
+fn shell_mode_text() -> &'static str {
+    if cfg!(target_os = "ios") {
+        "Slint iOS shell"
+    } else {
+        "Slint Linux shell"
+    }
+}
+
+fn library_hint(layout: &StorageLayout) -> String {
+    if cfg!(target_os = "ios") {
+        format!(
+            "Drop ROMs in Files at On My iPhone/Retrofront/{}",
+            layout
+                .content_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("Roms")
+        )
+    } else {
+        format!("Scan ROMs from {}", layout.content_dir.display())
+    }
+}
+
+fn core_hint(layout: &StorageLayout) -> String {
+    if cfg!(target_os = "ios") {
+        "Bundled Frameworks are scanned at startup and copied without filtering".into()
+    } else {
+        format!("Place libretro cores in {}", layout.core_dir.display())
+    }
 }
 
 fn path_string(path: &Path) -> String {
