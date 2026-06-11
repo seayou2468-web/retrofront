@@ -20,12 +20,17 @@ targets:
   # C CORE MODULE
   # =========================
   CRetrofrontCore:
-    type: library.static
-    platform: iOS
-    path: frontend/CRetrofrontCore
-    settings:
-      base:
-        PUBLIC_HEADERS_FOLDER_PATH: include
+  type: library.static
+  platform: iOS
+
+  sources:
+    - path: frontend/CRetrofrontCore
+
+  settings:
+    base:
+      DEFINES_MODULE: YES
+      MODULEMAP_FILE: $(SRCROOT)/frontend/CRetrofrontCore/module.modulemap
+      PUBLIC_HEADERS_FOLDER_PATH: include
 
   # =========================
   # SWIFT FRAMEWORK
