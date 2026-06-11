@@ -54,7 +54,7 @@ targets:
             flutter pub get
             flutter build ios --config-only --no-codesign
           else
-            echo "warning: flutter not found; run 'flutter create --platforms=ios .' in Retrofront/flutter before archiving"
+            echo "warning: flutter not found; run 'flutter create --platforms=ios -i objc .' in Retrofront/flutter before archiving"
           fi
 
     postBuildScripts:

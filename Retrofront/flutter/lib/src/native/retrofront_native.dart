@@ -7,7 +7,6 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:ffi/ffi.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 
 final class RfFrontend extends ffi.Opaque {}
 
@@ -1166,16 +1165,14 @@ overlay0_desc10 = "menu_toggle,0.08,0.13,rect,0.06,0.04"
   }
 
   Future<Directory> _resolveRetroArchRoot() async {
-    if (Platform.isIOS) {
-      final docs = await getApplicationDocumentsDirectory();
-      return Directory(p.join(docs.path, 'RetroArch'));
-    }
     final home = Platform.environment['HOME'];
+    if (Platform.isIOS && home != null && home.isNotEmpty) {
+      return Directory(p.join(home, 'Documents', 'RetroArch'));
+    }
     if (home != null && home.isNotEmpty) {
       return Directory(p.join(home, '.config', 'retroarch'));
     }
-    final support = await getApplicationSupportDirectory();
-    return Directory(p.join(support.path, 'RetroArch'));
+    return Directory(p.join(Directory.systemTemp.path, 'RetroArch'));
   }
 
   void _applyAllSettingsToNative() {

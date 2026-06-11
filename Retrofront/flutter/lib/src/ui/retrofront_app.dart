@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:ui' as ui;
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -737,12 +736,14 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
   }
 
   Future<void> _pickRom() async {
-    final result = await FilePicker.platform.pickFiles(allowMultiple: true);
-    if (result == null) return;
+    final paths = await _promptForPaths(
+      title: 'ROMファイルのパス',
+      hint: widget.frontend.settings['content_directory'] ?? '/path/to/game.rom',
+      multiline: true,
+    );
+    if (paths.isEmpty) return;
     final importedGames = <GameEntry>[];
-    for (final file in result.files) {
-      final path = file.path;
-      if (path == null) continue;
+    for (final path in paths) {
       await widget.frontend.importRom(path);
       final imported = _latestImportedGameFor(path);
       if (imported != null) importedGames.add(imported);
@@ -770,10 +771,46 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
   }
 
   Future<void> _pickRomDirectory() async {
-    final path = await FilePicker.platform.getDirectoryPath();
-    if (path == null) return;
-    await widget.frontend.scanRoms(path);
+    final paths = await _promptForPaths(
+      title: 'ROMディレクトリのパス',
+      hint: widget.frontend.settings['content_directory'] ?? '/path/to/roms',
+    );
+    if (paths.isEmpty) return;
+    await widget.frontend.scanRoms(paths.first);
     if (mounted) setState(() {});
+  }
+
+  Future<List<String>> _promptForPaths({required String title, required String hint, bool multiline = false}) async {
+    final controller = TextEditingController(text: multiline ? '' : hint);
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF081321),
+        title: Text(title),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          minLines: multiline ? 3 : 1,
+          maxLines: multiline ? 6 : 1,
+          decoration: InputDecoration(
+            hintText: multiline ? '$hint\n/path/to/another.rom' : hint,
+            helperText: multiline ? '複数指定する場合は1行に1ファイルずつ入力してください。' : null,
+          ),
+          style: const TextStyle(color: _text),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('キャンセル')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(controller.text), child: const Text('OK')),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (value == null) return const [];
+    return value
+        .split(RegExp(r'\r?\n'))
+        .map((path) => path.trim())
+        .where((path) => path.isNotEmpty)
+        .toList();
   }
 
   Future<void> _showCoreOptions(BuildContext context) async {
