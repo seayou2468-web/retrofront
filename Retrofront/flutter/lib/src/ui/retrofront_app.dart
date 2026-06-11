@@ -76,16 +76,19 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
     final plan = await widget.frontend.planContentLaunch(game.path, preferredCorePath: preferredCorePath);
     if (!mounted) return;
     var launchGame = game;
+    var selectedCorePath = plan.selectedCorePath;
     if (plan.needsCoreChoice) {
       final selected = await _chooseCoreForGame(game, plan.candidates);
       if (selected == null) return;
+      selectedCorePath = selected.path;
       await widget.frontend.setSetting('content_core_${plan.contentExtension}', selected.path);
       launchGame = GameEntry(title: game.title, system: selected.system, core: selected.name, lastPlayed: game.lastPlayed, playTime: game.playTime, path: game.path, initials: game.initials);
     } else if (plan.isSelected) {
-      final selected = plan.selectedCorePath.isEmpty
+      final selected = selectedCorePath.isEmpty
           ? (plan.candidates.isNotEmpty ? plan.candidates.first : null)
-          : plan.candidates.where((core) => core.path == plan.selectedCorePath).firstOrNull;
+          : plan.candidates.where((core) => core.path == selectedCorePath).firstOrNull;
       if (selected != null) {
+        selectedCorePath = selected.path;
         await widget.frontend.setSetting('content_core_${plan.contentExtension}', selected.path);
         launchGame = GameEntry(title: game.title, system: selected.system, core: selected.name, lastPlayed: game.lastPlayed, playTime: game.playTime, path: game.path, initials: game.initials);
       }
@@ -93,7 +96,7 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(plan.reason.isEmpty ? '互換コアが見つかりません。info.zipを取得してコアを再スキャンしてください。' : plan.reason)));
       return;
     }
-    final ok = await widget.frontend.launch(launchGame);
+    final ok = await widget.frontend.launchPath(game.path, preferredCorePath: selectedCorePath);
     await _refreshRuntimeLists();
     if (!mounted) return;
     setState(() => _selectedGame = launchGame);

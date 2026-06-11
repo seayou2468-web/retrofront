@@ -64,9 +64,6 @@ impl CoreInfoList {
                 continue;
             }
             let mut info = self.load_info_for_core(&path);
-            if info.supported_extensions.is_empty() {
-                continue;
-            }
             info.path = path;
             self.cores.push(info);
         }

@@ -67,7 +67,7 @@ targets:
         script: |
           set -eu
           CORES_SRC="${SRCROOT}/archifacts/ios"
-          CORES_DST="${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks"
+          CORES_DST="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/dylibs"
 
           sign_core() {
             if [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then

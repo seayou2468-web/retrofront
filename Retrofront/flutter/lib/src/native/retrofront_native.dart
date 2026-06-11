@@ -209,6 +209,7 @@ abstract interface class RetrofrontFrontend {
   Future<bool> loadCore(CoreEntry core);
   Future<LaunchPlanEntry> planContentLaunch(String path, {String preferredCorePath = ''});
   Future<bool> launch(GameEntry game);
+  Future<bool> launchPath(String path, {String preferredCorePath = ''});
   Future<bool> runFrame();
   Future<bool> quickSave({int slot = 0});
   Future<bool> quickLoad({int slot = 0});
@@ -565,7 +566,7 @@ class RetrofrontNative implements RetrofrontFrontend {
           .listSync(recursive: true)
           .where((entity) => entity is File || (entity is Directory && entity.path.toLowerCase().endsWith('.framework')))
           .where((entity) => _isCoreLibrary(entity.path))
-          .map((entity) => CoreEntry(name: _titleCase(p.basenameWithoutExtension(entity.path).replaceAll('_libretro', '').replaceAll('_ios', '')), system: 'Libretro', path: entity.path))
+          .map((entity) => _fallbackCoreEntryForPath(entity.path))
           .toList();
       final byPath = {for (final core in [...cores, ...found]) core.path: core};
       cores = byPath.values.toList()..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
@@ -643,26 +644,50 @@ class RetrofrontNative implements RetrofrontFrontend {
 
   @override
   Future<bool> launch(GameEntry game) async {
-    if (!File(game.path).existsSync()) {
+    final preferred = _corePathForGame(game);
+    final ok = await launchPath(game.path, preferredCorePath: preferred);
+    if (ok) {
+      final loadedCore = _coreNameForPath(preferred);
+      runtime = runtime.copyWith(
+        loadedGame: game.title,
+        loadedCore: loadedCore.isEmpty ? game.core : loadedCore,
+        running: true,
+      );
+    }
+    return ok;
+  }
+
+  @override
+  Future<bool> launchPath(String path, {String preferredCorePath = ''}) async {
+    if (!File(path).existsSync()) {
       statusMessage = 'Launch failed: ROM file is missing.';
       return false;
     }
-    var ok = _handle == null;
-    var selectedCorePath = _corePathForGame(game);
+
     final handle = _handle;
+    var selectedCorePath = preferredCorePath;
+    var ok = handle == null;
+
     if (handle != null) {
-      final ext = p.extension(game.path).replaceFirst('.', '').toLowerCase();
-      final plan = await planContentLaunch(game.path, preferredCorePath: settings['content_core_$ext'] ?? '');
-      if (!plan.isSelected) {
-        statusMessage = plan.needsCoreChoice
-            ? 'Launch failed: select a core for .$ext.'
-            : (plan.reason.isEmpty ? 'Launch failed: no compatible core found for .$ext.' : plan.reason);
+      if (selectedCorePath.isEmpty) {
+        final ext = p.extension(path).replaceFirst('.', '').toLowerCase();
+        final plan = await planContentLaunch(path, preferredCorePath: settings['content_core_$ext'] ?? '');
+        if (!plan.isSelected) {
+          statusMessage = plan.needsCoreChoice
+              ? 'Launch failed: select a core for .$ext.'
+              : (plan.reason.isEmpty ? 'Launch failed: no compatible core found for .$ext.' : plan.reason);
+          return false;
+        }
+        selectedCorePath = plan.selectedCorePath.isNotEmpty
+            ? plan.selectedCorePath
+            : (plan.candidates.isNotEmpty ? plan.candidates.first.path : '');
+      }
+      if (selectedCorePath.isEmpty) {
+        statusMessage = 'Launch failed: no compatible core was selected.';
         return false;
       }
-      selectedCorePath = plan.selectedCorePath.isNotEmpty
-          ? plan.selectedCorePath
-          : _corePathForGame(game);
-      final cPath = game.path.toNativeUtf8();
+
+      final cPath = path.toNativeUtf8();
       final cCore = selectedCorePath.toNativeUtf8();
       final cMeta = ''.toNativeUtf8();
       try {
@@ -673,10 +698,14 @@ class RetrofrontNative implements RetrofrontFrontend {
         malloc.free(cMeta);
       }
     }
+
     if (ok || handle == null) {
-      final loadedCore = _coreNameForPath(selectedCorePath);
-      runtime = runtime.copyWith(loadedGame: game.title, loadedCore: loadedCore.isEmpty ? game.core : loadedCore, running: true);
-      statusMessage = 'Loaded game: ${p.basename(game.path)}';
+      runtime = runtime.copyWith(
+        loadedGame: _titleCase(p.basenameWithoutExtension(path)),
+        loadedCore: _coreNameForPath(selectedCorePath),
+        running: true,
+      );
+      statusMessage = 'Loaded game: ${p.basename(path)}';
     } else {
       statusMessage = 'Launch failed: ${_lastError()}';
     }
@@ -979,8 +1008,9 @@ class RetrofrontNative implements RetrofrontFrontend {
   }
 
   String _corePathForGame(GameEntry game) {
-    if (game.core.isEmpty) return cores.isNotEmpty ? cores.first.path : '';
-    return cores.firstWhere((core) => core.name == game.core, orElse: () => cores.isNotEmpty ? cores.first : const CoreEntry(name: '', system: '', path: '')).path;
+    if (game.core.isEmpty) return '';
+    if (File(game.core).existsSync() || Directory(game.core).existsSync()) return game.core;
+    return cores.firstWhere((core) => core.name == game.core, orElse: () => const CoreEntry(name: '', system: '', path: '')).path;
   }
 
   String _coreNameForPath(String path) {
@@ -1010,8 +1040,9 @@ class RetrofrontNative implements RetrofrontFrontend {
     final envCoreDir = Platform.environment['RETROFRONT_BUNDLED_CORE_DIR'];
     return <String>{
       if (envCoreDir != null && envCoreDir.isNotEmpty) envCoreDir,
-      if (Platform.isIOS) p.join(executableDir, 'Frameworks'),
       if (Platform.isIOS) p.join(executableDir, 'dylibs'),
+      if (Platform.isIOS) p.join(executableDir, 'Resources', 'dylibs'),
+      if (Platform.isIOS) p.join(executableDir, 'Frameworks'),
       if (Platform.isIOS) executableDir,
       if (Platform.isIOS) p.join(current, 'archifacts', 'ios'),
       if (Platform.isIOS) p.join(current, '..', 'archifacts', 'ios'),
@@ -1300,6 +1331,102 @@ overlay0_desc10 = "menu_toggle,0.08,0.13,rect,0.06,0.04"
         games.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
         break;
     }
+  }
+
+  CoreEntry _fallbackCoreEntryForPath(String path) {
+    final info = _fallbackInfoForCorePath(path);
+    final stem = p.basenameWithoutExtension(path);
+    final name = info['display_name']?.isNotEmpty == true
+        ? info['display_name']!
+        : _titleCase(stem.replaceAll('_libretro', '').replaceAll('.libretro', '').replaceAll('_ios', ''));
+    final system = info['systemname'] ?? info['system_name'] ?? 'Libretro';
+    final extensions = (info['supported_extensions'] ?? '')
+        .split('|')
+        .map((ext) => ext.trim().replaceFirst('.', '').toLowerCase())
+        .where((ext) => ext.isNotEmpty)
+        .toSet();
+    return CoreEntry(name: name, system: system.isEmpty ? 'Libretro' : system, path: path, supportedExtensions: extensions);
+  }
+
+  Map<String, String> _fallbackInfoForCorePath(String corePath) {
+    final infoRoot = settings['libretro_info_path'];
+    if (infoRoot == null || infoRoot.isEmpty) return const {};
+    for (final dir in _fallbackInfoSearchDirectories(infoRoot)) {
+      for (final candidate in _fallbackInfoNameCandidates(corePath)) {
+        final file = File(p.join(dir, '$candidate.info'));
+        if (file.existsSync()) return _parseInfoFile(file);
+      }
+    }
+    return const {};
+  }
+
+  List<String> _fallbackInfoSearchDirectories(String infoRoot) {
+    final parent = p.dirname(infoRoot);
+    return <String>{
+      infoRoot,
+      p.join(infoRoot, 'info'),
+      p.join(infoRoot, 'assets', 'info'),
+      p.join(parent, 'assets', 'info'),
+    }.toList();
+  }
+
+  List<String> _fallbackInfoNameCandidates(String corePath) {
+    final stems = <String>{p.basenameWithoutExtension(corePath)};
+    if (corePath.toLowerCase().endsWith('.framework')) {
+      stems.add(p.basenameWithoutExtension(corePath));
+    }
+    final bases = <String>{};
+    for (final stem in stems) {
+      bases.add(stem);
+      if (stem.startsWith('lib') && stem.length > 3) bases.add(stem.substring(3));
+      bases.add(stem.replaceAll('-', '_'));
+      bases.add(stem.replaceAll('.', '_'));
+    }
+    for (final base in [...bases]) {
+      for (final suffix in const ['_ios', '_macos', '_android']) {
+        if (base.endsWith(suffix)) {
+          final stripped = base.substring(0, base.length - suffix.length);
+          bases.add(stripped);
+          if (stripped.endsWith('_libretro')) bases.add(stripped.substring(0, stripped.length - '_libretro'.length));
+          if (stripped.endsWith('.libretro')) bases.add(stripped.substring(0, stripped.length - '.libretro'.length));
+        }
+      }
+      if (base.endsWith('_libretro')) bases.add(base.substring(0, base.length - '_libretro'.length));
+      if (base.endsWith('.libretro')) bases.add(base.substring(0, base.length - '.libretro'.length));
+    }
+    final candidates = <String>{};
+    for (final base in bases.where((base) => base.isNotEmpty)) {
+      final lower = base.toLowerCase();
+      for (final variant in <String>{
+        base,
+        lower,
+        lower.replaceAll(RegExp(r'[-.]'), '_'),
+        lower.replaceAll(RegExp(r'[-_]'), '.'),
+        lower.replaceAll(RegExp(r'[_.]'), '-'),
+      }) {
+        candidates.add(variant);
+        if (!variant.endsWith('_libretro') && !variant.endsWith('.libretro') && !variant.endsWith('-libretro')) {
+          candidates.add('${variant}_libretro');
+        }
+      }
+    }
+    return candidates.toList();
+  }
+
+  Map<String, String> _parseInfoFile(File file) {
+    final values = <String, String>{};
+    for (final line in file.readAsLinesSync()) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty || trimmed.startsWith('#') || !trimmed.contains('=')) continue;
+      final index = trimmed.indexOf('=');
+      final key = trimmed.substring(0, index).trim();
+      var value = trimmed.substring(index + 1).trim();
+      if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+        value = value.substring(1, value.length - 1);
+      }
+      values[key] = value;
+    }
+    return values;
   }
 
   bool _isCoreLibrary(String path) {
