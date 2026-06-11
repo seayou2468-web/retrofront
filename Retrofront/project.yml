@@ -38,6 +38,8 @@ targets:
       - framework: target/aarch64-apple-ios/release/libretrofront_ui.a
         embed: false
       - framework: ../Externals/MoltenVK/MoltenVK.xcframework
+      - sdk: UIKit.framework
+      - sdk: QuartzCore.framework
       - sdk: OpenGLES.framework
       - sdk: GLKit.framework
     postBuildScripts:
@@ -46,6 +48,21 @@ targets:
           set -eu
           CORES_SRC="${SRCROOT}/archifacts/ios"
           CORES_DST="${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Frameworks"
+          # Keep the default TestFlight/Debug IPA small and startup-safe.
+          # Set RETROFRONT_IOS_CORES=all to embed every bundled core, or provide a
+          # comma-separated allow-list such as "mgba_libretro_ios.dylib,snes9x_libretro_ios.dylib".
+          RETROFRONT_IOS_CORES="${RETROFRONT_IOS_CORES:-mgba_libretro_ios.dylib,snes9x_libretro_ios.dylib}"
+
+          should_copy_core() {
+            local name="$1"
+            if [ "${RETROFRONT_IOS_CORES}" = "all" ]; then
+              return 0
+            fi
+            case ",${RETROFRONT_IOS_CORES}," in
+              *,"${name}",*) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
 
           sign_core() {
             if [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
@@ -56,13 +73,23 @@ targets:
           mkdir -p "${CORES_DST}"
           if [ -d "${CORES_SRC}" ]; then
             find "${CORES_SRC}" -maxdepth 1 -type f -name '*.dylib' -print | while IFS= read -r core; do
-              destination="${CORES_DST}/$(basename "${core}")"
+              name="$(basename "${core}")"
+              if ! should_copy_core "${name}"; then
+                echo "Skipping ${name}; not listed in RETROFRONT_IOS_CORES"
+                continue
+              fi
+              destination="${CORES_DST}/${name}"
               cp -f "${core}" "${destination}"
               sign_core "${destination}"
             done
 
             find "${CORES_SRC}" -maxdepth 1 -type d -name '*.framework' -print | while IFS= read -r core; do
-              destination="${CORES_DST}/$(basename "${core}")"
+              name="$(basename "${core}")"
+              if ! should_copy_core "${name}"; then
+                echo "Skipping ${name}; not listed in RETROFRONT_IOS_CORES"
+                continue
+              fi
+              destination="${CORES_DST}/${name}"
               rm -rf "${destination}"
               ditto "${core}" "${destination}"
               sign_core "${destination}"
@@ -74,6 +101,7 @@ targets:
         PRODUCT_NAME: Retrofront
         INFOPLIST_FILE: apps/iOS/Resources/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: "YES"
         FRAMEWORK_SEARCH_PATHS: "$(inherited) $(SRCROOT)/cores $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Frameworks"
         LIBRARY_SEARCH_PATHS: "$(inherited) $(SRCROOT)/target/aarch64-apple-ios/release"
         OTHER_LDFLAGS: "$(inherited) -lretrofront_ui"

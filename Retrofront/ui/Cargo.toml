@@ -17,7 +17,7 @@ path = "src/main.rs"
 [features]
 default = ["desktop"]
 desktop = ["slint/backend-winit", "slint/renderer-femtovg"]
-ios = []
+ios = ["slint/backend-winit", "slint/renderer-software"]
 
 [dependencies]
 retrofront-core = { path = "../core" }

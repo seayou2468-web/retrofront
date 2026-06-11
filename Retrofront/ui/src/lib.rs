@@ -6,7 +6,7 @@ use std::cell::{Cell, RefCell};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, UNIX_EPOCH};
 
 slint::include_modules!();
 
@@ -256,8 +256,12 @@ fn install_packaged_assets(
     ] {
         let zip = asset_dir.join(format!("{name}.zip"));
         if zip.exists() {
+            if asset_pack_already_installed(&zip, destination) {
+                continue;
+            }
             match core.install_assets_zip(&zip, destination) {
                 Ok(report) => {
+                    let _ = write_asset_install_marker(&zip, destination);
                     *status.borrow_mut() = format!(
                         "Installed {name}: {} files, {} folders",
                         report.files_written, report.directories_created
@@ -267,6 +271,44 @@ fn install_packaged_assets(
             }
         }
     }
+}
+
+fn asset_pack_already_installed(zip: &Path, destination: &Path) -> bool {
+    let marker = destination.join(".retrofront-pack-installed");
+    let Ok(expected) = asset_pack_fingerprint(zip) else {
+        return false;
+    };
+    std::fs::read_to_string(marker).is_ok_and(|actual| actual == expected)
+}
+
+fn write_asset_install_marker(zip: &Path, destination: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(destination)
+        .map_err(|error| format!("create {}: {error}", destination.display()))?;
+    let fingerprint = asset_pack_fingerprint(zip)?;
+    std::fs::write(destination.join(".retrofront-pack-installed"), fingerprint).map_err(|error| {
+        format!(
+            "write install marker for {}: {error}",
+            destination.display()
+        )
+    })
+}
+
+fn asset_pack_fingerprint(zip: &Path) -> Result<String, String> {
+    let metadata =
+        std::fs::metadata(zip).map_err(|error| format!("metadata {}: {error}", zip.display()))?;
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .unwrap_or(Duration::ZERO);
+    Ok(format!(
+        "{}:{}:{}",
+        zip.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default(),
+        metadata.len(),
+        modified.as_secs()
+    ))
 }
 
 fn wire_callbacks(

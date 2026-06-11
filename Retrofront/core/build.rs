@@ -17,6 +17,18 @@ fn main() {
     let mut builder = bindgen::Builder::default().header(header.to_string_lossy());
     if let Some(clang_target) = clang_target {
         builder = builder.clang_arg(format!("--target={clang_target}"));
+
+        if let Ok(sdkroot) = env::var("SDKROOT") {
+            if !sdkroot.is_empty() {
+                builder = builder.clang_arg("-isysroot").clang_arg(sdkroot);
+            }
+        }
+
+        if let Ok(deployment_target) = env::var("IPHONEOS_DEPLOYMENT_TARGET") {
+            if !deployment_target.is_empty() {
+                builder = builder.clang_arg(format!("-miphoneos-version-min={deployment_target}"));
+            }
+        }
     }
 
     let bindings = builder
