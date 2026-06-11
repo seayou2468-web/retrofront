@@ -84,12 +84,6 @@ jobs:
         run: |
           brew install xcodegen
 
-      - name: Fetch bundled frontend assets
-        working-directory: Retrofront
-        shell: bash
-        run: |
-          ./scripts/fetch-frontend-assets.sh apps/iOS/Resources
-
       - name: Install Rust iOS target
         shell: bash
         run: |
