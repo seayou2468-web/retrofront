@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: retrofront-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: retrofront-global
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
