@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:ffi' as ffi;
 import 'dart:io' show Directory, File, HttpClient, HttpStatus, Platform;
-import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
@@ -273,7 +272,7 @@ class RetrofrontNative implements RetrofrontFrontend {
         process.lookup<ffi.NativeFunction<ffi.Pointer<RfFrontend> Function()>>('rf_frontend_create');
         return process;
       } catch (_) {
-        // Statically linked symbols are optional; continue in preview mode.
+        // Statically linked symbols are optional; report unavailable if absent.
       }
     }
     return null;
@@ -487,7 +486,7 @@ class RetrofrontNative implements RetrofrontFrontend {
     }
     await scanRoms(settings['content_directory']!);
     statusMessage = _handle == null
-        ? 'Native core library not found; UI is running in preview mode.'
+        ? 'Native core library not found; runtime actions are disabled until it is bundled.'
         : 'RetroArch-compatible storage initialized (${cores.length} cores, ${games.length} ROMs).';
   }
 
@@ -572,8 +571,12 @@ class RetrofrontNative implements RetrofrontFrontend {
 
   @override
   Future<bool> loadCore(CoreEntry core) async {
-    var ok = File(core.path).existsSync() || Directory(core.path).existsSync() || _handle == null;
+    var ok = File(core.path).existsSync() || Directory(core.path).existsSync();
     final handle = _handle;
+    if (handle == null) {
+      statusMessage = 'Core load failed: native core library is unavailable.';
+      return false;
+    }
     if (handle != null) {
       final cPath = core.path.toNativeUtf8();
       try {
@@ -603,7 +606,7 @@ class RetrofrontNative implements RetrofrontFrontend {
         contentExtension: ext,
         selectedCorePath: compatible.length == 1 ? compatible.first.path : '',
         candidates: compatible,
-        reason: compatible.isEmpty ? 'No compatible core found' : 'Preview launch plan',
+        reason: compatible.isEmpty ? 'No compatible core found' : 'Native library unavailable; launch is disabled.',
       );
     }
     final cPath = path.toNativeUtf8();
@@ -662,8 +665,13 @@ class RetrofrontNative implements RetrofrontFrontend {
     }
 
     final handle = _handle;
+    if (handle == null) {
+      statusMessage = 'Launch failed: native core library is unavailable.';
+      return false;
+    }
+
     var selectedCorePath = preferredCorePath;
-    var ok = handle == null;
+    var ok = false;
 
     if (handle != null) {
       if (selectedCorePath.isEmpty) {
@@ -712,20 +720,43 @@ class RetrofrontNative implements RetrofrontFrontend {
   @override
   Future<bool> runFrame() async {
     final handle = _handle;
-    final ok = handle == null ? true : _runFrame(handle);
+    if (handle == null) {
+      statusMessage = 'Run failed: native core library is unavailable.';
+      return false;
+    }
+    final ok = _runFrame(handle);
     if (ok) runtime = runtime.copyWith(frameNumber: runtime.frameNumber + 1, running: true);
     return ok;
   }
 
   @override
-  Future<bool> quickSave({int slot = 0}) async => _handle == null ? true : _saveState(_handle!, slot);
+  Future<bool> quickSave({int slot = 0}) async {
+    final handle = _handle;
+    if (handle == null) {
+      statusMessage = 'Quick save failed: native core library is unavailable.';
+      return false;
+    }
+    return _saveState(handle, slot);
+  }
 
   @override
-  Future<bool> quickLoad({int slot = 0}) async => _handle == null ? true : _loadState(_handle!, slot);
+  Future<bool> quickLoad({int slot = 0}) async {
+    final handle = _handle;
+    if (handle == null) {
+      statusMessage = 'Quick load failed: native core library is unavailable.';
+      return false;
+    }
+    return _loadState(handle, slot);
+  }
 
   @override
   Future<bool> reset() async {
-    final ok = _handle == null ? true : _reset(_handle!);
+    final handle = _handle;
+    if (handle == null) {
+      statusMessage = 'Reset failed: native core library is unavailable.';
+      return false;
+    }
+    final ok = _reset(handle);
     if (ok) runtime = runtime.copyWith(frameNumber: 0, running: true);
     return ok;
   }
@@ -935,7 +966,7 @@ class RetrofrontNative implements RetrofrontFrontend {
   @override
   Future<VideoFrame?> copyVideoFrame() async {
     final handle = _handle;
-    if (handle == null) return VideoFrame(width: 320, height: 180, rgba: _demoFrame(runtime.frameNumber));
+    if (handle == null) return null;
     final info = malloc<RfVideoFrameInfo>();
     try {
       if (!_videoFrameInfo(handle, info) || info.ref.rgbaLen == 0 || info.ref.width == 0 || info.ref.height == 0) return null;
@@ -1498,21 +1529,4 @@ overlay0_desc10 = "menu_toggle,0.08,0.13,rect,0.06,0.04"
   String _titleCase(String name) => name.replaceAll(RegExp('[_-]+'), ' ').split(' ').where((part) => part.isNotEmpty).map((part) => '${part[0].toUpperCase()}${part.substring(1)}').join(' ');
 
   String _initials(String name) => name.split(RegExp(r'[_\-\s]+')).where((part) => part.isNotEmpty).take(2).map((part) => part[0].toUpperCase()).join();
-
-  Uint8List _demoFrame(int frame) {
-    const width = 320;
-    const height = 180;
-    final bytes = Uint8List(width * height * 4);
-    for (var y = 0; y < height; y++) {
-      for (var x = 0; x < width; x++) {
-        final index = (y * width + x) * 4;
-        final wave = (math.sin((x + frame) / 18) + math.cos((y - frame) / 15)) * 40 + 90;
-        bytes[index] = (30 + wave).clamp(0, 255).toInt();
-        bytes[index + 1] = (80 + x / width * 120).clamp(0, 255).toInt();
-        bytes[index + 2] = (120 + y / height * 90).clamp(0, 255).toInt();
-        bytes[index + 3] = 255;
-      }
-    }
-    return bytes;
-  }
 }

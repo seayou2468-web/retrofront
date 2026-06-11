@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../native/retrofront_native.dart';
 
@@ -26,6 +27,7 @@ class RetrofrontApp extends StatefulWidget {
 }
 
 class _RetrofrontAppState extends State<RetrofrontApp> {
+  static const _documentPicker = MethodChannel('retrofront/document_picker');
   Timer? _frameTimer;
   int _tab = 0;
   String _section = 'ライブラリ';
@@ -410,9 +412,9 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
             _GradientButton(label: 'プレイ', onTap: () => _launchGame(game)),
             const SizedBox(height: 18),
             Row(children: [
-              Expanded(child: _ActionTile(icon: Icons.gamepad_outlined, label: 'コアをロード', onTap: () {})),
+              Expanded(child: _ActionTile(icon: Icons.gamepad_outlined, label: 'コアをロード', onTap: _selectedCore == null ? null : () async { await widget.frontend.loadCore(_selectedCore!); await _refreshRuntimeLists(); if (mounted) setState(() {}); })),
               const SizedBox(width: 18),
-              Expanded(child: _ActionTile(icon: Icons.info_outline, label: '詳細を表示', onTap: () {})),
+              Expanded(child: _ActionTile(icon: Icons.info_outline, label: '詳細を表示', onTap: () => _showGameDetails(game))),
             ]),
           ],
         ),
@@ -425,7 +427,7 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
       child: Padding(
         padding: const EdgeInsets.all(22),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [const Text('ROMをインポート', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)), const Spacer(), IconButton(onPressed: () {}, icon: const Icon(Icons.close, size: 18))]),
+          Row(children: [const Text('ROMをインポート', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)), const Spacer(), IconButton(onPressed: () => setState(() => _section = 'ライブラリ'), icon: const Icon(Icons.close, size: 18))]),
           const SizedBox(height: 8),
           Expanded(
             child: DecoratedBox(
@@ -783,11 +785,8 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
   }
 
   Future<void> _pickRom() async {
-    final paths = await _promptForPaths(
-      title: 'ROMファイルのパス',
-      hint: widget.frontend.settings['content_directory'] ?? '/path/to/game.rom',
-      multiline: true,
-    );
+    final paths = await _pickFiles(allowMultiple: true);
+
     if (paths.isEmpty) return;
     final importedGames = <GameEntry>[];
     for (final path in paths) {
@@ -818,13 +817,79 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
   }
 
   Future<void> _pickRomDirectory() async {
-    final paths = await _promptForPaths(
-      title: 'ROMディレクトリのパス',
-      hint: widget.frontend.settings['content_directory'] ?? '/path/to/roms',
-    );
+    final paths = await _pickDirectory();
+
     if (paths.isEmpty) return;
     await widget.frontend.scanRoms(paths.first);
     if (mounted) setState(() {});
+  }
+
+
+  Future<List<String>> _pickFiles({required bool allowMultiple}) async {
+    if (Platform.isIOS) {
+      try {
+        final result = await _documentPicker.invokeListMethod<String>('pickFiles', {'allowMultiple': allowMultiple});
+        return result ?? const [];
+      } on PlatformException catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('ファイル選択を開けませんでした: ${error.message ?? error.code}')));
+        }
+        return const [];
+      } on MissingPluginException {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('iOSのファイル選択ブリッジが組み込まれていません。Xcodeプロジェクトを再生成してください。')));
+        }
+        return const [];
+      }
+    }
+    return _promptForPaths(
+      title: 'ROMファイルのパス',
+      hint: widget.frontend.settings['content_directory'] ?? '/path/to/game.rom',
+      multiline: true,
+    );
+  }
+
+  Future<List<String>> _pickDirectory() async {
+    if (Platform.isIOS) {
+      try {
+        final result = await _documentPicker.invokeListMethod<String>('pickDirectory');
+        return result ?? const [];
+      } on PlatformException catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('ディレクトリ選択を開けませんでした: ${error.message ?? error.code}')));
+        }
+        return const [];
+      } on MissingPluginException {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('iOSのディレクトリ選択ブリッジが組み込まれていません。Xcodeプロジェクトを再生成してください。')));
+        }
+        return const [];
+      }
+    }
+    return _promptForPaths(
+      title: 'ROMディレクトリのパス',
+      hint: widget.frontend.settings['content_directory'] ?? '/path/to/roms',
+    );
+  }
+
+  Future<void> _showGameDetails(GameEntry game) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF081321),
+      showDragHandle: true,
+      builder: (context) => ListView(
+        padding: const EdgeInsets.all(18),
+        children: [
+          Text(game.title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 12),
+          _SettingsRow(title: 'System', value: game.system),
+          _SettingsRow(title: 'Core', value: game.core.isEmpty ? '未割り当て' : game.core),
+          _SettingsRow(title: 'Path', value: game.path),
+          _SettingsRow(title: 'Last Played', value: game.lastPlayed),
+          _SettingsRow(title: 'Play Time', value: game.playTime),
+        ],
+      ),
+    );
   }
 
   Future<List<String>> _promptForPaths({required String title, required String hint, bool multiline = false}) async {
@@ -1142,7 +1207,7 @@ class _RailItem extends StatelessWidget { const _RailItem({required this.label, 
 class _Chip extends StatelessWidget { const _Chip({required this.label}); final String label; @override Widget build(BuildContext context) => Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5), decoration: BoxDecoration(color: const Color(0xFF142033), borderRadius: BorderRadius.circular(7), border: Border.all(color: _line)), child: Text(label, style: const TextStyle(color: _text, fontSize: 12))); }
 class _GradientButton extends StatelessWidget { const _GradientButton({required this.label, required this.onTap}); final String label; final FutureOr<void> Function() onTap; @override Widget build(BuildContext context) => InkWell(onTap: () => onTap(), borderRadius: BorderRadius.circular(10), child: Container(height: 52, alignment: Alignment.center, decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), gradient: const LinearGradient(colors: [_accent, _cyan])), child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900)))); }
 class _SmallButton extends StatelessWidget { const _SmallButton({required this.label, required this.onTap}); final String label; final VoidCallback onTap; @override Widget build(BuildContext context) => OutlinedButton(onPressed: onTap, style: OutlinedButton.styleFrom(foregroundColor: _text, side: const BorderSide(color: _line), backgroundColor: const Color(0xFF111D2C)), child: Text(label)); }
-class _ActionTile extends StatelessWidget { const _ActionTile({required this.icon, required this.label, required this.onTap}); final IconData icon; final String label; final VoidCallback onTap; @override Widget build(BuildContext context) => InkWell(onTap: onTap, child: Container(height: 64, decoration: BoxDecoration(color: const Color(0xFF111C2C), borderRadius: BorderRadius.circular(14), border: Border.all(color: _line)), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(icon, color: _text), const SizedBox(height: 8), Text(label, style: const TextStyle(color: _muted, fontSize: 12))]))); }
+class _ActionTile extends StatelessWidget { const _ActionTile({required this.icon, required this.label, required this.onTap}); final IconData icon; final String label; final FutureOr<void> Function()? onTap; @override Widget build(BuildContext context) => InkWell(onTap: onTap == null ? null : () => onTap!(), child: Container(height: 64, decoration: BoxDecoration(color: const Color(0xFF111C2C), borderRadius: BorderRadius.circular(14), border: Border.all(color: _line)), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(icon, color: _text), const SizedBox(height: 8), Text(label, style: const TextStyle(color: _muted, fontSize: 12))]))); }
 class _PathSelector extends StatelessWidget { const _PathSelector({required this.path, required this.onTap}); final String path; final VoidCallback onTap; @override Widget build(BuildContext context) => InkWell(onTap: onTap, child: Container(height: 38, padding: const EdgeInsets.symmetric(horizontal: 12), decoration: BoxDecoration(color: const Color(0xFF101A2A), borderRadius: BorderRadius.circular(8), border: Border.all(color: _line)), child: Row(children: [Expanded(child: Text(path, style: const TextStyle(color: _muted, fontSize: 12))), const Icon(Icons.more_horiz, color: _text)]))); }
 class _GameRow extends StatelessWidget { const _GameRow({required this.game, required this.desktop, required this.selected, required this.onTap, required this.onPlay}); final GameEntry game; final bool desktop; final bool selected; final VoidCallback onTap; final VoidCallback onPlay; @override Widget build(BuildContext context) => InkWell(onTap: onTap, borderRadius: BorderRadius.circular(10), child: Container(height: desktop ? 58 : 58, padding: const EdgeInsets.symmetric(horizontal: 10), decoration: BoxDecoration(color: selected ? const Color(0xCC1D2A5B) : Colors.transparent, borderRadius: BorderRadius.circular(10), border: selected ? Border.all(color: _accent) : null), child: Row(children: [Container(width: 44, height: 44, decoration: BoxDecoration(borderRadius: BorderRadius.circular(7), gradient: const LinearGradient(colors: [Color(0xFFE6862D), Color(0xFF38235F), Color(0xFF1FC5D6)])), child: Center(child: Text(game.initials, style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.white)))), const SizedBox(width: 12), Expanded(flex: 3, child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(game.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: _text, fontWeight: FontWeight.w800, fontSize: 13)), Text(game.system, style: const TextStyle(color: _muted, fontSize: 11))])), if (desktop) Expanded(child: Text(game.core, style: const TextStyle(color: _muted, fontSize: 12))), if (desktop) Expanded(child: Text(game.lastPlayed, style: const TextStyle(color: _muted, fontSize: 12))), SizedBox(width: desktop ? 90 : 54, child: Text(game.playTime, textAlign: TextAlign.right, style: const TextStyle(color: _muted, fontSize: 11))), const SizedBox(width: 10), InkWell(onTap: onPlay, customBorder: const CircleBorder(), child: CircleAvatar(radius: 16, backgroundColor: const Color(0xFF152035), child: Icon(selected ? Icons.play_arrow : Icons.more_horiz, color: _text, size: 18)))])) ); }
 class _CoreRow extends StatelessWidget { const _CoreRow({required this.core, required this.selected, required this.onTap}); final CoreEntry core; final bool selected; final VoidCallback onTap; @override Widget build(BuildContext context) => InkWell(onTap: onTap, borderRadius: BorderRadius.circular(12), child: Container(height: 52, padding: const EdgeInsets.symmetric(horizontal: 12), decoration: BoxDecoration(color: selected ? const Color(0xFF2C2368) : Colors.transparent, borderRadius: BorderRadius.circular(12), border: selected ? Border.all(color: const Color(0xFF6E8CFF)) : null), child: Row(children: [Container(width: 32, height: 32, decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), gradient: const LinearGradient(colors: [_accent, _cyan])), child: const Icon(Icons.extension, size: 16)), const SizedBox(width: 12), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(core.name, style: const TextStyle(color: _text, fontWeight: FontWeight.w900, fontSize: 12)), Text(core.system, style: const TextStyle(color: _muted, fontSize: 10))])), Icon(selected ? Icons.check_circle : Icons.info_outline, color: selected ? _accent : _muted, size: 18)]))); }

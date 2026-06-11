@@ -20,6 +20,7 @@ targets:
       - path: flutter/ios/Runner
         optional: true
       - path: apps/iOS/Resources
+      - path: apps/iOS/Native
 
     dependencies:
       - framework: target/aarch64-apple-ios/release/libretrofront_core.dylib
@@ -106,6 +107,7 @@ targets:
         COPY_PHASE_STRIP: "YES"
         DEBUG_INFORMATION_FORMAT: "dwarf"
         GCC_SYMBOLS_PRIVATE_EXTERN: "YES"
+        ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: "NO"
 
 schemes:
   RetrofrontiOS:
