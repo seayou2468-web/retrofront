@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io' show File, Platform;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -208,16 +208,36 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
       backgroundColor: Colors.transparent,
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
           child: Column(
             children: [
-              Expanded(child: pages[_tab]),
-              _mobileNav(),
+              _mobileHeader(),
               const SizedBox(height: 10),
+              Expanded(child: AnimatedSwitcher(duration: const Duration(milliseconds: 180), child: KeyedSubtree(key: ValueKey(_tab), child: pages[_tab]))),
+              const SizedBox(height: 10),
+              _mobileNav(),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _mobileHeader() {
+    final running = widget.frontend.runtime.running;
+    return Container(
+      height: 58,
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      decoration: BoxDecoration(color: const Color(0xDD07111E), borderRadius: BorderRadius.circular(18), border: Border.all(color: _line)),
+      child: Row(children: [
+        Container(width: 34, height: 34, decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [_accent, _cyan]))),
+        const SizedBox(width: 10),
+        Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Retrofront', style: TextStyle(color: _text, fontWeight: FontWeight.w900, fontSize: 16)),
+          Text(running ? 'Running: ${widget.frontend.runtime.loadedGame}' : widget.frontend.statusMessage, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: _muted, fontSize: 11)),
+        ])),
+        if (running) _SmallButton(label: 'メニュー', onTap: () => setState(widget.frontend.openQuickMenu)) else InkWell(onTap: _pickRom, child: const _IconPill(icon: Icons.add)),
+      ]),
     );
   }
 
@@ -556,7 +576,19 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
             ]),
           ),
         ]),
-        if (widget.frontend.runtime.overlayEnabled) _GameOverlay(onButton: (id, down) => widget.frontend.setJoypadButton(id, down), onMenu: () => setState(widget.frontend.openQuickMenu)),
+        if (widget.frontend.runtime.overlayEnabled)
+          _GameOverlay(
+            controls: const [],
+            opacity: double.tryParse(widget.frontend.settings['input_overlay_opacity'] ?? '0.70') ?? .70,
+            onInput: (input, down) {
+              if (input == 'menu_toggle') {
+                if (down) setState(widget.frontend.openQuickMenu);
+                return;
+              }
+              final id = _buttonIdForOverlayInput(input);
+              if (id != null) widget.frontend.setJoypadButton(id, down);
+            },
+          ),
         if (widget.frontend.runtime.quickMenuOpen) _quickMenu(),
       ]),
     );
@@ -646,16 +678,20 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
       ]),
       _SettingsGroup(title: 'Loaded Core', children: [
         _SettingsRow(title: 'Current Core', value: widget.frontend.runtime.loadedCore.isEmpty ? 'Not loaded' : widget.frontend.runtime.loadedCore),
+        ListTile(
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.tune, color: _accent, size: 18),
+          title: const Text('Core Options', style: TextStyle(color: _text, fontSize: 13, fontWeight: FontWeight.w800)),
+          subtitle: Text(_coreOptions.isEmpty ? 'コアをロードまたはゲームを起動すると編集できます' : '${_coreOptions.length} options available', style: const TextStyle(color: _muted, fontSize: 11)),
+          trailing: const Icon(Icons.open_in_new, color: _muted, size: 18),
+          onTap: () => _showCoreOptions(context),
+        ),
         if (widget.frontend.cores.isEmpty)
           const _SettingsRow(title: 'Bundled Cores', value: 'No bundled cores discovered')
         else
-          for (final core in widget.frontend.cores)
+          for (final core in widget.frontend.cores.take(8))
             _SettingsCoreButton(core: core, onTap: () async { await widget.frontend.loadCore(core); await _refreshRuntimeLists(); if (mounted) setState(() {}); }),
-        if (_coreOptions.isEmpty)
-          const _SettingsRow(title: 'Core Options', value: 'Load a core to edit its options')
-        else
-          for (final option in _coreOptions)
-            _SettingsChoiceRow(title: option.description.isEmpty ? option.key : option.description, value: option.value, choices: option.values.isEmpty ? [option.value] : option.values, onChanged: (v) async { await widget.frontend.setCoreOption(option.key, v); await _refreshRuntimeLists(); if (mounted) setState(() {}); }),
       ]),
       _SettingsGroup(title: 'Storage', children: [
         _SettingsRow(title: 'Content Folder', value: s['content_directory'] ?? ''),
@@ -718,13 +754,24 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
   }
 
   Widget _mobileNav() {
-    final items = [(Icons.videogame_asset_outlined, 'ライブラリ'), (Icons.playlist_play, 'プレイリスト'), (Icons.extension_outlined, 'コア'), (Icons.settings_outlined, '設定')];
+    final items = [(Icons.videogame_asset_outlined, 'ライブラリ'), (Icons.playlist_play, 'リスト'), (Icons.extension_outlined, 'コア'), (Icons.settings_outlined, '設定')];
     return Container(
-      height: 70,
-      decoration: BoxDecoration(color: const Color(0xEE07111E), border: Border(top: BorderSide(color: _line.withOpacity(.7)))),
-      child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+      height: 64,
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(color: const Color(0xF207111E), borderRadius: BorderRadius.circular(22), border: Border.all(color: _line), boxShadow: [BoxShadow(color: Colors.black.withOpacity(.28), blurRadius: 18, offset: const Offset(0, 8))]),
+      child: Row(children: [
         for (var i = 0; i < items.length; i++)
-          InkWell(onTap: () => setState(() => _tab = i), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(items[i].$1, color: i == _tab ? _text : _muted, size: 20), const SizedBox(height: 4), Text(items[i].$2, style: TextStyle(color: i == _tab ? _text : _muted, fontSize: 10))])),
+          Expanded(
+            child: InkWell(
+              onTap: () => setState(() => _tab = i),
+              borderRadius: BorderRadius.circular(16),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                decoration: BoxDecoration(color: i == _tab ? const Color(0xFF182A45) : Colors.transparent, borderRadius: BorderRadius.circular(16)),
+                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(items[i].$1, color: i == _tab ? _cyan : _muted, size: 20), const SizedBox(height: 3), Text(items[i].$2, style: TextStyle(color: i == _tab ? _text : _muted, fontSize: 10, fontWeight: i == _tab ? FontWeight.w800 : FontWeight.w500))]),
+              ),
+            ),
+          ),
       ]),
     );
   }
@@ -866,10 +913,13 @@ class _PlayScreen extends StatefulWidget {
 
 class _PlayScreenState extends State<_PlayScreen> {
   Timer? _timer;
+  String? _parsedOverlayPath;
+  List<_OverlayControl> _overlayControls = const [];
 
   @override
   void initState() {
     super.initState();
+    _reloadOverlayControls();
     _timer = Timer.periodic(const Duration(milliseconds: 16), (_) async {
       if (widget.frontend.runtime.running) {
         await widget.frontend.runFrame();
@@ -878,14 +928,107 @@ class _PlayScreenState extends State<_PlayScreen> {
     });
   }
 
+  void _reloadOverlayControls() {
+    final path = widget.frontend.settings['input_overlay'];
+    if (path == _parsedOverlayPath) return;
+    _parsedOverlayPath = path;
+    _overlayControls = _parseOverlayControls(path);
+  }
+
+  List<_OverlayControl> _parseOverlayControls(String? path) {
+    if (path == null || path.isEmpty) return const [];
+    final file = File(path);
+    if (!file.existsSync()) return const [];
+    final controls = <_OverlayControl>[];
+    final lines = switch (file.existsSync()) {
+      true => file.readAsLinesSync(),
+      false => const <String>[],
+    };
+    for (final rawLine in lines) {
+      final line = rawLine.trim();
+      if (!line.startsWith('overlay0_desc') || !line.contains('=')) continue;
+      final value = line.substring(line.indexOf('=') + 1).trim().replaceAll('"', '');
+      final parts = value.split(',').map((part) => part.trim()).toList();
+      if (parts.length < 6) continue;
+      final input = parts[0].toLowerCase();
+      final x = double.tryParse(parts[1]);
+      final y = double.tryParse(parts[2]);
+      final shape = parts[3].toLowerCase();
+      final w = double.tryParse(parts[4]);
+      final h = double.tryParse(parts[5]);
+      if (x == null || y == null || w == null || h == null) continue;
+      controls.add(_OverlayControl(input: input, x: x, y: y, width: w, height: h, radial: shape == 'radial'));
+    }
+    return controls;
+  }
+
+  int? _buttonIdForInput(String input) => _buttonIdForOverlayInput(input);
+
   @override
   void dispose() {
     _timer?.cancel();
     super.dispose();
   }
 
+  Future<void> _showPlayCoreOptions() async {
+    final options = await widget.frontend.coreOptions();
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF081321),
+      showDragHandle: true,
+      builder: (context) => ListView(padding: const EdgeInsets.all(18), children: [
+        Text(widget.frontend.runtime.loadedCore.isEmpty ? 'コア設定' : '${widget.frontend.runtime.loadedCore} の設定', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
+        const SizedBox(height: 12),
+        if (options.isEmpty)
+          const ListTile(title: Text('設定可能なコアオプションがありません'), subtitle: Text('ゲーム起動後にコアが公開したオプションがここに表示されます。'))
+        else
+          for (final option in options)
+            ListTile(
+              title: Text(option.description.isEmpty ? option.key : option.description),
+              subtitle: Text(option.key),
+              trailing: DropdownButton<String>(
+                value: option.values.contains(option.value) ? option.value : (option.values.isNotEmpty ? option.values.first : null),
+                items: option.values.map((value) => DropdownMenuItem(value: value, child: Text(value))).toList(),
+                onChanged: (value) async {
+                  if (value == null) return;
+                  await widget.frontend.setCoreOption(option.key, value);
+                  if (mounted) setState(() {});
+                },
+              ),
+            ),
+      ]),
+    );
+  }
+
+  Widget _playQuickMenu() {
+    return Positioned.fill(
+      child: DecoratedBox(
+        decoration: BoxDecoration(color: Colors.black.withOpacity(.62)),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: _GlassPanel(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [const Text('クイックメニュー', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)), const Spacer(), IconButton(onPressed: () => setState(widget.frontend.closeQuickMenu), icon: const Icon(Icons.close))]),
+                  _QuickAction(icon: Icons.tune, title: 'コア設定', subtitle: widget.frontend.runtime.loadedCore.isEmpty ? 'No core loaded' : widget.frontend.runtime.loadedCore, onTap: _showPlayCoreOptions),
+                  _QuickAction(icon: Icons.save_outlined, title: 'クイックセーブ', subtitle: 'Slot 0', onTap: () => widget.frontend.quickSave()),
+                  _QuickAction(icon: Icons.download, title: 'クイックロード', subtitle: 'Slot 0', onTap: () => widget.frontend.quickLoad()),
+                  _QuickAction(icon: Icons.gamepad_outlined, title: 'オーバーレイ', subtitle: widget.frontend.runtime.overlayEnabled ? '表示中' : '非表示', onTap: () async { await widget.frontend.setOverlayEnabled(!widget.frontend.runtime.overlayEnabled); _reloadOverlayControls(); if (mounted) setState(() {}); }),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    _reloadOverlayControls();
     return Scaffold(
       backgroundColor: Colors.black,
       body: LayoutBuilder(builder: (context, constraints) {
@@ -901,13 +1044,28 @@ class _PlayScreenState extends State<_PlayScreen> {
           onPointerCancel: (event) => widget.frontend.setOverlayTouch(0, 0, 0, false),
           child: Stack(children: [
             Positioned.fill(child: _VideoFrameView(frontend: widget.frontend, fit: BoxFit.contain)),
-            if (widget.frontend.runtime.overlayEnabled) _GameOverlay(onButton: (id, down) => widget.frontend.setJoypadButton(id, down), onMenu: () => setState(widget.frontend.openQuickMenu)),
+            if (widget.frontend.runtime.overlayEnabled)
+              _GameOverlay(
+                controls: _overlayControls,
+                opacity: (double.tryParse(widget.frontend.settings['input_overlay_opacity'] ?? '0.70') ?? .70).clamp(0.20, 1.0).toDouble(),
+                onInput: (input, down) {
+                  if (input == 'menu_toggle') {
+                    if (down) setState(widget.frontend.openQuickMenu);
+                    return;
+                  }
+                  final id = _buttonIdForInput(input);
+                  if (id != null) widget.frontend.setJoypadButton(id, down);
+                },
+              ),
             Positioned(top: 24, left: 24, child: SafeArea(child: _ViewportButton(icon: Icons.close_fullscreen, label: '戻る', onTap: () async => Navigator.of(context).pop()))),
             Positioned(top: 24, right: 24, child: SafeArea(child: Row(children: [
+              _ViewportButton(icon: Icons.menu, label: 'メニュー', onTap: () => setState(widget.frontend.openQuickMenu)),
+              const SizedBox(width: 14),
               _ViewportButton(icon: Icons.save_outlined, label: '保存', onTap: () => widget.frontend.quickSave()),
               const SizedBox(width: 14),
               _ViewportButton(icon: Icons.restart_alt, label: 'リセット', onTap: () async { await widget.frontend.reset(); if (mounted) setState(() {}); }),
             ]))),
+            if (widget.frontend.runtime.quickMenuOpen) _playQuickMenu(),
           ]),
         );
       }),
@@ -1082,9 +1240,121 @@ class _EmptyLibrary extends StatelessWidget {
       );
 }
 
-class _GameOverlay extends StatelessWidget { const _GameOverlay({required this.onButton, required this.onMenu}); final void Function(int, bool) onButton; final VoidCallback onMenu; @override Widget build(BuildContext context) => Positioned.fill(child: Stack(children: [Positioned(left: 28, bottom: 92, child: _OverlayButton(label: 'MENU', onTap: onMenu)), Positioned(right: 38, bottom: 115, child: _OverlayButton(label: 'A', onTap: () => onButton(8, true))), Positioned(right: 88, bottom: 80, child: _OverlayButton(label: 'B', onTap: () => onButton(0, true))), Positioned(left: 90, bottom: 130, child: _Dpad(onButton: onButton))])); }
-class _OverlayButton extends StatelessWidget { const _OverlayButton({required this.label, required this.onTap}); final String label; final VoidCallback onTap; @override Widget build(BuildContext context) => InkWell(onTap: onTap, customBorder: const CircleBorder(), child: Container(width: 54, height: 54, alignment: Alignment.center, decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.black.withOpacity(.34), border: Border.all(color: Colors.white24)), child: Text(label, style: const TextStyle(fontWeight: FontWeight.w900)))); }
-class _Dpad extends StatelessWidget { const _Dpad({required this.onButton}); final void Function(int, bool) onButton; @override Widget build(BuildContext context) => SizedBox(width: 86, height: 86, child: Stack(children: [Positioned(left: 28, top: 0, child: _OverlayButton(label: '▲', onTap: () => onButton(4, true))), Positioned(left: 28, bottom: 0, child: _OverlayButton(label: '▼', onTap: () => onButton(5, true))), Positioned(left: 0, top: 28, child: _OverlayButton(label: '◀', onTap: () => onButton(6, true))), Positioned(right: 0, top: 28, child: _OverlayButton(label: '▶', onTap: () => onButton(7, true)))])); }
+class _OverlayControl {
+  const _OverlayControl({required this.input, required this.x, required this.y, required this.width, required this.height, required this.radial});
+  final String input;
+  final double x;
+  final double y;
+  final double width;
+  final double height;
+  final bool radial;
+}
+
+class _GameOverlay extends StatelessWidget {
+  const _GameOverlay({required this.controls, required this.opacity, required this.onInput});
+  final List<_OverlayControl> controls;
+  final double opacity;
+  final void Function(String, bool) onInput;
+
+  @override
+  Widget build(BuildContext context) {
+    final activeControls = controls.isEmpty ? _fallbackControls : controls;
+    return Positioned.fill(
+      child: LayoutBuilder(builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final height = constraints.maxHeight;
+        return Stack(children: [
+          for (final control in activeControls)
+            Positioned(
+              left: (control.x * width) - (control.width * width),
+              top: (control.y * height) - (control.height * height),
+              child: _OverlayButton(
+                label: _overlayLabelForInput(control.input),
+                width: (control.width * width * 2).clamp(44.0, 96.0).toDouble(),
+                height: (control.height * height * 2).clamp(34.0, 96.0).toDouble(),
+                radial: control.radial,
+                opacity: opacity,
+                onChanged: (down) => onInput(control.input, down),
+              ),
+            ),
+        ]);
+      }),
+    );
+  }
+
+  static const _fallbackControls = [
+    _OverlayControl(input: 'menu_toggle', x: .08, y: .13, width: .06, height: .04, radial: false),
+    _OverlayControl(input: 'up', x: .16, y: .70, width: .055, height: .055, radial: false),
+    _OverlayControl(input: 'down', x: .16, y: .88, width: .055, height: .055, radial: false),
+    _OverlayControl(input: 'left', x: .07, y: .79, width: .055, height: .055, radial: false),
+    _OverlayControl(input: 'right', x: .25, y: .79, width: .055, height: .055, radial: false),
+    _OverlayControl(input: 'b', x: .78, y: .83, width: .06, height: .06, radial: true),
+    _OverlayControl(input: 'a', x: .88, y: .72, width: .06, height: .06, radial: true),
+    _OverlayControl(input: 'y', x: .68, y: .72, width: .052, height: .052, radial: true),
+    _OverlayControl(input: 'x', x: .78, y: .61, width: .052, height: .052, radial: true),
+    _OverlayControl(input: 'select', x: .42, y: .92, width: .05, height: .035, radial: false),
+    _OverlayControl(input: 'start', x: .58, y: .92, width: .05, height: .035, radial: false),
+  ];
+}
+
+class _OverlayButton extends StatelessWidget {
+  const _OverlayButton({required this.label, required this.width, required this.height, required this.radial, required this.opacity, required this.onChanged});
+  final String label;
+  final double width;
+  final double height;
+  final bool radial;
+  final double opacity;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Listener(
+        onPointerDown: (_) => onChanged(true),
+        onPointerUp: (_) => onChanged(false),
+        onPointerCancel: (_) => onChanged(false),
+        child: Container(
+          width: width,
+          height: height,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: radial ? BoxShape.circle : BoxShape.rectangle,
+            borderRadius: radial ? null : BorderRadius.circular(12),
+            color: Colors.black.withOpacity(.26 + opacity * .28),
+            border: Border.all(color: Colors.white.withOpacity(.22 + opacity * .28)),
+          ),
+          child: Text(label, style: TextStyle(color: Colors.white.withOpacity(.72 + opacity * .28), fontWeight: FontWeight.w900, fontSize: label.length > 2 ? 11 : 14)),
+        ),
+      );
+}
+
+
+int? _buttonIdForOverlayInput(String input) => switch (input) {
+      'b' => 0,
+      'y' => 1,
+      'select' => 2,
+      'start' => 3,
+      'up' => 4,
+      'down' => 5,
+      'left' => 6,
+      'right' => 7,
+      'a' => 8,
+      'x' => 9,
+      'l' => 10,
+      'r' => 11,
+      'l2' => 12,
+      'r2' => 13,
+      'l3' => 14,
+      'r3' => 15,
+      _ => null,
+    };
+
+String _overlayLabelForInput(String input) => switch (input) {
+      'menu_toggle' => 'MENU',
+      'up' => '▲',
+      'down' => '▼',
+      'left' => '◀',
+      'right' => '▶',
+      _ => input.toUpperCase(),
+    };
 
 class _StorageBarsPainter extends CustomPainter { @override void paint(Canvas canvas, Size size) { final paint = Paint(); for (var i = 0; i < 22; i++) { paint.color = Color.lerp(_accent, _cyan, i / 22)!.withOpacity(.35 + i / 38); final h = (i * 13 % 54) + 6.0; canvas.drawRect(Rect.fromLTWH(i * (size.width / 24), size.height - h, 3, h), paint); } } @override bool shouldRepaint(covariant CustomPainter oldDelegate) => false; }
 class _GameScenePainter extends CustomPainter { _GameScenePainter({required this.frame}); final int frame; @override void paint(Canvas canvas, Size size) { final p = Paint(); p.color = const Color(0xFF2C2E36); canvas.drawRect(Offset.zero & size, p); p.color = const Color(0xFF5B3C28); canvas.drawRect(Rect.fromLTWH(0, size.height * .65, size.width, size.height * .35), p); for (var i = 0; i < 8; i++) { p.color = Color.lerp(const Color(0xFF2F493E), const Color(0xFFB8904D), i / 7)!; canvas.drawRect(Rect.fromLTWH(i * size.width / 8, 0, size.width / 9, size.height * .66), p); } _fighter(canvas, Offset(size.width * .36 + (frame % 50) * .2, size.height * .55), const Color(0xFF3135A3)); _fighter(canvas, Offset(size.width * .73 - (frame % 40) * .18, size.height * .56), const Color(0xFFE66A22)); p.color = Colors.yellow; canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(size.width * .12, 22, size.width * .30, 8), const Radius.circular(4)), p); canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(size.width * .58, 22, size.width * .30, 8), const Radius.circular(4)), p); final tp = TextPainter(text: const TextSpan(text: '87', style: TextStyle(color: Color(0xFFFFED54), fontSize: 30, fontWeight: FontWeight.w900)), textDirection: TextDirection.ltr); tp.layout(); tp.paint(canvas, Offset(size.width / 2 - tp.width / 2, 10)); } void _fighter(Canvas c, Offset o, Color color) { final p = Paint()..color = color; c.drawCircle(o.translate(0, -34), 12, p); c.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: o, width: 32, height: 55), const Radius.circular(12)), p); p.strokeWidth = 9; p.strokeCap = StrokeCap.round; c.drawLine(o.translate(-10, 24), o.translate(-30, 55), p); c.drawLine(o.translate(10, 24), o.translate(28, 55), p); c.drawLine(o.translate(-15, -10), o.translate(-42, -20), p); c.drawLine(o.translate(15, -10), o.translate(44, -8), p); } @override bool shouldRepaint(covariant _GameScenePainter oldDelegate) => oldDelegate.frame != frame; }
