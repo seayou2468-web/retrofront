@@ -28,6 +28,8 @@ targets:
         OTHER_LDFLAGS: "$(inherited) -lretrofront_core"
         DEAD_CODE_STRIPPING: "YES"
         STRIP_INSTALLED_PRODUCT: "YES"
+        ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: "NO"
+  
     dependencies:
       - framework: target/aarch64-apple-ios/release/libretrofront_core.dylib
         embed: false
@@ -113,6 +115,9 @@ targets:
         COPY_PHASE_STRIP: "YES"
         DEBUG_INFORMATION_FORMAT: "dwarf"
         GCC_SYMBOLS_PRIVATE_EXTERN: "YES"
+        ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: "NO"
+
+  
 schemes:
   RetrofrontiOS:
     build:
