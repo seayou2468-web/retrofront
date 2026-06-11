@@ -13,8 +13,7 @@ let package = Package(
   ],
   products: [
     .library(name: "RetrofrontSwift", targets: ["RetrofrontSwift"]),
-    .executable(name: "retrofront", targets: ["retrofront-cli"]),
-    .executable(name: "retrofront-linux-ui", targets: ["retrofront-linux-ui"]),
+    .executable(name: "retrofront-linux", targets: ["RetrofrontLinux"]),
   ],
   targets: [
     .target(
@@ -31,15 +30,19 @@ let package = Package(
         .linkedLibrary("retrofront_core"),
       ]
     ),
-    .executableTarget(
-      name: "retrofront-cli",
-      dependencies: ["RetrofrontSwift"],
-      path: "frontend/Sources/retrofront-cli"
+    .systemLibrary(
+      name: "CGtk",
+      path: "apps/linux/CGtk",
+      pkgConfig: "gtk+-3.0",
+      providers: [
+        .apt(["libgtk-3-dev"]),
+        .brew(["gtk+3"]),
+      ]
     ),
     .executableTarget(
-      name: "retrofront-linux-ui",
-      dependencies: ["RetrofrontSwift"],
-      path: "frontend/Sources/retrofront-linux-ui"
+      name: "RetrofrontLinux",
+      dependencies: ["RetrofrontSwift", "CGtk"],
+      path: "apps/linux/Sources"
     ),
     .testTarget(
       name: "RetrofrontSwiftTests",

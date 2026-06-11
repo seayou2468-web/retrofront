@@ -2,7 +2,7 @@
 
 Retrofront is a libretro frontend foundation for iOS and Linux.
 
-The emulator/game cores are libretro cores. The **frontend core** is separate: a Rust management layer that loads libretro cores, manages lifecycle/session state, and exposes a C ABI for Swift UI code.
+The emulator/game cores are libretro cores. Retrofront is a single project: Rust owns the portable frontend runtime and Swift owns the platform UI shells, both built from the same repository root and wired together through a stable C ABI.
 
 ## Layout
 
@@ -10,7 +10,8 @@ The emulator/game cores are libretro cores. The **frontend core** is separate: a
 - `core/` — Rust frontend management core (`retrofront_core`), with bindgen-generated libretro bindings from `libretro/libretro.h`.
 - `frontend/CRetrofrontCore/` — C header/module map for Swift ↔ Rust FFI.
 - `frontend/Sources/RetrofrontSwift/` — Swift wrapper API for UI code.
-- `frontend/Sources/retrofront-cli/` — Linux/macOS command-line smoke-test frontend.
+- `apps/iOS/Sources/` — iOS SwiftUI app only.
+- `apps/linux/Sources/` — Linux GTK app only; it is GUI-first and shares the same Swift/Rust runtime as iOS.
 - `docs/ARCHITECTURE.md` — architecture and platform notes.
 
 ## Build and test
@@ -42,8 +43,10 @@ make ios-device-build
 
 ## Linux UI
 
+The Linux target is a GTK application, not a CLI smoke test. Install GTK 3 development files first (for example `apt install libgtk-3-dev`), then build and launch the GUI:
+
 ```sh
 cd Retrofront
 make linux-ui
-.build/debug/retrofront-linux-ui
+.build/debug/retrofront-linux
 ```

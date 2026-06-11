@@ -187,7 +187,14 @@ impl Settings {
     fn apply_retroarch_defaults(&mut self, base_dir: &Path) {
         let defaults = [
             ("libretro_directory", base_dir.join("cores")),
-            ("libretro_info_path", base_dir.join("info")),
+            (
+                "libretro_info_path",
+                if cfg!(target_os = "linux") {
+                    base_dir.join("cores")
+                } else {
+                    base_dir.join("info")
+                },
+            ),
             (
                 "core_options_path",
                 base_dir.join("retroarch-core-options.cfg"),
@@ -225,10 +232,18 @@ impl Settings {
             ("runtime_directory", base_dir.join("runtime")),
             ("cache_directory", base_dir.join("cache")),
             ("screenshot_directory", base_dir.join("screenshots")),
-            ("input_remapping_directory", base_dir.join("remaps")),
-            ("cheat_database_path", base_dir.join("cht")),
+            ("input_remapping_directory", base_dir.join("config/remaps")),
+            (
+                "cheat_database_path",
+                if cfg!(target_os = "linux") {
+                    base_dir.join("cheats")
+                } else {
+                    base_dir.join("cht")
+                },
+            ),
             ("content_database_path", base_dir.join("database/rdb")),
             ("overlay_directory", base_dir.join("overlays")),
+            ("osk_overlay_directory", base_dir.join("overlays/keyboards")),
             (
                 "input_overlay",
                 base_dir.join("overlays/gamepads/flat/retropad.cfg"),
@@ -353,6 +368,7 @@ impl Settings {
             "cheat_database_path",
             "content_database_path",
             "overlay_directory",
+            "osk_overlay_directory",
             "input_overlay",
             "joypad_autoconfig_dir",
             "video_shader_dir",
@@ -386,7 +402,7 @@ impl Settings {
             "cheat_database_path",
             "content_database_path",
             "overlay_directory",
-            "input_overlay",
+            "osk_overlay_directory",
             "joypad_autoconfig_dir",
             "video_shader_dir",
             "video_filter_dir",
@@ -436,7 +452,11 @@ mod tests {
         );
         assert_eq!(
             settings.libretro_info_path(),
-            PathBuf::from("/tmp/Retrofront/info")
+            if cfg!(target_os = "linux") {
+                PathBuf::from("/tmp/Retrofront/cores")
+            } else {
+                PathBuf::from("/tmp/Retrofront/info")
+            }
         );
     }
 }

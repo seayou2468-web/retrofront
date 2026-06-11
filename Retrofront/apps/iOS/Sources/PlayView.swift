@@ -143,8 +143,6 @@ struct RuntimeMenuScreen: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
-                        QuickActionGrid(isPresented: $isPresented, dismissPlayer: dismissPlayer)
-
                         if runtime.currentMenu?.title == "Core", !runtime.coreOptions.isEmpty {
                             QuickCoreOptionsSection()
                         }
@@ -335,11 +333,17 @@ struct RuntimeMenuEntries: View {
         switch entry.actionId {
         case 9: return "restart.circle.fill"
         case 11, 21, 222: return "slider.horizontal.3"
-        case 14, 27, 28, 29: return "externaldrive.fill"
+        case 14, 27, 28, 29, 30, 31, 32: return "externaldrive.fill"
         case 22, 211: return "display"
         case 19, 25, 213: return "gamecontroller.fill"
         case 23, 212: return "speaker.wave.2.fill"
         case 26, 12: return "xmark.circle.fill"
+        case 13: return "sparkles"
+        case 15: return "camera.fill"
+        case 16, 36: return "star.fill"
+        case 17: return "bolt.fill"
+        case 18: return "doc.badge.gearshape.fill"
+        case 24: return "opticaldisc.fill"
         default: return entry.kind == .submenu ? "folder.fill" : "circle.fill"
         }
     }

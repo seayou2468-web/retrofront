@@ -3033,18 +3033,50 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
                 true
             }
             menu::ACTION_SHADERS => {
-                core.menu.push_status(
-                    "Shaders",
-                    "Shader configuration is represented in the video settings branch.",
-                );
+                core.menu.push_shader_settings(&core.settings);
                 true
             }
             menu::ACTION_CHEATS => {
-                core.menu.push_placeholder_settings("Cheats");
+                core.menu.push_cheat_settings(&core.settings);
                 true
             }
             menu::ACTION_OVERRIDES => {
-                core.menu.push_placeholder_settings("Overrides");
+                core.menu.push_override_settings();
+                true
+            }
+            menu::ACTION_DISC_CONTROL => {
+                core.menu.push_disc_control();
+                true
+            }
+            menu::ACTION_REPLAY => {
+                core.menu
+                    .push_replay_recording_settings("Replay", &core.settings);
+                true
+            }
+            menu::ACTION_RECORDING => {
+                core.menu
+                    .push_replay_recording_settings("Recording", &core.settings);
+                true
+            }
+            menu::ACTION_STREAMING => {
+                core.menu
+                    .push_replay_recording_settings("Streaming", &core.settings);
+                true
+            }
+            menu::ACTION_UNDO_LOAD_STATE | menu::ACTION_UNDO_SAVE_STATE => {
+                core.menu.push_status(
+                    "Save State History",
+                    "Undo entries are exposed in the quick menu and will use the save-state backup ring when implemented.",
+                );
+                true
+            }
+            menu::ACTION_ADD_TO_PLAYLIST
+            | menu::ACTION_SET_CORE_ASSOCIATION
+            | menu::ACTION_STATE_SLOT => {
+                core.menu.push_status(
+                    "Quick Menu",
+                    "This RetroArch quick-menu entry is modeled and ready for a platform callback.",
+                );
                 true
             }
             menu::ACTION_SETTINGS_DRIVERS => {

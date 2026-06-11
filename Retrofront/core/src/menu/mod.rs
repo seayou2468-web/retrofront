@@ -33,6 +33,14 @@ pub const ACTION_EXIT_GAME: u32 = 26;
 pub const ACTION_SAVE_STATE_SLOT_0: u32 = 27;
 pub const ACTION_LOAD_STATE_SLOT_0: u32 = 28;
 pub const ACTION_SAVE_SRAM: u32 = 29;
+pub const ACTION_STATE_SLOT: u32 = 30;
+pub const ACTION_UNDO_LOAD_STATE: u32 = 31;
+pub const ACTION_UNDO_SAVE_STATE: u32 = 32;
+pub const ACTION_REPLAY: u32 = 33;
+pub const ACTION_RECORDING: u32 = 34;
+pub const ACTION_STREAMING: u32 = 35;
+pub const ACTION_ADD_TO_PLAYLIST: u32 = 36;
+pub const ACTION_SET_CORE_ASSOCIATION: u32 = 37;
 pub const ACTION_SETTINGS_DRIVERS: u32 = 210;
 pub const ACTION_SETTINGS_VIDEO: u32 = 211;
 pub const ACTION_SETTINGS_AUDIO: u32 = 212;
@@ -143,32 +151,77 @@ impl MenuEngine {
                 "Reset the current content",
                 ACTION_RESTART_CONTENT,
             ),
-            Self::submenu(
-                "Core Settings",
-                "Open options for the active libretro core",
-                ACTION_CORE_SETTINGS,
+            Self::action(
+                "Close Content",
+                "Unload the current game and return to the menu",
+                ACTION_CLOSE_CONTENT,
+            ),
+            Self::action(
+                "Take Screenshot",
+                "Write a screenshot to the screenshots directory",
+                ACTION_TAKE_SCREENSHOT,
+            ),
+            Self::setting(
+                "State Slot",
+                "Select the active save-state slot",
+                "0",
+                ACTION_STATE_SLOT,
+            ),
+            Self::action(
+                "Save State",
+                "Instantly serialize the current gameplay state",
+                ACTION_SAVE_STATE_SLOT_0,
+            ),
+            Self::action(
+                "Load State",
+                "Restore the selected save-state slot",
+                ACTION_LOAD_STATE_SLOT_0,
+            ),
+            Self::action(
+                "Undo Load State",
+                "Restore the state that existed before the last load",
+                ACTION_UNDO_LOAD_STATE,
+            ),
+            Self::action(
+                "Undo Save State",
+                "Restore the overwritten save-state backup",
+                ACTION_UNDO_SAVE_STATE,
+            ),
+            Self::action(
+                "Save SRAM",
+                "Flush battery-backed memory card / SRAM data",
+                ACTION_SAVE_SRAM,
             ),
             Self::submenu(
-                "Display & Orientation",
-                "Portrait, landscape, scaling and filter controls",
-                ACTION_DISPLAY_SETTINGS,
+                "Core Options",
+                "Variables exposed by the active libretro core",
+                ACTION_CORE_OPTIONS,
             ),
             Self::submenu(
                 "Controls",
-                "Button mapping, remaps, overlays and connected pads",
+                "Port controls, remaps, overlays and connected pads",
                 ACTION_CONTROLS,
             ),
             Self::submenu(
-                "Save States",
-                "Save, load and manage state slots",
-                ACTION_SAVE_STATES,
+                "Cheats",
+                "Load, append, toggle and apply cheat files",
+                ACTION_CHEATS,
             ),
             Self::submenu("Shaders", "Video shader passes and presets", ACTION_SHADERS),
-            Self::submenu("Cheats", "Load and apply cheat files", ACTION_CHEATS),
             Self::submenu(
                 "Overrides",
                 "Core/content/game override configuration",
                 ACTION_OVERRIDES,
+            ),
+            Self::submenu(
+                "Disc Control",
+                "Swap/eject virtual discs when a core supports it",
+                ACTION_DISC_CONTROL,
+            ),
+            Self::submenu(
+                "Display & Orientation",
+                "Scaling, filtering and orientation controls",
+                ACTION_DISPLAY_SETTINGS,
             ),
             Self::submenu(
                 "Audio",
@@ -176,19 +229,34 @@ impl MenuEngine {
                 ACTION_AUDIO_MIXER,
             ),
             Self::submenu(
-                "Disc Control",
-                "Swap/eject virtual discs when a core supports it",
-                ACTION_DISC_CONTROL,
+                "Replay",
+                "Replay capture and playback controls",
+                ACTION_REPLAY,
+            ),
+            Self::submenu(
+                "Recording",
+                "Recording output and driver settings",
+                ACTION_RECORDING,
+            ),
+            Self::submenu(
+                "Streaming",
+                "Streaming output and service settings",
+                ACTION_STREAMING,
             ),
             Self::action(
-                "Screenshot",
-                "Write a screenshot to the screenshots directory",
-                ACTION_TAKE_SCREENSHOT,
-            ),
-            Self::action(
-                "Favorite",
+                "Add to Favorites",
                 "Add current ROM to Favorites",
                 ACTION_ADD_TO_FAVORITES,
+            ),
+            Self::action(
+                "Add to Playlist",
+                "Append current content to a playlist",
+                ACTION_ADD_TO_PLAYLIST,
+            ),
+            Self::action(
+                "Set Core Association",
+                "Remember this core for the content extension",
+                ACTION_SET_CORE_ASSOCIATION,
             ),
             Self::submenu(
                 "Information",
@@ -1030,6 +1098,131 @@ impl MenuEngine {
         });
     }
 
+    pub fn push_shader_settings(&mut self, settings: &Settings) {
+        self.history.push(MenuList {
+            title: "Shaders".to_string(),
+            entries: vec![
+                Self::setting(
+                    "Video Shader Directory",
+                    "RetroArch shader presets",
+                    settings
+                        .path_value("video_shader_dir")
+                        .unwrap_or_default()
+                        .to_string_lossy(),
+                    730,
+                ),
+                Self::setting(
+                    "Video Filter Directory",
+                    "CPU video filters",
+                    settings
+                        .path_value("video_filter_dir")
+                        .unwrap_or_default()
+                        .to_string_lossy(),
+                    731,
+                ),
+                Self::action(
+                    "Load Preset",
+                    "Open a shader preset from the shader directory",
+                    732,
+                ),
+                Self::action(
+                    "Save Preset",
+                    "Save current shader parameters as a preset",
+                    733,
+                ),
+                Self::action("Remove Shader Passes", "Clear active shader passes", 734),
+            ],
+        });
+    }
+
+    pub fn push_cheat_settings(&mut self, settings: &Settings) {
+        self.history.push(MenuList {
+            title: "Cheats".to_string(),
+            entries: vec![
+                Self::setting(
+                    "Cheat File Directory",
+                    "RetroArch cheat database path",
+                    settings
+                        .path_value("cheat_database_path")
+                        .unwrap_or_default()
+                        .to_string_lossy(),
+                    740,
+                ),
+                Self::action("Load Cheat File", "Replace active cheats from a file", 741),
+                Self::action("Append Cheat File", "Append cheats from another file", 742),
+                Self::action(
+                    "Apply Changes",
+                    "Apply edited cheat toggles to the running core",
+                    743,
+                ),
+            ],
+        });
+    }
+
+    pub fn push_override_settings(&mut self) {
+        self.history.push(MenuList {
+            title: "Overrides".to_string(),
+            entries: vec![
+                Self::action(
+                    "Save Core Overrides",
+                    "Save settings for the active core",
+                    750,
+                ),
+                Self::action(
+                    "Save Content Directory Overrides",
+                    "Save settings for this content folder",
+                    751,
+                ),
+                Self::action(
+                    "Save Game Overrides",
+                    "Save settings for the active game",
+                    752,
+                ),
+                Self::action("Remove Overrides", "Delete active override files", 753),
+            ],
+        });
+    }
+
+    pub fn push_disc_control(&mut self) {
+        self.history.push(MenuList {
+            title: "Disc Control".to_string(),
+            entries: vec![
+                Self::action("Eject Disc", "Toggle the virtual tray state", 760),
+                Self::setting("Current Disc Index", "Selected disc number", "1", 761),
+                Self::action("Load New Disc", "Append or replace a disc image", 762),
+                Self::action("Cycle Tray Status", "Close/eject the virtual tray", 763),
+            ],
+        });
+    }
+
+    pub fn push_replay_recording_settings(&mut self, title: &str, settings: &Settings) {
+        self.history.push(MenuList {
+            title: title.to_string(),
+            entries: vec![
+                Self::setting(
+                    "Output Directory",
+                    "RetroArch recording output path",
+                    settings
+                        .path_value("recording_output_directory")
+                        .unwrap_or_default()
+                        .to_string_lossy(),
+                    770,
+                ),
+                Self::setting(
+                    "Config Directory",
+                    "Recording profile directory",
+                    settings
+                        .path_value("recording_config_directory")
+                        .unwrap_or_default()
+                        .to_string_lossy(),
+                    771,
+                ),
+                Self::action("Start", "Start this runtime capture mode", 772),
+                Self::action("Stop", "Stop this runtime capture mode", 773),
+            ],
+        });
+    }
+
     pub fn push_placeholder_settings(&mut self, title: &str) {
         self.history.push(MenuList {
             title: title.to_string(),
@@ -1162,10 +1355,11 @@ mod tests {
         for expected in [
             "Resume",
             "Restart",
-            "Core Settings",
+            "Core Options",
             "Shaders",
-            "Save States",
-            "Exit Game",
+            "Save State",
+            "Close Content",
+            "Disc Control",
         ] {
             assert!(labels.contains(&expected), "missing {expected}");
         }

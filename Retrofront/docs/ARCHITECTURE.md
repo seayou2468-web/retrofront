@@ -1,8 +1,8 @@
 # Retrofront architecture
 
-Retrofront separates UI and frontend management:
+Retrofront is one project with platform-separated apps and shared frontend management:
 
-- **Swift (`frontend/Sources/RetrofrontSwift`)** owns application/UI-facing APIs and is suitable for iOS, macOS, and Linux SwiftUI or CLI frontends.
+- **Swift (`frontend/Sources/RetrofrontSwift`)** owns shared application/UI-facing APIs, including the RetroArch-compatible storage layout used by both apps.
 - **Rust (`core`)** owns portable frontend state: dynamic loading of libretro cores, session lifecycle, game metadata, callback collection, and a stable C ABI.
 - **libretro ABI (`libretro/libretro.h`)** remains the canonical header. `core/build.rs` runs bindgen against this header at compile time; Swift talks to Rust through `frontend/CRetrofrontCore/retrofront_core.h`.
 
@@ -31,5 +31,11 @@ Retrofront separates UI and frontend management:
 ## UI shells
 
 - The iOS SwiftUI app is an empty emulator shell: it connects to the Rust frontend runtime, shows library/play/core/settings screens, and does not require any libretro emulator core to build or launch.
-- The Linux UI is a terminal dashboard executable that also connects to the same Swift/Rust runtime without requiring a loaded emulator core.
+- The Linux UI lives under `apps/linux`, imports GTK through SwiftPM, and starts as a GUI dashboard rather than a CLI. It connects to the same Swift/Rust runtime without requiring a loaded emulator core.
 - iOS project generation uses XcodeGen. Build the Rust `aarch64-apple-ios` static library first, then generate/build the Xcode project for `generic/platform=iOS`.
+
+## Platform source separation
+
+- iOS-only SwiftUI code lives in `apps/iOS/Sources`.
+- Linux-only GTK code lives in `apps/linux/Sources` with its C module shim in `apps/linux/CGtk`.
+- Shared Swift code lives in `frontend/Sources/RetrofrontSwift`; platform apps must not duplicate storage layout or runtime wrapper code that can live there.

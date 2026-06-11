@@ -13,7 +13,7 @@ test: rust
 	swift test
 
 linux-ui: rust
-	swift build --product retrofront-linux-ui
+	swift build --product retrofront-linux
 
 ios-rust:
 	./scripts/build-rust-ios.sh

@@ -76,36 +76,15 @@ public final class EmulatorRuntimeModel: ObservableObject {
 
   private func applyBundleCoreDirectories(_ frontend: Retrofront) {
     let layout = storageLayout
-    if let coreDirectory = layout.bundledCoreDirectory {
-      try? frontend.setSetting(key: "libretro_directory", value: coreDirectory.path)
-    }
     frontend.setInfoDir(layout.infoDirectory.path)
-    try? frontend.setSetting(key: "libretro_info_path", value: layout.infoDirectory.path)
-    try? frontend.setSetting(key: "assets_directory", value: layout.assetsDirectory.path)
-    try? frontend.setSetting(key: "menu_assets_directory", value: layout.assetsDirectory.path)
-    try? frontend.setSetting(key: "overlay_directory", value: layout.overlaysDirectory.path)
-    try? frontend.setSetting(key: "input_overlay", value: layout.overlayConfig.path)
+    for setting in layout.retroArchSettings {
+      try? frontend.setSetting(key: setting.key, value: setting.url.path)
+    }
   }
 
   private func applyRetroArchStorageSettings(_ frontend: Retrofront, layout: RetroArchStorageLayout) {
-    let values: [(String, URL)] = [
-      ("content_directory", layout.contentDirectory),
-      ("menu_content_directory", layout.root),
-      ("core_assets_directory", layout.downloadsDirectory),
-      ("savefile_directory", layout.savesDirectory),
-      ("savestate_directory", layout.statesDirectory),
-      ("system_directory", layout.systemDirectory),
-      ("playlist_directory", layout.playlistsDirectory),
-      ("cache_directory", layout.cacheDirectory),
-      ("assets_directory", layout.assetsDirectory),
-      ("menu_assets_directory", layout.assetsDirectory),
-      ("libretro_info_path", layout.infoDirectory),
-      ("overlay_directory", layout.overlaysDirectory),
-    ]
-    for (key, url) in values { try? frontend.setSetting(key: key, value: url.path) }
-    try? frontend.setSetting(key: "input_overlay", value: layout.overlayConfig.path)
-    if let coreDirectory = layout.bundledCoreDirectory {
-      try? frontend.setSetting(key: "libretro_directory", value: coreDirectory.path)
+    for setting in layout.retroArchSettings {
+      try? frontend.setSetting(key: setting.key, value: setting.url.path)
     }
   }
 
@@ -118,6 +97,7 @@ public final class EmulatorRuntimeModel: ObservableObject {
       frontend.scanCores(in: resourceURL.path)
       frontend.scanCores(in: resourceURL.appendingPathComponent("dylibs").path)
     }
+    frontend.scanCores(in: storageLayout.retroArchSettings.first(where: { $0.key == "libretro_directory" })?.url.path ?? retroArchRoot.appendingPathComponent("cores", isDirectory: true).path)
     frontend.scanCores(in: retroArchRoot.appendingPathComponent("cores", isDirectory: true).path)
     frontend.scanCores(in: retroArchRoot.appendingPathComponent("Cores", isDirectory: true).path)
     frontend.scanConfiguredCores()
