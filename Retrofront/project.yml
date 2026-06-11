@@ -25,6 +25,8 @@ targets:
         HEADER_SEARCH_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
         LIBRARY_SEARCH_PATHS: "$(SRCROOT)/target/aarch64-apple-ios/release"
         OTHER_LDFLAGS: "$(inherited) -lretrofront_core"
+        DEAD_CODE_STRIPPING: "YES"
+        STRIP_INSTALLED_PRODUCT: "YES"
     dependencies:
       - framework: target/aarch64-apple-ios/release/libretrofront_core.a
         embed: false
@@ -35,11 +37,18 @@ targets:
       - path: apps/iOS/Sources
       - path: apps/iOS/Resources
     dependencies:
-      - framework: target/aarch64-apple-ios/release/libretrofront_ui.a
+      - framework: target/aarch64-apple-ios/release/libretrofront_core.a
         embed: false
-      - framework: ../Externals/MoltenVK/MoltenVK.xcframework
-      - sdk: OpenGLES.framework
-      - sdk: GLKit.framework
+      - sdk: UIKit.framework
+      - sdk: Foundation.framework
+      - sdk: CoreFoundation.framework
+      - sdk: CoreGraphics.framework
+      - sdk: CoreText.framework
+      - sdk: QuartzCore.framework
+      - sdk: AudioToolbox.framework
+      - sdk: AVFoundation.framework
+      - sdk: GameController.framework
+        weak: true
     postBuildScripts:
       - name: Copy libretro cores
         script: |
@@ -76,8 +85,16 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
         FRAMEWORK_SEARCH_PATHS: "$(inherited) $(SRCROOT)/cores $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Frameworks"
         LIBRARY_SEARCH_PATHS: "$(inherited) $(SRCROOT)/target/aarch64-apple-ios/release"
-        OTHER_LDFLAGS: "$(inherited) -lretrofront_ui"
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
+        OTHER_LDFLAGS: "$(inherited) -lretrofront_core -ObjC"
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"
+        DEAD_CODE_STRIPPING: "YES"
+        STRIP_INSTALLED_PRODUCT: "YES"
+        STRIP_STYLE: "all"
+        COPY_PHASE_STRIP: "YES"
+        DEBUG_INFORMATION_FORMAT: "dwarf"
+        GCC_SYMBOLS_PRIVATE_EXTERN: "YES"
 schemes:
   RetrofrontiOS:
     build:

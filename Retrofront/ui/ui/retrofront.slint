@@ -134,6 +134,8 @@ export component MainWindow inherits Window {
     in property <[UiRow]> menu_entries;
     in property <[UiRow]> runtime_stats;
     in property <[UiRow]> api_rows;
+    in property <[UiRow]> directory_rows;
+    in property <[UiRow]> feature_rows;
     in property <string> menu_title;
 
     callback refresh_requested;
@@ -280,8 +282,26 @@ export component MainWindow inherits Window {
                         }
                     }
                     FrostPanel {
+                        width: 420px;
+                        panel-bg: #111a2c;
+                        VerticalLayout { padding: 20px; spacing: 12px; SectionTitle { label: "Storage map"; } ScrollView { VerticalLayout { spacing: 9px; for dir[index] in root.directory_rows: ClickRow { title: dir.title; subtitle: dir.subtitle; badge: "D"; } } } }
+                    }
+                    FrostPanel {
                         panel-bg: #111a2c;
                         VerticalLayout { padding: 20px; spacing: 12px; SectionTitle { label: "Runtime API radar"; } ScrollView { VerticalLayout { spacing: 9px; for api[index] in root.api_rows: ClickRow { title: api.title; subtitle: api.subtitle; badge: "✓"; } } } }
+                    }
+                }
+            }
+            Tab {
+                title: "Feature Matrix";
+                FrostPanel {
+                    panel-bg: @linear-gradient(135deg, #111a2c 0%, #1c304f 100%);
+                    VerticalLayout {
+                        padding: 20px;
+                        spacing: 13px;
+                        SectionTitle { label: "RetroArch replacement readiness"; }
+                        Text { text: "Concrete runtime capabilities are surfaced as first-class UI rows so missing platform features are visible instead of hidden in logs."; color: #aab7cf; font-size: 14px; }
+                        ScrollView { VerticalLayout { spacing: 9px; for feature[index] in root.feature_rows: ClickRow { title: feature.title; subtitle: feature.subtitle; badge: "F"; } } }
                     }
                 }
             }

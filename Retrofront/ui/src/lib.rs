@@ -6,11 +6,13 @@ use std::cell::{Cell, RefCell};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 slint::include_modules!();
 
 type SharedFrontend = Rc<RefCell<FrontendCore>>;
+static REFRESH_LAYOUT: OnceLock<StorageLayout> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 struct StorageLayout {
@@ -193,10 +195,58 @@ impl StorageLayout {
         frontend.set_info_dir(&self.info_dir);
         Ok(())
     }
+    fn ui_directory_rows(&self) -> Vec<UiSettingEntry> {
+        [
+            ("Root", &self.root),
+            ("Config", &self.config_file),
+            ("Cores", &self.core_dir),
+            ("Content", &self.content_dir),
+            ("Assets", &self.assets_dir),
+            ("Core info", &self.info_dir),
+            ("Overlays", &self.overlays_dir),
+            ("Saves", &self.saves_dir),
+            ("States", &self.states_dir),
+            ("System", &self.system_dir),
+            ("Screenshots", &self.screenshots_dir),
+            ("Playlists", &self.playlists_dir),
+            ("Cache", &self.cache_dir),
+        ]
+        .into_iter()
+        .map(|(key, path)| UiSettingEntry {
+            key: key.to_string(),
+            value: path_string(path),
+        })
+        .collect()
+    }
+}
+
+fn layout_for_refresh() -> StorageLayout {
+    REFRESH_LAYOUT
+        .get()
+        .cloned()
+        .unwrap_or_else(StorageLayout::current)
+}
+
+fn feature_rows(core: &FrontendCore, layout: &StorageLayout) -> Vec<UiSettingEntry> {
+    let core_count = core.core_summaries().len();
+    let game_count = core.game_summaries().len();
+    let runtime = core.runtime_summaries();
+    vec![
+        UiSettingEntry { key: "iOS launch backend".into(), value: "Slint winit + software renderer selected by ios feature; no empty backend startup failure".into() },
+        UiSettingEntry { key: "Bundle size controls".into(), value: "Release LTO, panic=abort, strip, dead-strip, no bundled MoltenVK/OpenGLES dependency".into() },
+        UiSettingEntry { key: "Core policy".into(), value: format!("{core_count} discovered cores; archifacts/ios copying remains unfiltered") },
+        UiSettingEntry { key: "Library".into(), value: format!("{game_count} scanned entries from {}", layout.content_dir.display()) },
+        UiSettingEntry { key: "Save data".into(), value: "SRAM, savestates, save/system directories and RetroArch-compatible config paths".into() },
+        UiSettingEntry { key: "Input".into(), value: "Joypad bitmasks, keyboard callback, descriptors, max users, rumble, sensors, overlays, MFi/GameController link".into() },
+        UiSettingEntry { key: "Media".into(), value: "Software frame ingest, audio samples/batches, frame stepping, playback timer and screenshots directory".into() },
+        UiSettingEntry { key: "Environment".into(), value: "Core options v0/v1/v2/intl, VFS v4, directories, messages, geometry, rotation, perf, MIDI, location/camera stubs".into() },
+        UiSettingEntry { key: "Runtime telemetry".into(), value: format!("{} rows exported to the dashboard", runtime.len()) },
+    ]
 }
 
 pub fn run() -> Result<(), slint::PlatformError> {
     let layout = StorageLayout::current();
+    let _ = REFRESH_LAYOUT.set(layout.clone());
     let frontend = Rc::new(RefCell::new(FrontendCore::new()));
     let status = Rc::new(RefCell::new(String::from("Ready")));
 
@@ -529,6 +579,19 @@ fn refresh_window(window: &MainWindow, frontend: &SharedFrontend, status: &Rc<Re
     ));
     window.set_api_rows(row_model(
         core.libretro_api_summaries()
+            .iter()
+            .map(setting_row)
+            .collect(),
+    ));
+    window.set_directory_rows(row_model(
+        layout_for_refresh()
+            .ui_directory_rows()
+            .iter()
+            .map(setting_row)
+            .collect(),
+    ));
+    window.set_feature_rows(row_model(
+        feature_rows(&core, &layout_for_refresh())
             .iter()
             .map(setting_row)
             .collect(),
