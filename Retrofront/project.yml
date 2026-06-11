@@ -47,9 +47,7 @@ targets:
     dependencies:
       - target: RetrofrontCoreBridge
 
-      # =========================
-      # UIKit / Core frameworks
-      # =========================
+      # Core iOS frameworks
       - sdk: UIKit.framework
       - sdk: Foundation.framework
       - sdk: CoreFoundation.framework
@@ -62,15 +60,11 @@ targets:
       - sdk: Metal.framework
       - sdk: MetalKit.framework
 
-      # =========================
-      # 追加: OpenGL / Legacy Graphics
-      # =========================
+      # OpenGL legacy
       - sdk: OpenGLES.framework
       - sdk: GLKit.framework
 
-      # =========================
-      # 追加: Vulkan backend
-      # =========================
+      # Vulkan backend (MoltenVK)
       - framework: ../Externals/MoltenVK/MoltenVK.xcframework
 
     preBuildScripts:
@@ -99,6 +93,7 @@ targets:
           }
 
           mkdir -p "${CORES_DST}"
+
           if [ -f "${SRCROOT}/target/aarch64-apple-ios/release/libretrofront_core.dylib" ]; then
             cp -f "${SRCROOT}/target/aarch64-apple-ios/release/libretrofront_core.dylib" "${CORES_DST}/"
             sign_core "${CORES_DST}/libretrofront_core.dylib"
@@ -126,19 +121,28 @@ targets:
         PRODUCT_NAME: Retrofront
         INFOPLIST_FILE: apps/iOS/Resources/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
+
         FRAMEWORK_SEARCH_PATHS: "$(inherited) $(SRCROOT)/cores $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Frameworks"
         LIBRARY_SEARCH_PATHS: "$(inherited) $(SRCROOT)/target/aarch64-apple-ios/release"
         SWIFT_INCLUDE_PATHS: "$(SRCROOT)/apps/frontend/CRetrofrontCore"
         HEADER_SEARCH_PATHS: "$(SRCROOT)/apps/frontend/CRetrofrontCore"
+
         OTHER_LDFLAGS: "$(inherited) -lc++ -ObjC"
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"
+
+        # =========================
+        # Swift runtime control (重要)
+        # =========================
+        ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: "NO"
+        EMBEDDED_CONTENT_CONTAINS_SWIFT: "NO"
+        SWIFT_FORCE_STATIC_LINK_STDLIB: "NO"
+
         DEAD_CODE_STRIPPING: "YES"
         STRIP_INSTALLED_PRODUCT: "YES"
         STRIP_STYLE: "all"
         COPY_PHASE_STRIP: "YES"
         DEBUG_INFORMATION_FORMAT: "dwarf"
         GCC_SYMBOLS_PRIVATE_EXTERN: "YES"
-        ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: "NO"
 
 schemes:
   RetrofrontiOS:
