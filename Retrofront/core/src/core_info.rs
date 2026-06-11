@@ -64,6 +64,9 @@ impl CoreInfoList {
                 continue;
             }
             let mut info = self.load_info_for_core(&path);
+            if info.supported_extensions.is_empty() {
+                continue;
+            }
             info.path = path;
             self.cores.push(info);
         }
@@ -237,7 +240,15 @@ impl CoreInfoList {
             .extension()
             .and_then(|ext| ext.to_str())
             .unwrap_or_default();
-        matches!(ext.to_ascii_lowercase().as_str(), "dylib" | "so" | "dll")
+        if !matches!(ext.to_ascii_lowercase().as_str(), "dylib" | "so" | "dll") {
+            return false;
+        }
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        file_name.contains("_libretro") || file_name.contains(".libretro")
     }
 
     fn load_info_for_core(&self, core_path: &Path) -> CoreInfo {
@@ -552,15 +563,25 @@ mod tests {
                 .as_nanos()
         ));
         let framework = dir.join("mgba_libretro_ios.framework");
+        let info_dir = dir.join("info");
         fs::create_dir_all(&framework).unwrap();
+        fs::create_dir_all(&info_dir).unwrap();
         File::create(framework.join("mgba_libretro_ios")).unwrap();
+        fs::write(
+            info_dir.join("mgba_libretro.info"),
+            "display_name = \"mGBA\"\nsupported_extensions = \"gba|gb|gbc\"\n",
+        )
+        .unwrap();
 
         let mut list = CoreInfoList::new();
+        list.set_info_dir(info_dir);
         list.scan_directory(&dir);
 
         assert_eq!(list.cores.len(), 1);
         assert_eq!(list.cores[0].path, framework);
-        assert!(list.cores[0].supported_extensions.is_empty());
+        assert!(list.cores[0]
+            .supported_extensions
+            .contains(&"gba".to_string()));
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -669,6 +690,26 @@ mod tests {
         let info = list.load_info_for_core(Path::new("/cores/mgba_libretro_ios.dylib"));
         assert_eq!(info.display_name, "mGBA");
         assert!(info.supported_extensions.contains(&"gba".to_string()));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ignores_non_libretro_dylibs_in_core_scan() {
+        let dir = std::env::temp_dir().join(format!(
+            "retrofront-non-core-dylibs-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("libswiftCore.dylib"), b"not a core").unwrap();
+        fs::write(dir.join("Foundation.dylib"), b"not a core").unwrap();
+
+        let mut list = CoreInfoList::new();
+        list.scan_directory(&dir);
+
+        assert!(list.cores.is_empty());
         let _ = fs::remove_dir_all(dir);
     }
 

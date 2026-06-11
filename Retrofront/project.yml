@@ -82,7 +82,15 @@ targets:
           fi
           if [ -d "${CORES_SRC}" ]; then
             find "${CORES_SRC}" -maxdepth 1 -type f -name '*.dylib' -print | while IFS= read -r core; do
-              destination="${CORES_DST}/$(basename "${core}")"
+              core_name="$(basename "${core}")"
+              case "${core_name}" in
+                *_libretro*.dylib|*.libretro.dylib) ;;
+                *)
+                  echo "Skipping non-libretro dylib ${core_name}"
+                  continue
+                  ;;
+              esac
+              destination="${CORES_DST}/${core_name}"
               cp -f "${core}" "${destination}"
               sign_core "${destination}"
             done

@@ -4,6 +4,7 @@ import 'dart:io' show Directory, File, HttpClient, HttpStatus, Platform;
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:archive/archive.dart';
 import 'package:ffi/ffi.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -320,7 +321,7 @@ class RetrofrontNative implements RetrofrontFrontend {
   late final int Function(ffi.Pointer<RfFrontend>) _launchCandidateCountNative;
   late final bool Function(ffi.Pointer<RfFrontend>, int, ffi.Pointer<RfCoreInfo>) _getLaunchCandidateNative;
   late final bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Pointer<RfAssetInstallReport>) _installAssetsZipNative;
-  late final void Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>) _setBaseDirNative;
+  late final bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>) _setBaseDirNative;
   late final void Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>) _setInfoDirNative;
   late final void Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>) _scanCoresNative;
   late final void Function(ffi.Pointer<RfFrontend>) _scanConfiguredCoresNative;
@@ -416,7 +417,7 @@ class RetrofrontNative implements RetrofrontFrontend {
     _launchCandidateCountNative = lib.lookupFunction<ffi.UintPtr Function(ffi.Pointer<RfFrontend>), int Function(ffi.Pointer<RfFrontend>)>('rf_frontend_launch_candidate_count');
     _getLaunchCandidateNative = lib.lookupFunction<ffi.Bool Function(ffi.Pointer<RfFrontend>, ffi.UintPtr, ffi.Pointer<RfCoreInfo>), bool Function(ffi.Pointer<RfFrontend>, int, ffi.Pointer<RfCoreInfo>)>('rf_frontend_get_launch_candidate');
     _installAssetsZipNative = lib.lookupFunction<ffi.Bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Pointer<RfAssetInstallReport>), bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Pointer<RfAssetInstallReport>)>('rf_frontend_install_assets_zip');
-    _setBaseDirNative = lib.lookupFunction<ffi.Void Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>), void Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>)>('rf_frontend_set_base_dir');
+    _setBaseDirNative = lib.lookupFunction<ffi.Bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>), bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>)>('rf_frontend_set_base_dir');
     _setInfoDirNative = lib.lookupFunction<ffi.Void Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>), void Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>)>('rf_frontend_set_info_dir');
     _scanCoresNative = lib.lookupFunction<ffi.Void Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>), void Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>)>('rf_frontend_scan_cores');
     _scanConfiguredCoresNative = lib.lookupFunction<ffi.Void Function(ffi.Pointer<RfFrontend>), void Function(ffi.Pointer<RfFrontend>)>('rf_frontend_scan_configured_cores');
@@ -862,40 +863,47 @@ class RetrofrontNative implements RetrofrontFrontend {
       statusMessage = 'Install failed: ${package.name}.zip was not found.';
       return 0;
     }
-    final handle = _handle;
-    if (handle == null) {
-      statusMessage = 'Install failed: native core library is required to extract ${package.name}.zip.';
-      return 0;
-    }
     Directory(destination).createSync(recursive: true);
-    final cZip = zipFile.path.toNativeUtf8();
-    final cDestination = destination.toNativeUtf8();
-    final report = malloc<RfAssetInstallReport>();
-    try {
-      final ok = _installAssetsZipNative(handle, cZip, cDestination, report);
-      if (!ok) {
-        statusMessage = 'Install failed: could not extract ${package.name}.zip.';
+    final handle = _handle;
+    int filesWritten;
+    if (handle != null) {
+      final cZip = zipFile.path.toNativeUtf8();
+      final cDestination = destination.toNativeUtf8();
+      final report = malloc<RfAssetInstallReport>();
+      try {
+        final ok = _installAssetsZipNative(handle, cZip, cDestination, report);
+        if (!ok) {
+          statusMessage = 'Install failed: ${_lastError()}';
+          return 0;
+        }
+        filesWritten = report.ref.filesWritten;
+      } finally {
+        malloc.free(cZip);
+        malloc.free(cDestination);
+        malloc.free(report);
+      }
+    } else {
+      try {
+        filesWritten = await _extractFrontendAssetZip(zipFile, Directory(destination));
+      } catch (error) {
+        statusMessage = 'Install failed: could not extract ${package.name}.zip: $error';
         return 0;
       }
-      if (package.name == 'info') {
-        _applyAllSettingsToNative();
-        await _scanBundledCoreDirectories();
-        await scanCores(settings['libretro_directory'] ?? '');
-        _scanConfiguredCores();
-      }
-      if (package.name == 'overlays') {
-        _ensureDefaultOverlayConfig();
-        if ((settings['input_overlay'] ?? '').isNotEmpty) {
-          await loadOverlay(settings['input_overlay']!);
-        }
-      }
-      statusMessage = '${package.name}.zip installed: ${report.ref.filesWritten} files';
-      return report.ref.filesWritten;
-    } finally {
-      malloc.free(cZip);
-      malloc.free(cDestination);
-      malloc.free(report);
     }
+    if (package.name == 'info') {
+      _applyAllSettingsToNative();
+      await _scanBundledCoreDirectories();
+      await scanCores(settings['libretro_directory'] ?? '');
+      _scanConfiguredCores();
+    }
+    if (package.name == 'overlays') {
+      _ensureDefaultOverlayConfig();
+      if ((settings['input_overlay'] ?? '').isNotEmpty) {
+        await loadOverlay(settings['input_overlay']!);
+      }
+    }
+    statusMessage = '${package.name}.zip installed: $filesWritten files';
+    return filesWritten;
   }
 
   @override
@@ -1078,20 +1086,54 @@ overlay0_desc10 = "menu_toggle,0.08,0.13,rect,0.06,0.04"
     final cache = Directory(p.join((_retroArchRoot ?? await _resolveRetroArchRoot()).path, 'cache', 'frontend-assets'));
     cache.createSync(recursive: true);
     final destination = File(p.join(cache.path, '$name.zip'));
+    final temporary = File(p.join(cache.path, '$name.zip.download'));
     final uri = Uri.parse('https://buildbot.libretro.com/assets/frontend/$name.zip');
-    final client = HttpClient();
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 20);
     try {
       final request = await client.getUrl(uri);
+      request.headers.set('Accept', 'application/zip, application/octet-stream, */*');
       final response = await request.close();
       if (response.statusCode != HttpStatus.ok) {
-        throw StateError('HTTP ${response.statusCode}');
+        await response.drain();
+        throw StateError('HTTP ${response.statusCode} while downloading $uri');
+      }
+      if (temporary.existsSync()) temporary.deleteSync();
+      await response.pipe(temporary.openWrite());
+      if (temporary.lengthSync() == 0) {
+        temporary.deleteSync();
+        throw StateError('downloaded $name.zip is empty');
       }
       if (destination.existsSync()) destination.deleteSync();
-      await response.pipe(destination.openWrite());
+      temporary.renameSync(destination.path);
       return destination;
     } finally {
       client.close(force: true);
     }
+  }
+
+  Future<int> _extractFrontendAssetZip(File zipFile, Directory destination) async {
+    destination.createSync(recursive: true);
+    final archive = ZipDecoder().decodeBytes(await zipFile.readAsBytes(), verify: true);
+    var filesWritten = 0;
+    for (final entry in archive) {
+      final safePath = _safeZipPath(entry.name);
+      if (safePath == null || _isMacOSZipMetadataPath(safePath)) continue;
+      final normalized = _normalizeFrontendAssetZipPath(safePath);
+      if (normalized.isEmpty) continue;
+      final outputPath = p.joinAll([destination.path, ...normalized.split('/')]);
+      if (entry.isFile) {
+        final output = File(outputPath);
+        if (output.existsSync()) output.deleteSync();
+        output.parent.createSync(recursive: true);
+        final content = entry.content;
+        final bytes = content is List<int> ? content : List<int>.from(content as Iterable<int>);
+        output.writeAsBytesSync(bytes);
+        filesWritten++;
+      } else {
+        Directory(outputPath).createSync(recursive: true);
+      }
+    }
+    return filesWritten;
   }
 
   Future<Directory> _resolveRetroArchRoot() async {
@@ -1112,12 +1154,20 @@ overlay0_desc10 = "menu_toggle,0.08,0.13,rect,0.06,0.04"
     if (handle == null) return;
     final base = settings['base_dir']?.toNativeUtf8();
     if (base != null) {
-      try { _setBaseDirNative(handle, base); } finally { malloc.free(base); }
+      try {
+        _setBaseDirNative(handle, base);
+      } finally {
+        malloc.free(base);
+      }
     }
     _applyRendererSetting();
     final info = settings['libretro_info_path']?.toNativeUtf8();
     if (info != null) {
-      try { _setInfoDirNative(handle, info); } finally { malloc.free(info); }
+      try {
+        _setInfoDirNative(handle, info);
+      } finally {
+        malloc.free(info);
+      }
     }
     for (final entry in settings.entries) {
       final cKey = entry.key.toNativeUtf8();
@@ -1254,8 +1304,47 @@ overlay0_desc10 = "menu_toggle,0.08,0.13,rect,0.06,0.04"
 
   bool _isCoreLibrary(String path) {
     final lower = path.toLowerCase();
-    return lower.endsWith('.framework') || lower.endsWith('.so') || lower.endsWith('.dylib') || lower.endsWith('.dll');
+    final name = p.basename(lower);
+    if (name.startsWith('libswift') || name == 'foundation.dylib' || name == 'libretrofront_core.dylib') {
+      return false;
+    }
+    if (lower.endsWith('.framework')) {
+      return name.contains('libretro');
+    }
+    if (!(lower.endsWith('.so') || lower.endsWith('.dylib') || lower.endsWith('.dll'))) {
+      return false;
+    }
+    return name.contains('_libretro') || name.contains('.libretro');
   }
+
+  String? _safeZipPath(String name) {
+    final normalized = name.replaceAll('\\', '/');
+    final parts = normalized.split('/').where((part) => part.isNotEmpty && part != '.');
+    final safe = <String>[];
+    for (final part in parts) {
+      if (part == '..' || part.contains(':')) return null;
+      safe.add(part);
+    }
+    return safe.isEmpty ? null : safe.join('/');
+  }
+
+  String _normalizeFrontendAssetZipPath(String path) {
+    final parts = path.split('/').where((part) => part.isNotEmpty).toList();
+    if (parts.isEmpty) return '';
+    if (parts.first == 'assets') {
+      while (parts.isNotEmpty && parts.first == 'assets') {
+        parts.removeAt(0);
+      }
+      return parts.join('/');
+    }
+    if (parts.first == 'info' || parts.first == 'overlays') {
+      parts.removeAt(0);
+      return parts.join('/');
+    }
+    return parts.join('/');
+  }
+
+  bool _isMacOSZipMetadataPath(String path) => path.split('/').any((part) => part == '__MACOSX' || part.startsWith('._'));
 
   static const _fallbackExtensions = {'zip', 'gba', 'gb', 'gbc', 'sfc', 'smc', 'nes', 'cue', 'chd', 'iso', 'bin', 'md', 'gen'};
 
