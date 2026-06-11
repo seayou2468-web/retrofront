@@ -739,11 +739,34 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
   Future<void> _pickRom() async {
     final result = await FilePicker.platform.pickFiles(allowMultiple: true);
     if (result == null) return;
+    final importedGames = <GameEntry>[];
     for (final file in result.files) {
       final path = file.path;
-      if (path != null) await widget.frontend.importRom(path);
+      if (path == null) continue;
+      await widget.frontend.importRom(path);
+      final imported = _latestImportedGameFor(path);
+      if (imported != null) importedGames.add(imported);
     }
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() => _selectedGame = importedGames.isNotEmpty ? importedGames.first : _selectedGame);
+    if (importedGames.length == 1) {
+      await _launchGame(importedGames.single);
+    }
+  }
+
+  GameEntry? _latestImportedGameFor(String sourcePath) {
+    if (widget.frontend.games.isEmpty) return null;
+    final sourceName = _pathBasename(sourcePath);
+    for (final game in widget.frontend.games) {
+      if (_pathBasename(game.path) == sourceName) return game;
+    }
+    return null;
+  }
+
+  String _pathBasename(String path) {
+    final normalized = path.replaceAll('\\', '/');
+    final index = normalized.lastIndexOf('/');
+    return index == -1 ? normalized : normalized.substring(index + 1);
   }
 
   Future<void> _pickRomDirectory() async {

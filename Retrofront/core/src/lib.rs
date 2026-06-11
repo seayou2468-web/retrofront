@@ -1003,7 +1003,7 @@ impl FrontendCore {
             ("Core options", "v0/v1/v2/intl definitions, current values, variable update checks, display callbacks and FFI option export"),
             ("Content metadata", "game_info_ext, zip preparation, fullpath/in-memory loading, content-info overrides and launch planning"),
             ("Platform services", "performance counters, LEDs, MIDI, camera/location, proc-address, throttle, JIT/netplay responses and exec-memory safety"),
-            ("Native bridge", "C ABI exports for Swift/iOS and desktop hosts: cores, games, menus, settings, overlays, video frames and gfx driver state"),
+            ("Native bridge", "C ABI exports for Flutter/iOS and desktop hosts: cores, games, menus, settings, overlays, video frames and gfx driver state"),
         ]
         .into_iter()
         .map(|(key, value)| UiSettingEntry {

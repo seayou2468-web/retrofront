@@ -569,13 +569,15 @@ impl MenuEngine {
                 Self::setting(
                     "Audio",
                     "audio_driver",
-                    settings.get("audio_driver").map_or("swift", String::as_str),
+                    settings.get("audio_driver").map_or("rust", String::as_str),
                     601,
                 ),
                 Self::setting(
                     "Input",
                     "input_driver",
-                    settings.get("input_driver").map_or("swift", String::as_str),
+                    settings
+                        .get("input_driver")
+                        .map_or("flutter", String::as_str),
                     602,
                 ),
                 Self::setting(
@@ -631,7 +633,7 @@ impl MenuEngine {
                 Self::setting(
                     "Output",
                     "Active audio driver",
-                    settings.get("audio_driver").map_or("swift", String::as_str),
+                    settings.get("audio_driver").map_or("rust", String::as_str),
                     640,
                 ),
                 Self::setting(
@@ -665,7 +667,9 @@ impl MenuEngine {
                 Self::setting(
                     "Driver",
                     "Active input driver",
-                    settings.get("input_driver").map_or("swift", String::as_str),
+                    settings
+                        .get("input_driver")
+                        .map_or("flutter", String::as_str),
                     660,
                 ),
                 Self::setting(

@@ -253,10 +253,8 @@ class RetrofrontNative implements RetrofrontFrontend {
     final candidates = <String>[
       if (Platform.isIOS) 'libretrofront_core.dylib',
       if (Platform.isIOS) 'retrofront_core.framework/retrofront_core',
-      if (Platform.isIOS) 'RetrofrontCoreBridge.framework/RetrofrontCoreBridge',
       if (Platform.isIOS) p.join(executableDir, 'Frameworks', 'libretrofront_core.dylib'),
       if (Platform.isIOS) p.join(executableDir, 'Frameworks', 'retrofront_core.framework', 'retrofront_core'),
-      if (Platform.isIOS) p.join(executableDir, 'Frameworks', 'RetrofrontCoreBridge.framework', 'RetrofrontCoreBridge'),
       if (Platform.isLinux) 'libretrofront_core.so',
       if (Platform.isLinux && bundledNativeDir != null) p.join(bundledNativeDir, 'libretrofront_core.so'),
       if (Platform.isLinux) p.join(current, 'libretrofront_core.so'),
@@ -1432,7 +1430,7 @@ overlay0_desc10 = "menu_toggle,0.08,0.13,rect,0.06,0.04"
   bool _isCoreLibrary(String path) {
     final lower = path.toLowerCase();
     final name = p.basename(lower);
-    if (name.startsWith('libswift') || name == 'foundation.dylib' || name == 'libretrofront_core.dylib') {
+    if (name == 'foundation.dylib' || name == 'libretrofront_core.dylib') {
       return false;
     }
     if (lower.endsWith('.framework')) {

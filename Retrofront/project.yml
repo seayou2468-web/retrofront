@@ -7,35 +7,12 @@ options:
 
 settings:
   base:
-    SWIFT_VERSION: "5.9"
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Manual
     CODE_SIGNING_ALLOWED: "NO"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
 
 targets:
-  RetrofrontCoreBridge:
-    type: framework
-    platform: iOS
-    sources:
-      - path: apps/frontend/Sources/RetrofrontSwift
-      - path: apps/frontend/CRetrofrontCore
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.retrofront.corebridge
-        DEFINES_MODULE: "YES"
-        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/apps/frontend/CRetrofrontCore"
-        HEADER_SEARCH_PATHS: "$(SRCROOT)/apps/frontend/CRetrofrontCore"
-        LIBRARY_SEARCH_PATHS: "$(SRCROOT)/target/aarch64-apple-ios/release"
-        OTHER_LDFLAGS: "$(inherited) -lretrofront_core"
-        DEAD_CODE_STRIPPING: "YES"
-        STRIP_INSTALLED_PRODUCT: "YES"
-        ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: "NO"
-
-    dependencies:
-      - framework: target/aarch64-apple-ios/release/libretrofront_core.dylib
-        embed: false
-
   RetrofrontiOS:
     type: application
     platform: iOS
@@ -45,7 +22,8 @@ targets:
       - path: apps/iOS/Resources
 
     dependencies:
-      - target: RetrofrontCoreBridge
+      - framework: target/aarch64-apple-ios/release/libretrofront_core.dylib
+        embed: true
 
       # Core iOS frameworks
       - sdk: UIKit.framework
@@ -94,11 +72,6 @@ targets:
 
           mkdir -p "${CORES_DST}"
 
-          if [ -f "${SRCROOT}/target/aarch64-apple-ios/release/libretrofront_core.dylib" ]; then
-            cp -f "${SRCROOT}/target/aarch64-apple-ios/release/libretrofront_core.dylib" "${CORES_DST}/"
-            sign_core "${CORES_DST}/libretrofront_core.dylib"
-          fi
-
           if [ -d "${CORES_SRC}" ]; then
             find "${CORES_SRC}" -maxdepth 1 -type f -name '*.dylib' -print | while IFS= read -r core; do
               core_name="$(basename "${core}")"
@@ -124,18 +97,8 @@ targets:
 
         FRAMEWORK_SEARCH_PATHS: "$(inherited) $(SRCROOT)/cores $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Frameworks"
         LIBRARY_SEARCH_PATHS: "$(inherited) $(SRCROOT)/target/aarch64-apple-ios/release"
-        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/apps/frontend/CRetrofrontCore"
-        HEADER_SEARCH_PATHS: "$(SRCROOT)/apps/frontend/CRetrofrontCore"
-
         OTHER_LDFLAGS: "$(inherited) -lc++ -ObjC"
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"
-
-        # =========================
-        # Swift runtime control (重要)
-        # =========================
-        ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: "NO"
-        EMBEDDED_CONTENT_CONTAINS_SWIFT: "NO"
-        SWIFT_FORCE_STATIC_LINK_STDLIB: "NO"
 
         DEAD_CODE_STRIPPING: "YES"
         STRIP_INSTALLED_PRODUCT: "YES"

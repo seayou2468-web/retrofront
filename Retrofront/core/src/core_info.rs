@@ -700,7 +700,7 @@ mod tests {
                 .as_nanos()
         ));
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("libswiftCore.dylib"), b"not a core").unwrap();
+        fs::write(dir.join("libSystem.dylib"), b"not a core").unwrap();
         fs::write(dir.join("Foundation.dylib"), b"not a core").unwrap();
 
         let mut list = CoreInfoList::new();
