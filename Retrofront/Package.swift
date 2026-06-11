@@ -18,13 +18,13 @@ let package = Package(
   targets: [
     .target(
       name: "CRetrofrontCore",
-      path: "frontend/CRetrofrontCore",
+      path: "apps/frontend/CRetrofrontCore",
       publicHeadersPath: "."
     ),
     .target(
       name: "RetrofrontSwift",
       dependencies: ["CRetrofrontCore"],
-      path: "frontend/Sources/RetrofrontSwift",
+      path: "apps/frontend/Sources/RetrofrontSwift",
       linkerSettings: [
         .unsafeFlags(["-L", rustReleasePath, "-Xlinker", "-rpath", "-Xlinker", rustReleasePath]),
         .linkedLibrary("retrofront_core"),
@@ -33,12 +33,12 @@ let package = Package(
     .executableTarget(
       name: "retrofront-cli",
       dependencies: ["RetrofrontSwift"],
-      path: "frontend/Sources/retrofront-cli"
+      path: "apps/frontend/Sources/retrofront-cli"
     ),
     .testTarget(
       name: "RetrofrontSwiftTests",
       dependencies: ["RetrofrontSwift"],
-      path: "frontend/Tests/RetrofrontSwiftTests"
+      path: "apps/frontend/Tests/RetrofrontSwiftTests"
     ),
   ]
 )

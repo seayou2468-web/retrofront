@@ -16,13 +16,13 @@ targets:
     type: framework
     platform: iOS
     sources:
-      - path: frontend/Sources/RetrofrontSwift
+      - path: apps/frontend/Sources/RetrofrontSwift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.retrofront.swift
         DEFINES_MODULE: "YES"
-        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
-        HEADER_SEARCH_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/apps/frontend/CRetrofrontCore"
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/apps/frontend/CRetrofrontCore"
         LIBRARY_SEARCH_PATHS: "$(SRCROOT)/target/aarch64-apple-ios/release"
         OTHER_LDFLAGS: "$(inherited) -lretrofront_core"
         DEAD_CODE_STRIPPING: "YES"
@@ -86,8 +86,8 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
         FRAMEWORK_SEARCH_PATHS: "$(inherited) $(SRCROOT)/cores $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Frameworks"
         LIBRARY_SEARCH_PATHS: "$(inherited) $(SRCROOT)/target/aarch64-apple-ios/release"
-        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
-        HEADER_SEARCH_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/apps/frontend/CRetrofrontCore"
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/apps/frontend/CRetrofrontCore"
         OTHER_LDFLAGS: "$(inherited) -lc++ -ObjC"
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"
         DEAD_CODE_STRIPPING: "YES"

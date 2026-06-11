@@ -16,10 +16,11 @@ path = "src/main.rs"
 
 [features]
 default = ["desktop"]
-desktop = ["slint/backend-winit", "slint/renderer-femtovg"]
-# iOS runs the same Slint shell as Linux. The software renderer keeps the
-# app independent from GLKit/OpenGL while winit provides the native iOS event loop.
-ios = ["slint/backend-winit", "slint/renderer-software"]
+desktop = ["slint/backend-winit-x11", "slint/backend-winit-wayland", "slint/renderer-femtovg"]
+# iOS must not pull desktop X11/Wayland/Qt backends. Slint 1.15 exposes iOS
+# through the winit backend crate itself, so enable only that crate plus the
+# software renderer for the static iOS library.
+ios = ["slint/unstable-winit-030", "slint/renderer-software"]
 
 [dependencies]
 retrofront-core = { path = "../core" }

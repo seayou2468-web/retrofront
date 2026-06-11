@@ -16,16 +16,16 @@ linux-ui:
 	cargo build --manifest-path Cargo.toml --release -p retrofront-ui --bin retrofront
 
 linux-appimage: frontend-assets
-	./scripts/build-linux-appimage.sh
+	../scripts/build-linux-appimage.sh
 
 frontend-assets:
-	./scripts/fetch-frontend-assets.sh apps/iOS/Resources
+	../scripts/fetch-frontend-assets.sh apps/iOS/Resources
 
 ios-rust:
-	./scripts/build-rust-ios.sh
+	../scripts/build-rust-ios.sh
 
 xcodegen:
-	./scripts/generate-xcodeproj.sh
+	../scripts/generate-xcodeproj.sh
 
 ios-device-build: ios-rust xcodegen
 	xcodebuild -project Retrofront.xcodeproj -scheme RetrofrontiOS -destination 'generic/platform=iOS' -configuration Debug CODE_SIGNING_ALLOWED=NO build

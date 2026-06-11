@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="${RETROFRONT_PROJECT_DIR:-${REPO_DIR}/Retrofront}"
 APPDIR="${ROOT_DIR}/dist/Retrofront.AppDir"
 APPIMAGE="${ROOT_DIR}/dist/Retrofront-x86_64.AppImage"
 APPIMAGETOOL="${APPIMAGETOOL:-appimagetool}"

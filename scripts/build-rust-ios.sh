@@ -2,7 +2,8 @@
 set -euo pipefail
 
 TARGET="${IOS_RUST_TARGET:-aarch64-apple-ios}"
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="${RETROFRONT_PROJECT_DIR:-${REPO_DIR}/Retrofront}"
 PROFILE_DIR="$ROOT_DIR/target/$TARGET/release"
 
 rustup target add "$TARGET"
