@@ -2,9 +2,7 @@ name: Retrofront
 
 on:
   workflow_dispatch:
-
   push:
-
   pull_request:
 
 permissions:
@@ -14,14 +12,12 @@ jobs:
 
   linux:
     name: Linux Swift/Rust UI
-
     runs-on: ubuntu-latest
 
     container:
-      image: swift:6.0-jammy
+      image: swift:6.1
 
     steps:
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -34,7 +30,11 @@ jobs:
             clang \
             libclang-dev \
             make \
-            curl
+            curl \
+            pkg-config \
+            libgtk-4-dev \
+            libadwaita-1-dev \
+            libgtksourceview-5-dev
 
       - name: Install Rust
         shell: bash
@@ -47,12 +47,17 @@ jobs:
 
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
+      - name: Fetch bundled frontend assets
+        working-directory: Retrofront
+        shell: bash
+        run: |
+          ./scripts/fetch-frontend-assets.sh apps/iOS/Resources
+
       - name: Test Linux workspace
         working-directory: Retrofront
         shell: bash
         run: |
           . "$HOME/.cargo/env"
-
           make test
 
       - name: Build Linux UI
@@ -60,7 +65,6 @@ jobs:
         shell: bash
         run: |
           . "$HOME/.cargo/env"
-
           make linux-ui
 
       - name: Upload Linux artifacts
@@ -74,11 +78,9 @@ jobs:
 
   ios-device:
     name: iOS Device Build
-
     runs-on: macos-15
 
     steps:
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -86,6 +88,17 @@ jobs:
         shell: bash
         run: |
           brew install xcodegen
+
+      - name: Fetch bundled frontend assets
+        working-directory: Retrofront
+        shell: bash
+        run: |
+          ./scripts/fetch-frontend-assets.sh apps/iOS/Resources
+
+      - name: Install Rust iOS target
+        shell: bash
+        run: |
+          rustup target add aarch64-apple-ios
 
       - name: Build Rust static library for iOS device
         working-directory: Retrofront
@@ -98,6 +111,21 @@ jobs:
         shell: bash
         run: |
           make xcodegen
+
+      - name: Verify CRetrofrontCore
+        working-directory: Retrofront
+        shell: bash
+        run: |
+          find frontend/CRetrofrontCore -type f
+
+          test -f frontend/CRetrofrontCore/module.modulemap
+          test -f frontend/CRetrofrontCore/retrofront_core.h
+
+      - name: Verify generated project
+        working-directory: Retrofront
+        shell: bash
+        run: |
+          grep -n "CRetrofrontCore" Retrofront.xcodeproj/project.pbxproj || true
 
       - name: Verify bundled libretro core exists
         working-directory: Retrofront
