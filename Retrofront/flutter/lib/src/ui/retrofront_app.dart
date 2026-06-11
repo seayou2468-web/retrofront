@@ -33,6 +33,7 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
   GameEntry? _selectedGame;
   CoreEntry? _selectedCore;
   List<CoreOptionEntry> _coreOptions = const [];
+  List<String> _overlayConfigs = const [];
 
   @override
   void initState() {
@@ -51,6 +52,7 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
   Future<void> _bootstrap() async {
     await widget.frontend.initialize();
     _coreOptions = await widget.frontend.coreOptions();
+    _overlayConfigs = await widget.frontend.availableOverlayConfigs();
     _selectedGame ??= widget.frontend.games.isNotEmpty ? widget.frontend.games.first : null;
     _selectedCore ??= widget.frontend.cores.isNotEmpty ? widget.frontend.cores.first : null;
     if (mounted) setState(() {});
@@ -72,11 +74,20 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
       if (selected == null) return;
       await widget.frontend.setSetting('content_core_${plan.contentExtension}', selected.path);
       launchGame = GameEntry(title: game.title, system: selected.system, core: selected.name, lastPlayed: game.lastPlayed, playTime: game.playTime, path: game.path, initials: game.initials);
+    } else if (plan.isSelected) {
+      final selected = plan.selectedCorePath.isEmpty
+          ? (plan.candidates.isNotEmpty ? plan.candidates.first : null)
+          : plan.candidates.where((core) => core.path == plan.selectedCorePath).firstOrNull;
+      if (selected != null) {
+        await widget.frontend.setSetting('content_core_${plan.contentExtension}', selected.path);
+        launchGame = GameEntry(title: game.title, system: selected.system, core: selected.name, lastPlayed: game.lastPlayed, playTime: game.playTime, path: game.path, initials: game.initials);
+      }
     } else if (plan.decision == 0) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(plan.reason.isEmpty ? '互換コアが見つかりません。info.zipを取得してコアを再スキャンしてください。' : plan.reason)));
       return;
     }
     final ok = await widget.frontend.launch(launchGame);
+    _coreOptions = await widget.frontend.coreOptions();
     if (!mounted) return;
     setState(() => _selectedGame = launchGame);
     if (ok) {
@@ -546,60 +557,109 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
   }
 
   Widget _settingsPanel({required bool desktop}) {
-    final categories = ['ユーザーインターフェース', 'ビデオ', 'オーディオ', '入力', 'コア', 'システム', 'プレイリスト'];
-    final rows = [
-      ('テーマ', 'ダーク / ライト / システム'),
-      ('アクセントカラー', '紫・青・シアン・緑・黄・橙・赤'),
-      ('透明度（グラス効果）', '60%'),
-      ('ビデオドライバ', widget.frontend.settings['video_driver'] ?? 'metal'),
-      ('スケール', widget.frontend.settings['video_scale_mode'] ?? 'integer_fit'),
-      ('オーディオ遅延', '${widget.frontend.settings['audio_latency_ms']} ms'),
-      ('入力オーバーレイ', widget.frontend.settings['input_overlay_enable'] ?? 'true'),
-      ('セーブディレクトリ', widget.frontend.settings['savefile_directory'] ?? 'saves'),
-      ('ステートディレクトリ', widget.frontend.settings['savestate_directory'] ?? 'states'),
-    ];
+    final categories = ['Video', 'Audio', 'Controller', 'Library', 'Loaded Core', 'Storage'];
     return _GlassPanel(
       child: Padding(
         padding: EdgeInsets.all(desktop ? 22 : 14),
         child: desktop
             ? Row(children: [
-                SizedBox(width: 210, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('設定', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)), const SizedBox(height: 16), for (final c in categories) _SettingCategory(label: c, selected: c == categories.first)])),
+                SizedBox(
+                  width: 210,
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('設定', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+                    const SizedBox(height: 6),
+                    const Text('実際に保存・反映されるアプリ設定', style: TextStyle(color: _muted, fontSize: 11)),
+                    const SizedBox(height: 16),
+                    for (final c in categories) _SettingCategory(label: c, selected: c == categories.first),
+                  ]),
+                ),
                 const VerticalDivider(color: _line),
-                Expanded(child: _settingsControls(rows)),
-                const VerticalDivider(color: _line),
-                SizedBox(width: 300, child: _settingsPreview()),
+                Expanded(child: _settingsControls()),
               ])
             : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 const Text('設定', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
+                const SizedBox(height: 4),
+                const Text('実際に保存・反映されるアプリ設定', style: TextStyle(color: _muted, fontSize: 11)),
                 const SizedBox(height: 14),
-                _settingsControls(rows),
+                Expanded(child: _settingsControls()),
               ]),
       ),
     );
   }
 
-  Widget _settingsControls(List<(String, String)> rows) {
+  Widget _settingsControls() {
+    final s = widget.frontend.settings;
     return ListView(children: [
-      const Text('テーマ', style: TextStyle(color: _muted, fontSize: 12)),
-      const SizedBox(height: 8),
-      Row(children: ['ダーク', 'ライト', 'システム'].map((t) => Expanded(child: Padding(padding: const EdgeInsets.only(right: 8), child: InkWell(onTap: () async { await widget.frontend.setSetting('theme', t == 'ダーク' ? 'dark' : t == 'ライト' ? 'light' : 'system'); if (mounted) setState(() {}); }, child: _ThemeCard(label: t, selected: widget.frontend.settings['theme'] == (t == 'ダーク' ? 'dark' : t == 'ライト' ? 'light' : 'system')))))).toList()),
-      const SizedBox(height: 16),
-      const Text('アクセントカラー', style: TextStyle(color: _muted, fontSize: 12)),
+      _SettingsGroup(title: 'Video', children: [
+        _SettingsChoiceRow(title: 'Renderer', value: _rendererLabel(s['video_driver']), choices: const ['Metal', 'Software', 'MoltenVK', 'OpenGL ES'], onChanged: (v) => _setMappedSetting('video_driver', v, const {'Metal': 'metal', 'Software': 'software', 'MoltenVK': 'moltenvk', 'OpenGL ES': 'opengl'})),
+        _SettingsChoiceRow(title: 'Scale', value: _scaleLabel(s['video_scale_mode']), choices: const ['Aspect', 'Integer', 'Stretch'], onChanged: (v) => _setMappedSetting('video_scale_mode', v, const {'Aspect': 'keep_aspect', 'Integer': 'integer', 'Stretch': 'stretch'})),
+        _SettingsChoiceRow(title: 'Filter', value: _filterLabel(s['video_filter_mode']), choices: const ['Nearest', 'Linear'], onChanged: (v) => _setMappedSetting('video_filter_mode', v, const {'Nearest': 'nearest', 'Linear': 'linear'})),
+        _SettingsToggleRow(title: 'VSync', subtitle: '表示更新に同期', value: _settingBool('video_vsync'), onChanged: (v) => _setBoolSetting('video_vsync', v)),
+      ]),
+      _SettingsGroup(title: 'Audio', children: [
+        _SettingsToggleRow(title: 'Audio Output', subtitle: '音声出力を有効化', value: _settingBool('audio_enable'), onChanged: (v) => _setBoolSetting('audio_enable', v)),
+        _SettingsToggleRow(title: 'Audio Sync', subtitle: '音声同期', value: _settingBool('audio_sync'), onChanged: (v) => _setBoolSetting('audio_sync', v)),
+        _SettingsChoiceRow(title: 'Latency', value: '${s['audio_latency_ms'] ?? '64'} ms', choices: const ['32 ms', '64 ms', '96 ms', '128 ms'], onChanged: (v) => _setPlainSetting('audio_latency_ms', v.replaceAll(' ms', ''))),
+      ]),
+      _SettingsGroup(title: 'Controller', children: [
+        _SettingsToggleRow(title: 'Touch Overlay', subtitle: '画面上コントローラー', value: _settingBool('input_overlay_enable'), onChanged: (v) async { await widget.frontend.setOverlayEnabled(v); if (mounted) setState(() {}); }),
+        _SettingsChoiceRow(title: 'Overlay Set', value: _overlayLabel(s['input_overlay']), choices: _overlayConfigs.isEmpty ? const ['Not selected'] : _overlayConfigs.map(_overlayLabel).toList(), onChanged: (v) async { final path = _overlayConfigs.where((path) => _overlayLabel(path) == v).firstOrNull; if (path != null) { await widget.frontend.loadOverlay(path); if (mounted) setState(() {}); } }),
+        _SettingsChoiceRow(title: 'Overlay Opacity', value: _opacityLabel(s['input_overlay_opacity']), choices: const ['45%', '70%', '90%'], onChanged: (v) => _setMappedSetting('input_overlay_opacity', v, const {'45%': '0.45', '70%': '0.70', '90%': '0.90'})),
+        _SettingsToggleRow(title: 'Haptics', subtitle: 'タッチ操作の振動フィードバック', value: _settingBool('input_haptic_feedback'), onChanged: (v) => _setBoolSetting('input_haptic_feedback', v)),
+      ]),
+      _SettingsGroup(title: 'Library', children: [
+        _SettingsChoiceRow(title: 'Sort', value: _librarySortLabel(s['library_sort_mode']), choices: const ['Name ↑', 'Name ↓', 'Extension'], onChanged: (v) => _setMappedSetting('library_sort_mode', v, const {'Name ↑': 'name_ascending', 'Name ↓': 'name_descending', 'Extension': 'extension'})),
+        _SettingsToggleRow(title: 'Core Badges', subtitle: '互換コア数をROMに表示', value: _settingBool('library_show_core_badges'), onChanged: (v) => _setBoolSetting('library_show_core_badges', v)),
+        _SettingsToggleRow(title: 'File Details', subtitle: '拡張子とサイズを表示', value: _settingBool('library_show_file_details'), onChanged: (v) => _setBoolSetting('library_show_file_details', v)),
+        _SettingsToggleRow(title: 'Auto Scan', subtitle: '起動時にROMを再スキャン', value: _settingBool('library_auto_scan_on_launch'), onChanged: (v) => _setBoolSetting('library_auto_scan_on_launch', v)),
+      ]),
+      _SettingsGroup(title: 'Loaded Core', children: [
+        _SettingsRow(title: 'Current Core', value: widget.frontend.runtime.loadedCore.isEmpty ? 'Not loaded' : widget.frontend.runtime.loadedCore),
+        if (widget.frontend.cores.isEmpty)
+          const _SettingsRow(title: 'Bundled Cores', value: 'No bundled cores discovered')
+        else
+          for (final core in widget.frontend.cores.take(10))
+            _SettingsCoreButton(core: core, onTap: () async { await widget.frontend.loadCore(core); _coreOptions = await widget.frontend.coreOptions(); if (mounted) setState(() {}); }),
+        if (_coreOptions.isEmpty)
+          const _SettingsRow(title: 'Core Options', value: 'Load a core to edit its options')
+        else
+          for (final option in _coreOptions)
+            _SettingsChoiceRow(title: option.description.isEmpty ? option.key : option.description, value: option.value, choices: option.values.isEmpty ? [option.value] : option.values, onChanged: (v) async { await widget.frontend.setCoreOption(option.key, v); _coreOptions = await widget.frontend.coreOptions(); if (mounted) setState(() {}); }),
+      ]),
+      _SettingsGroup(title: 'Storage', children: [
+        _SettingsRow(title: 'Content Folder', value: s['content_directory'] ?? ''),
+        _SettingsRow(title: 'Core Folder', value: s['libretro_directory'] ?? ''),
+        _SettingsRow(title: 'Info Folder', value: s['libretro_info_path'] ?? ''),
+        _SettingsRow(title: 'Saves', value: s['savefile_directory'] ?? ''),
+        _SettingsRow(title: 'States', value: s['savestate_directory'] ?? ''),
+        _SettingsRow(title: 'System/BIOS', value: s['system_directory'] ?? ''),
+        _SettingsRow(title: 'Screenshots', value: s['screenshot_directory'] ?? ''),
+        for (final package in RetrofrontNative.frontendAssetPackages) _SettingsAssetRow(package: package, onBundled: () => _installAssetPackage(package.name, download: false), onDownload: () => _installAssetPackage(package.name, download: true)),
+      ]),
       const SizedBox(height: 10),
-      Wrap(spacing: 13, children: const [Color(0xFF7B61FF), Color(0xFF4058FF), Color(0xFF18A9E6), Color(0xFF11CBD7), Color(0xFF5BD17E), Color(0xFFE1C13C), Color(0xFFE98525), Color(0xFFE9485D), Color(0xFFC653A8), Color(0xFF263247)].map((c) => InkWell(onTap: () async { await widget.frontend.setSetting('accent_color', c.value.toRadixString(16)); if (mounted) setState(() {}); }, child: CircleAvatar(radius: 9, backgroundColor: c))).toList()),
-      const SizedBox(height: 18),
-      Row(children: [const Text('透明度（グラス効果）', style: TextStyle(color: _muted, fontSize: 12)), Expanded(child: Slider(value: double.tryParse(widget.frontend.settings['glass_opacity'] ?? '0.60') ?? .60, activeColor: _accent, onChanged: (v) async { await widget.frontend.setSetting('glass_opacity', v.toStringAsFixed(2)); if (mounted) setState(() {}); })), Text('${(((double.tryParse(widget.frontend.settings['glass_opacity'] ?? '0.60') ?? .60) * 100).round())}%', style: const TextStyle(color: _text, fontSize: 12))]),
-      const SizedBox(height: 6),
-      _SettingsChoiceRow(title: 'ビデオドライバ', value: widget.frontend.settings['video_driver'] ?? 'metal', choices: const ['metal', 'opengl', 'vulkan', 'software'], onChanged: (v) async { await widget.frontend.setSetting('video_driver', v); if (mounted) setState(() {}); }),
-      _SettingsChoiceRow(title: 'スケール', value: widget.frontend.settings['video_scale_mode'] ?? 'integer_fit', choices: const ['integer_fit', 'fit', 'fill', 'stretch'], onChanged: (v) async { await widget.frontend.setSetting('video_scale_mode', v); if (mounted) setState(() {}); }),
-      _SettingsChoiceRow(title: 'オーディオ遅延', value: widget.frontend.settings['audio_latency_ms'] ?? '64', choices: const ['32', '64', '96', '128'], onChanged: (v) async { await widget.frontend.setSetting('audio_latency_ms', v); if (mounted) setState(() {}); }),
-      SwitchListTile(contentPadding: EdgeInsets.zero, dense: true, title: const Text('入力オーバーレイ', style: TextStyle(color: _text, fontSize: 13)), subtitle: Text(widget.frontend.settings['input_overlay'] ?? '', style: const TextStyle(color: _muted, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis), value: (widget.frontend.settings['input_overlay_enable'] ?? 'true') == 'true', activeColor: _accent, onChanged: (v) async { await widget.frontend.setOverlayEnabled(v); if (mounted) setState(() {}); }),
-      const SizedBox(height: 12),
-      const Text('Frontend ZIP Assets', style: TextStyle(color: _muted, fontSize: 12)),
-      const SizedBox(height: 6),
-      for (final package in RetrofrontNative.frontendAssetPackages) _SettingsAssetRow(package: package, onBundled: () => _installAssetPackage(package.name, download: false), onDownload: () => _installAssetPackage(package.name, download: true)),
-      for (final row in rows.skip(7)) _SettingsRow(title: row.$1, value: row.$2),
+      Text(widget.frontend.statusMessage, style: const TextStyle(color: _muted, fontSize: 11)),
     ]);
+  }
+
+  bool _settingBool(String key) => widget.frontend.settings[key] != 'false';
+
+  Future<void> _setBoolSetting(String key, bool value) => _setPlainSetting(key, value ? 'true' : 'false');
+
+  Future<void> _setMappedSetting(String key, String label, Map<String, String> values) => _setPlainSetting(key, values[label] ?? label);
+
+  Future<void> _setPlainSetting(String key, String value) async {
+    await widget.frontend.setSetting(key, value);
+    if (mounted) setState(() {});
+  }
+
+  String _rendererLabel(String? value) => switch (value) { 'software' => 'Software', 'moltenvk' => 'MoltenVK', 'opengl' => 'OpenGL ES', _ => 'Metal' };
+  String _scaleLabel(String? value) => switch (value) { 'integer' => 'Integer', 'stretch' => 'Stretch', _ => 'Aspect' };
+  String _filterLabel(String? value) => value == 'linear' ? 'Linear' : 'Nearest';
+  String _librarySortLabel(String? value) => switch (value) { 'extension' => 'Extension', 'name_descending' => 'Name ↓', _ => 'Name ↑' };
+  String _opacityLabel(String? value) => '${(((double.tryParse(value ?? '0.70') ?? .70) * 100).round())}%';
+  String _overlayLabel(String? path) {
+    if (path == null || path.isEmpty) return 'Not selected';
+    return path.split(Platform.pathSeparator).last.replaceAll('.cfg', '').replaceAll('_', ' ').replaceAll('-', ' ');
   }
 
   Widget _playlistPanel() {
@@ -811,6 +871,62 @@ class _QuickAction extends StatelessWidget { const _QuickAction({required this.i
 class _SettingCategory extends StatelessWidget { const _SettingCategory({required this.label, required this.selected}); final String label; final bool selected; @override Widget build(BuildContext context) => Container(height: 28, margin: const EdgeInsets.only(bottom: 4), padding: const EdgeInsets.symmetric(horizontal: 10), decoration: BoxDecoration(color: selected ? const Color(0xFF2B2364) : Colors.transparent, borderRadius: BorderRadius.circular(6)), alignment: Alignment.centerLeft, child: Text(label, style: TextStyle(color: selected ? _text : _muted, fontSize: 12))); }
 class _ThemeCard extends StatelessWidget { const _ThemeCard({required this.label, required this.selected}); final String label; final bool selected; @override Widget build(BuildContext context) => Container(height: 58, alignment: Alignment.bottomCenter, padding: const EdgeInsets.only(bottom: 6), decoration: BoxDecoration(borderRadius: BorderRadius.circular(9), border: Border.all(color: selected ? _accent : _line), gradient: const LinearGradient(colors: [Color(0xFF091223), Color(0xFF203151)])), child: Text(label, style: const TextStyle(fontSize: 11))); }
 class _AssetPackageRow extends StatelessWidget { const _AssetPackageRow({required this.package, required this.destination, required this.onBundled, required this.onDownload}); final FrontendAssetPackageEntry package; final String destination; final FutureOr<void> Function() onBundled; final FutureOr<void> Function() onDownload; @override Widget build(BuildContext context) => Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: _panel2, borderRadius: BorderRadius.circular(12), border: Border.all(color: _line)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('${package.name}.zip', style: const TextStyle(fontWeight: FontWeight.w900)), const SizedBox(height: 4), Text('${package.label} → $destination', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: _muted, fontSize: 11)), const SizedBox(height: 10), Row(children: [Expanded(child: _SmallButton(label: '同梱ZIPを展開', onTap: onBundled)), const SizedBox(width: 8), Expanded(child: _SmallButton(label: '最新版を取得', onTap: onDownload))]) ])); }
+
+class _SettingsGroup extends StatelessWidget {
+  const _SettingsGroup({required this.title, required this.children});
+  final String title;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title, style: const TextStyle(color: _text, fontSize: 16, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(color: _panel2, borderRadius: BorderRadius.circular(14), border: Border.all(color: _line)),
+            child: Column(children: children),
+          ),
+        ]),
+      );
+}
+
+class _SettingsToggleRow extends StatelessWidget {
+  const _SettingsToggleRow({required this.title, required this.subtitle, required this.value, required this.onChanged});
+  final String title;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) => SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        dense: true,
+        title: Text(title, style: const TextStyle(color: _text, fontSize: 13)),
+        subtitle: Text(subtitle, style: const TextStyle(color: _muted, fontSize: 11)),
+        value: value,
+        activeColor: _accent,
+        onChanged: onChanged,
+      );
+}
+
+class _SettingsCoreButton extends StatelessWidget {
+  const _SettingsCoreButton({required this.core, required this.onTap});
+  final CoreEntry core;
+  final FutureOr<void> Function() onTap;
+
+  @override
+  Widget build(BuildContext context) => ListTile(
+        dense: true,
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(core.loaded ? Icons.check_circle : Icons.extension, color: core.loaded ? _accent : _muted, size: 18),
+        title: Text(core.name, style: const TextStyle(color: _text, fontSize: 13)),
+        subtitle: Text([core.system, core.supportedExtensions.take(6).join(', ')].where((part) => part.isNotEmpty).join(' • '), style: const TextStyle(color: _muted, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+        onTap: () => onTap(),
+      );
+}
+
 class _SettingsAssetRow extends StatelessWidget { const _SettingsAssetRow({required this.package, required this.onBundled, required this.onDownload}); final FrontendAssetPackageEntry package; final FutureOr<void> Function() onBundled; final FutureOr<void> Function() onDownload; @override Widget build(BuildContext context) => ListTile(dense: true, contentPadding: EdgeInsets.zero, title: Text('${package.name}.zip', style: const TextStyle(color: _text, fontSize: 13)), subtitle: Text(package.label, style: const TextStyle(color: _muted, fontSize: 11)), trailing: Wrap(spacing: 8, children: [TextButton(onPressed: () => onBundled(), child: const Text('同梱')), TextButton(onPressed: () => onDownload(), child: const Text('取得'))])); }
 class _SettingsChoiceRow extends StatelessWidget { const _SettingsChoiceRow({required this.title, required this.value, required this.choices, required this.onChanged}); final String title; final String value; final List<String> choices; final ValueChanged<String> onChanged; @override Widget build(BuildContext context) => ListTile(dense: true, contentPadding: EdgeInsets.zero, title: Text(title, style: const TextStyle(color: _text, fontSize: 13)), subtitle: Text(value, style: const TextStyle(color: _muted, fontSize: 11)), trailing: DropdownButton<String>(value: choices.contains(value) ? value : choices.first, dropdownColor: _panel2, underline: const SizedBox.shrink(), items: [for (final choice in choices) DropdownMenuItem(value: choice, child: Text(choice))], onChanged: (value) { if (value != null) onChanged(value); })); }
 class _SettingsRow extends StatelessWidget { const _SettingsRow({required this.title, required this.value}); final String title; final String value; @override Widget build(BuildContext context) => ListTile(dense: true, contentPadding: EdgeInsets.zero, title: Text(title, style: const TextStyle(color: _text, fontSize: 13)), subtitle: Text(value, style: const TextStyle(color: _muted, fontSize: 11)), trailing: const Icon(Icons.chevron_right, color: _muted, size: 18)); }

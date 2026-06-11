@@ -219,6 +219,7 @@ abstract interface class RetrofrontFrontend {
   Future<List<CoreOptionEntry>> coreOptions();
   Future<bool> setCoreOption(String key, String value);
   Future<void> setSetting(String key, String value);
+  Future<List<String>> availableOverlayConfigs();
   Future<int> installFrontendAssetPackage(String name, {bool download = false});
   Future<VideoFrame?> copyVideoFrame();
   void openQuickMenu();
@@ -274,6 +275,7 @@ class RetrofrontNative implements RetrofrontFrontend {
   late final void Function(ffi.Pointer<RfFrontend>) _destroy;
   late final int Function(ffi.Pointer<RfFrontend>) _state;
   late final bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>) _loadCore;
+  late final bool Function(ffi.Pointer<RfFrontend>, int) _setGfxBackendNative;
   late final bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>) _launchContent;
   late final bool Function(ffi.Pointer<RfFrontend>) _runFrame;
   late final bool Function(ffi.Pointer<RfFrontend>) _reset;
@@ -303,6 +305,7 @@ class RetrofrontNative implements RetrofrontFrontend {
   late final void Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>) _scanGamesNative;
   late final int Function(ffi.Pointer<RfFrontend>) _gamesCountNative;
   late final bool Function(ffi.Pointer<RfFrontend>, int, ffi.Pointer<RfGameInfo>) _getGameInfoNative;
+  late final ffi.Pointer<Utf8> Function(ffi.Pointer<RfFrontend>) _lastErrorNative;
 
   @override
   final List<GameEntry> games = <GameEntry>[];
@@ -367,6 +370,7 @@ class RetrofrontNative implements RetrofrontFrontend {
     _destroy = lib.lookupFunction<ffi.Void Function(ffi.Pointer<RfFrontend>), void Function(ffi.Pointer<RfFrontend>)>('rf_frontend_destroy');
     _state = lib.lookupFunction<ffi.Uint32 Function(ffi.Pointer<RfFrontend>), int Function(ffi.Pointer<RfFrontend>)>('rf_frontend_state');
     _loadCore = lib.lookupFunction<ffi.Bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>), bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>)>('rf_frontend_load_core');
+    _setGfxBackendNative = lib.lookupFunction<ffi.Bool Function(ffi.Pointer<RfFrontend>, ffi.Uint32), bool Function(ffi.Pointer<RfFrontend>, int)>('rf_frontend_set_gfx_backend');
     _launchContent = lib.lookupFunction<ffi.Bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>), bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>)>('rf_frontend_launch_content');
     _runFrame = lib.lookupFunction<ffi.Bool Function(ffi.Pointer<RfFrontend>), bool Function(ffi.Pointer<RfFrontend>)>('rf_frontend_run_frame');
     _reset = lib.lookupFunction<ffi.Bool Function(ffi.Pointer<RfFrontend>), bool Function(ffi.Pointer<RfFrontend>)>('rf_frontend_reset');
@@ -396,6 +400,7 @@ class RetrofrontNative implements RetrofrontFrontend {
     _scanGamesNative = lib.lookupFunction<ffi.Void Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>), void Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>)>('rf_frontend_scan_games');
     _gamesCountNative = lib.lookupFunction<ffi.UintPtr Function(ffi.Pointer<RfFrontend>), int Function(ffi.Pointer<RfFrontend>)>('rf_frontend_games_count');
     _getGameInfoNative = lib.lookupFunction<ffi.Bool Function(ffi.Pointer<RfFrontend>, ffi.UintPtr, ffi.Pointer<RfGameInfo>), bool Function(ffi.Pointer<RfFrontend>, int, ffi.Pointer<RfGameInfo>)>('rf_frontend_get_game_info');
+    _lastErrorNative = lib.lookupFunction<ffi.Pointer<Utf8> Function(ffi.Pointer<RfFrontend>), ffi.Pointer<Utf8> Function(ffi.Pointer<RfFrontend>)>('rf_frontend_last_error');
   }
 
   @override
@@ -420,14 +425,31 @@ class RetrofrontNative implements RetrofrontFrontend {
       'libretro_directory': p.join(root.path, 'cores'),
       'core_options_path': p.join(root.path, 'retroarch-core-options.cfg'),
       'input_overlay': p.join(root.path, 'overlays', 'gamepads', 'flat', 'retropad.cfg'),
+      'input_overlay_enable': 'true',
+      'input_overlay_opacity': '0.70',
+      'input_haptic_feedback': 'true',
+      'audio_enable': 'true',
+      'audio_sync': 'true',
+      'audio_latency_ms': '64',
+      'video_driver': Platform.isIOS ? 'metal' : 'software',
+      'video_bgfx_renderer': Platform.isIOS ? 'metal' : 'glcore',
+      'video_scale_mode': 'keep_aspect',
+      'video_filter_mode': 'nearest',
+      'video_vsync': 'true',
+      'library_sort_mode': 'name_ascending',
+      'library_show_core_badges': 'true',
+      'library_show_file_details': 'true',
+      'library_auto_scan_on_launch': 'true',
+      'screenshot_directory': p.join(root.path, 'screenshots'),
     };
     settings.addAll(dirs);
-    for (final dir in dirs.entries.where((entry) => entry.key != 'core_options_path' && entry.key != 'input_overlay')) {
+    for (final dir in dirs.entries.where((entry) => _directorySettingKeys.contains(entry.key))) {
       Directory(dir.value).createSync(recursive: true);
     }
     Directory(p.dirname(settings['input_overlay']!)).createSync(recursive: true);
     _ensureDefaultOverlayConfig();
     await _loadPersistedSettings();
+    _normalizeConfiguredDirectories(root);
     _applyAllSettingsToNative();
     await _scanBundledCoreDirectories();
     await scanCores(settings['libretro_directory']!);
@@ -437,7 +459,7 @@ class RetrofrontNative implements RetrofrontFrontend {
     await scanRoms(settings['content_directory']!);
     statusMessage = _handle == null
         ? 'Native core library not found; UI is running in preview mode.'
-        : 'RetroArch-compatible storage initialized.';
+        : 'RetroArch-compatible storage initialized (${cores.length} cores, ${games.length} ROMs).';
   }
 
   @override
@@ -492,6 +514,7 @@ class RetrofrontNative implements RetrofrontFrontend {
       }
     }
     await _loadPersistedLibrary();
+    _sortGames();
   }
 
   @override
@@ -533,6 +556,9 @@ class RetrofrontNative implements RetrofrontFrontend {
     if (ok || handle == null) {
       cores = [for (final item in cores) CoreEntry(name: item.name, system: item.system, path: item.path, supportedExtensions: item.supportedExtensions, loaded: item.name == core.name)];
       runtime = runtime.copyWith(loadedCore: core.name);
+      statusMessage = 'Loaded core: ${core.name}';
+    } else {
+      statusMessage = 'Core load failed: ${_lastError()}';
     }
     return ok;
   }
@@ -595,9 +621,9 @@ class RetrofrontNative implements RetrofrontFrontend {
     if (handle != null) {
       final cPath = game.path.toNativeUtf8();
       final ext = p.extension(game.path).replaceFirst('.', '').toLowerCase();
-      final preferredCorePath = settings['content_core_$ext'] ?? cores
-          .firstWhere((core) => core.name == game.core, orElse: () => cores.isNotEmpty ? cores.first : const CoreEntry(name: '', system: '', path: ''))
-          .path;
+      final plan = await planContentLaunch(game.path, preferredCorePath: settings['content_core_$ext'] ?? '');
+      final preferredCorePath = settings['content_core_$ext'] ??
+          (plan.selectedCorePath.isNotEmpty ? plan.selectedCorePath : _corePathForGame(game));
       final cCore = preferredCorePath.toNativeUtf8();
       final cMeta = ''.toNativeUtf8();
       try {
@@ -609,8 +635,11 @@ class RetrofrontNative implements RetrofrontFrontend {
       }
     }
     if (ok || handle == null) {
-      runtime = runtime.copyWith(loadedGame: game.title, loadedCore: game.core, running: true);
+      final loadedCore = _coreNameForPath(settings['content_core_${p.extension(game.path).replaceFirst('.', '').toLowerCase()}'] ?? _corePathForGame(game));
+      runtime = runtime.copyWith(loadedGame: game.title, loadedCore: loadedCore.isEmpty ? game.core : loadedCore, running: true);
       statusMessage = 'Running ${game.title}';
+    } else {
+      statusMessage = 'Launch failed: ${_lastError()}';
     }
     return ok;
   }
@@ -705,11 +734,18 @@ class RetrofrontNative implements RetrofrontFrontend {
   @override
   Future<bool> setCoreOption(String key, String value) async {
     final handle = _handle;
-    if (handle == null) return true;
+    settings['core_option_$key'] = value;
+    if (handle == null) {
+      await _persistSettings();
+      return true;
+    }
     final cKey = key.toNativeUtf8();
     final cValue = value.toNativeUtf8();
     try {
-      return _setOption(handle, cKey, cValue);
+      final ok = _setOption(handle, cKey, cValue);
+      if (ok) statusMessage = 'Core option updated: $key';
+      await _persistSettings();
+      return ok;
     } finally {
       malloc.free(cKey);
       malloc.free(cValue);
@@ -719,6 +755,11 @@ class RetrofrontNative implements RetrofrontFrontend {
   @override
   Future<void> setSetting(String key, String value) async {
     settings[key] = value;
+    if (key == 'video_driver') {
+      settings['video_bgfx_renderer'] = value == 'software' ? 'metal' : value;
+      _applyRendererSetting();
+    }
+    if (key == 'library_sort_mode') _sortGames();
     final handle = _handle;
     if (handle == null) {
       await _persistSettings();
@@ -733,6 +774,25 @@ class RetrofrontNative implements RetrofrontFrontend {
       malloc.free(cValue);
     }
     await _persistSettings();
+  }
+
+
+  @override
+  Future<List<String>> availableOverlayConfigs() async {
+    final roots = <String>{
+      if ((settings['overlay_directory'] ?? '').isNotEmpty) settings['overlay_directory']!,
+      p.join((_retroArchRoot ?? await _resolveRetroArchRoot()).path, 'overlays'),
+    };
+    final paths = <String>[];
+    for (final root in roots) {
+      final dir = Directory(root);
+      if (!dir.existsSync()) continue;
+      for (final file in dir.listSync(recursive: true).whereType<File>()) {
+        if (p.extension(file.path).toLowerCase() == '.cfg') paths.add(file.path);
+      }
+    }
+    paths.sort((a, b) => p.basenameWithoutExtension(a).toLowerCase().compareTo(p.basenameWithoutExtension(b).toLowerCase()));
+    return paths;
   }
 
   @override
@@ -820,6 +880,58 @@ class RetrofrontNative implements RetrofrontFrontend {
     if (handle != null) _destroy(handle);
   }
 
+
+  static const _directorySettingKeys = {
+    'base_dir',
+    'config_directory',
+    'assets_directory',
+    'menu_assets_directory',
+    'libretro_info_path',
+    'overlay_directory',
+    'core_assets_directory',
+    'content_directory',
+    'menu_content_directory',
+    'savefile_directory',
+    'savestate_directory',
+    'system_directory',
+    'playlist_directory',
+    'cache_directory',
+    'libretro_directory',
+    'screenshot_directory',
+  };
+
+  void _normalizeConfiguredDirectories(Directory root) {
+    for (final key in _directorySettingKeys) {
+      final value = settings[key];
+      if (value == null || value.isEmpty) continue;
+      Directory(value).createSync(recursive: true);
+    }
+    final coreDir = settings['libretro_directory'];
+    if (coreDir == null || coreDir.isEmpty || !Directory(coreDir).existsSync()) {
+      settings['libretro_directory'] = p.join(root.path, 'cores');
+      Directory(settings['libretro_directory']!).createSync(recursive: true);
+    }
+  }
+
+  String _lastError() {
+    final handle = _handle;
+    if (handle == null) return 'native core unavailable';
+    final ptr = _lastErrorNative(handle);
+    if (ptr == ffi.nullptr) return 'unknown native error';
+    final value = ptr.toDartString();
+    return value.isEmpty ? 'unknown native error' : value;
+  }
+
+  String _corePathForGame(GameEntry game) {
+    if (game.core.isEmpty) return cores.isNotEmpty ? cores.first.path : '';
+    return cores.firstWhere((core) => core.name == game.core, orElse: () => cores.isNotEmpty ? cores.first : const CoreEntry(name: '', system: '', path: '')).path;
+  }
+
+  String _coreNameForPath(String path) {
+    if (path.isEmpty) return '';
+    return cores.firstWhere((core) => core.path == path, orElse: () => const CoreEntry(name: '', system: '', path: '')).name;
+  }
+
   Future<void> _scanBundledCoreDirectories() async {
     for (final directory in _bundledCoreDirectories()) {
       if (Directory(directory).existsSync()) {
@@ -836,6 +948,8 @@ class RetrofrontNative implements RetrofrontFrontend {
       if (Platform.isIOS) p.join(executableDir, 'Frameworks'),
       if (Platform.isIOS) p.join(executableDir, 'dylibs'),
       if (Platform.isIOS) executableDir,
+      if (Platform.isIOS) p.join(current, 'archifacts', 'ios'),
+      if (Platform.isIOS) p.join(current, '..', 'archifacts', 'ios'),
       if (Platform.isLinux) p.join(current, 'archifacts', 'linux'),
       if (Platform.isLinux) p.join(current, '..', 'archifacts', 'linux'),
       if (Platform.isLinux) p.join(executableDir, 'cores'),
@@ -928,6 +1042,7 @@ overlay0_desc10 = "menu_toggle,0.08,0.13,rect,0.06,0.04"
     if (base != null) {
       try { _setBaseDirNative(handle, base); } finally { malloc.free(base); }
     }
+    _applyRendererSetting();
     final info = settings['libretro_info_path']?.toNativeUtf8();
     if (info != null) {
       try { _setInfoDirNative(handle, info); } finally { malloc.free(info); }
@@ -937,6 +1052,14 @@ overlay0_desc10 = "menu_toggle,0.08,0.13,rect,0.06,0.04"
       final cValue = entry.value.toNativeUtf8();
       try { _setSettingNative(handle, cKey, cValue); } finally { malloc.free(cKey); malloc.free(cValue); }
     }
+  }
+
+
+  void _applyRendererSetting() {
+    final handle = _handle;
+    if (handle == null) return;
+    final driver = settings['video_driver'] ?? (Platform.isIOS ? 'metal' : 'software');
+    _setGfxBackendNative(handle, driver == 'software' ? 0 : 1);
   }
 
   CoreEntry _coreEntryFromNative(RfCoreInfo info) {
@@ -1037,6 +1160,24 @@ overlay0_desc10 = "menu_toggle,0.08,0.13,rect,0.06,0.04"
     final file = File(p.join((_retroArchRoot ?? await _resolveRetroArchRoot()).path, 'config', 'retroarch.cfg'));
     file.parent.createSync(recursive: true);
     file.writeAsStringSync(settings.entries.map((entry) => '${entry.key} = "${entry.value}"').join('\n'));
+  }
+
+
+  void _sortGames() {
+    switch (settings['library_sort_mode']) {
+      case 'extension':
+        games.sort((a, b) {
+          final ext = p.extension(a.path).toLowerCase().compareTo(p.extension(b.path).toLowerCase());
+          return ext == 0 ? a.title.toLowerCase().compareTo(b.title.toLowerCase()) : ext;
+        });
+        break;
+      case 'name_descending':
+        games.sort((a, b) => b.title.toLowerCase().compareTo(a.title.toLowerCase()));
+        break;
+      default:
+        games.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+        break;
+    }
   }
 
   bool _isCoreLibrary(String path) {
