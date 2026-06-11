@@ -18,9 +18,9 @@ path = "src/main.rs"
 default = ["desktop"]
 desktop = ["slint/backend-winit-x11", "slint/backend-winit-wayland", "slint/renderer-femtovg"]
 # iOS must not pull desktop X11/Wayland/Qt backends. Slint 1.15 exposes iOS
-# through the winit backend crate itself, so enable only that crate plus the
-# software renderer for the static iOS library.
-ios = ["slint/unstable-winit-030", "slint/renderer-software"]
+# through the winit backend crate itself; renderer-skia selects Metal on Apple
+# targets when OpenGL is not enabled, keeping the iOS bundle on a native-only path.
+ios = ["slint/unstable-winit-030", "slint/renderer-skia"]
 
 [dependencies]
 retrofront-core = { path = "../core" }

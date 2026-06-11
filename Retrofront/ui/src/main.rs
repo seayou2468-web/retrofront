@@ -1,6 +1,3 @@
 fn main() {
-    if let Err(error) = retrofront_ui::run() {
-        eprintln!("Retrofront Slint UI failed: {error}");
-        std::process::exit(1);
-    }
+    std::process::exit(retrofront_ui::run_main());
 }

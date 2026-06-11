@@ -14,6 +14,43 @@ slint::include_modules!();
 type SharedFrontend = Rc<RefCell<FrontendCore>>;
 static REFRESH_LAYOUT: OnceLock<StorageLayout> = OnceLock::new();
 
+const DEFAULT_RETROPAD_OVERLAY: &str = r#"overlays = 2
+overlay0_name = "portrait"
+overlay0_full_screen = true
+overlay0_normalized = true
+overlay0_range_mod = 1.35
+overlay0_alpha_mod = 0.72
+overlay0_descs = 11
+overlay0_desc0 = "dpad_area,0.18,0.78,rect,0.16,0.16"
+overlay0_desc1 = "a,0.82,0.78,radial,0.07,0.07"
+overlay0_desc2 = "b,0.68,0.83,radial,0.07,0.07"
+overlay0_desc3 = "x,0.68,0.68,radial,0.07,0.07"
+overlay0_desc4 = "y,0.82,0.63,radial,0.07,0.07"
+overlay0_desc5 = "l,0.22,0.58,rect,0.12,0.045"
+overlay0_desc6 = "r,0.78,0.58,rect,0.12,0.045"
+overlay0_desc7 = "select,0.40,0.91,rect,0.08,0.04"
+overlay0_desc8 = "start,0.60,0.91,rect,0.08,0.04"
+overlay0_desc9 = "menu_toggle,0.50,0.58,rect,0.08,0.04"
+overlay0_desc10 = "overlay_next,0.93,0.08,rect,0.045,0.045"
+overlay1_name = "landscape"
+overlay1_full_screen = true
+overlay1_normalized = true
+overlay1_range_mod = 1.25
+overlay1_alpha_mod = 0.62
+overlay1_descs = 11
+overlay1_desc0 = "dpad_area,0.13,0.72,rect,0.12,0.18"
+overlay1_desc1 = "a,0.88,0.72,radial,0.055,0.08"
+overlay1_desc2 = "b,0.78,0.82,radial,0.055,0.08"
+overlay1_desc3 = "x,0.78,0.62,radial,0.055,0.08"
+overlay1_desc4 = "y,0.88,0.52,radial,0.055,0.08"
+overlay1_desc5 = "l,0.18,0.12,rect,0.13,0.055"
+overlay1_desc6 = "r,0.82,0.12,rect,0.13,0.055"
+overlay1_desc7 = "select,0.42,0.90,rect,0.06,0.04"
+overlay1_desc8 = "start,0.58,0.90,rect,0.06,0.04"
+overlay1_desc9 = "menu_toggle,0.50,0.10,rect,0.06,0.04"
+overlay1_desc10 = "overlay_next,0.96,0.08,rect,0.035,0.05"
+"#;
+
 #[derive(Debug, Clone)]
 struct StorageLayout {
     root: PathBuf,
@@ -33,6 +70,14 @@ struct StorageLayout {
     playlists_dir: PathBuf,
     cache_dir: PathBuf,
     overlay_config: PathBuf,
+    thumbnails_dir: PathBuf,
+    database_dir: PathBuf,
+    cheat_dir: PathBuf,
+    remaps_dir: PathBuf,
+    shaders_dir: PathBuf,
+    autoconfig_dir: PathBuf,
+    logs_dir: PathBuf,
+    records_dir: PathBuf,
 }
 
 impl StorageLayout {
@@ -127,6 +172,14 @@ impl StorageLayout {
             playlists_dir: root.join("playlists"),
             cache_dir,
             overlay_config: overlays_dir.join("gamepads/flat/retropad.cfg"),
+            thumbnails_dir: root.join("thumbnails"),
+            database_dir: root.join("database/rdb"),
+            cheat_dir: root.join("cht"),
+            remaps_dir: root.join("remaps"),
+            shaders_dir: root.join("shaders"),
+            autoconfig_dir: root.join("autoconfig"),
+            logs_dir: root.join("logs"),
+            records_dir: root.join("records"),
         }
     }
 
@@ -145,6 +198,15 @@ impl StorageLayout {
             &self.screenshots_dir,
             &self.playlists_dir,
             &self.cache_dir,
+            &self.thumbnails_dir,
+            &self.database_dir,
+            &self.cheat_dir,
+            &self.remaps_dir,
+            &self.shaders_dir,
+            &self.autoconfig_dir,
+            &self.logs_dir,
+            &self.records_dir,
+            self.overlay_config.parent().unwrap_or(&self.overlays_dir),
         ] {
             std::fs::create_dir_all(directory)
                 .map_err(|error| format!("create {}: {error}", directory.display()))?;
@@ -153,7 +215,20 @@ impl StorageLayout {
             std::fs::create_dir_all(&self.core_dir)
                 .map_err(|error| format!("create {}: {error}", self.core_dir.display()))?;
         }
+        self.ensure_default_overlay()?;
         Ok(())
+    }
+
+    fn ensure_default_overlay(&self) -> Result<(), String> {
+        if self.overlay_config.exists() {
+            return Ok(());
+        }
+        if let Some(parent) = self.overlay_config.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("create {}: {error}", parent.display()))?;
+        }
+        std::fs::write(&self.overlay_config, DEFAULT_RETROPAD_OVERLAY)
+            .map_err(|error| format!("write {}: {error}", self.overlay_config.display()))
     }
 
     fn apply(&self, frontend: &mut FrontendCore) -> Result<(), String> {
@@ -192,6 +267,38 @@ impl StorageLayout {
             path_string(&self.playlists_dir).as_str(),
         );
         frontend.set_setting("cache_directory", path_string(&self.cache_dir).as_str());
+        frontend.set_setting(
+            "thumbnails_directory",
+            path_string(&self.thumbnails_dir).as_str(),
+        );
+        frontend.set_setting(
+            "content_database_path",
+            path_string(&self.database_dir).as_str(),
+        );
+        frontend.set_setting("cheat_database_path", path_string(&self.cheat_dir).as_str());
+        frontend.set_setting(
+            "input_remapping_directory",
+            path_string(&self.remaps_dir).as_str(),
+        );
+        frontend.set_setting("video_shader_dir", path_string(&self.shaders_dir).as_str());
+        frontend.set_setting(
+            "joypad_autoconfig_dir",
+            path_string(&self.autoconfig_dir).as_str(),
+        );
+        frontend.set_setting("log_dir", path_string(&self.logs_dir).as_str());
+        frontend.set_setting(
+            "recording_output_directory",
+            path_string(&self.records_dir).as_str(),
+        );
+        if cfg!(target_os = "ios") {
+            frontend.set_setting("video_driver", "metal");
+            frontend.set_setting("video_bgfx_renderer", "metal");
+            frontend.set_setting("input_driver", "apple_gamecontroller");
+        } else {
+            frontend.set_setting("video_driver", "glcore");
+            frontend.set_setting("video_bgfx_renderer", "opengl");
+            frontend.set_setting("input_driver", "udev");
+        }
         frontend.set_info_dir(&self.info_dir);
         Ok(())
     }
@@ -210,6 +317,14 @@ impl StorageLayout {
             ("Screenshots", &self.screenshots_dir),
             ("Playlists", &self.playlists_dir),
             ("Cache", &self.cache_dir),
+            ("Thumbnails", &self.thumbnails_dir),
+            ("Database", &self.database_dir),
+            ("Cheats", &self.cheat_dir),
+            ("Remaps", &self.remaps_dir),
+            ("Shaders", &self.shaders_dir),
+            ("Autoconfig", &self.autoconfig_dir),
+            ("Logs", &self.logs_dir),
+            ("Records", &self.records_dir),
         ]
         .into_iter()
         .map(|(key, path)| UiSettingEntry {
@@ -250,6 +365,7 @@ fn feature_rows(core: &FrontendCore, layout: &StorageLayout) -> Vec<UiSettingEnt
 }
 
 pub fn run() -> Result<(), slint::PlatformError> {
+    configure_slint_backend();
     let layout = StorageLayout::current();
     let _ = REFRESH_LAYOUT.set(layout.clone());
     let frontend = Rc::new(RefCell::new(FrontendCore::new()));
@@ -258,6 +374,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
     initialize_frontend(&frontend, &layout, &status);
 
     let window = MainWindow::new()?;
+    window.set_mobile_layout(cfg!(target_os = "ios"));
     refresh_window(&window, &frontend, &status);
     wire_callbacks(&window, frontend, layout, status);
     window.run()
@@ -265,12 +382,23 @@ pub fn run() -> Result<(), slint::PlatformError> {
 
 #[no_mangle]
 pub extern "C" fn retrofront_slint_ios_main() -> i32 {
+    run_main()
+}
+
+pub fn run_main() -> i32 {
     match run() {
         Ok(()) => 0,
         Err(error) => {
             eprintln!("Retrofront Slint UI failed: {error}");
             1
         }
+    }
+}
+
+fn configure_slint_backend() {
+    if cfg!(target_os = "ios") {
+        env::set_var("SLINT_BACKEND", "winit");
+        env::set_var("SLINT_RENDERER", "skia");
     }
 }
 

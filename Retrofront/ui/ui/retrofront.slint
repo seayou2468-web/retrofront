@@ -193,6 +193,7 @@ export component MainWindow inherits Window {
     in property <string> shell_mode_text;
     in property <string> library_hint_text;
     in property <string> core_hint_text;
+    in property <bool> mobile_layout: false;
 
     callback refresh_requested;
     callback scan_games_requested;
@@ -214,6 +215,7 @@ export component MainWindow inherits Window {
     callback activate_menu_entry_requested(int);
 
     VerticalLayout {
+        visible: !root.mobile_layout;
         padding: 20px;
         spacing: 12px;
         HorizontalLayout {
@@ -323,6 +325,78 @@ export component MainWindow inherits Window {
                 PhonePreview { title: "プレイリスト"; rows: root.menu_entries; }
                 PhonePreview { title: "コア"; rows: root.cores; }
                 PhonePreview { title: "設定"; rows: root.settings; settings: true; }
+            }
+        }
+    }
+
+
+    Rectangle {
+        visible: root.mobile_layout;
+        x: 0px; y: 0px; width: root.width; height: root.height;
+        background: @linear-gradient(180deg, #050b14 0%, #071323 60%, #0c1628 100%);
+        VerticalLayout {
+            padding: 18px;
+            spacing: 14px;
+            HorizontalLayout {
+                height: 24px;
+                Text { text: "22:48"; color: white; font-size: 12px; font-weight: 800; }
+                Rectangle {}
+                Text { text: "▴ ᯤ ▬"; color: white; font-size: 11px; font-weight: 800; }
+            }
+            HorizontalLayout {
+                height: 36px;
+                Text { text: "ライブラリ"; color: white; font-size: 23px; font-weight: 900; }
+                Rectangle {}
+                IconButton { icon: "⌕"; clicked => { root.scan_games_requested(); } }
+                IconButton { icon: "⚗"; clicked => { root.show_settings_menu_requested(); } }
+            }
+            GlassPanel {
+                height: 74px;
+                radius: 18px;
+                fill: #0a1424f6;
+                HorizontalLayout {
+                    padding-left: 14px; padding-right: 14px; spacing: 12px;
+                    Rectangle { width: 48px; height: 48px; border-radius: 10px; background: @linear-gradient(135deg, #f0882c 0%, #34235a 50%, #27c4d8 100%); Text { text: "SF"; color: white; font-size: 12px; font-weight: 900; horizontal-alignment: center; vertical-alignment: center; } }
+                    VerticalLayout { alignment: center; spacing: 3px; Text { text: root.current_game_text; color: white; font-size: 14px; font-weight: 900; overflow: elide; } Text { text: root.current_core_text; color: #8f9db4; font-size: 11px; overflow: elide; } }
+                    IconButton { icon: "▶"; clicked => { root.play_pause_requested(); } }
+                }
+            }
+            ScrollView {
+                VerticalLayout {
+                    spacing: 8px;
+                    for game[index] in root.games: GameRow { title: game.title; subtitle: game.subtitle; index: index; clicked => { root.launch_game_requested(index); } }
+                }
+            }
+            GlassPanel {
+                height: 165px;
+                radius: 18px;
+                fill: #08111df2;
+                VerticalLayout {
+                    padding: 10px; spacing: 8px;
+                    Rectangle {
+                        height: 96px;
+                        border-radius: 14px;
+                        background: @linear-gradient(150deg, #07111d 0%, #17263b 100%);
+                        Image { source: root.video_frame; image-fit: contain; }
+                        Text { text: "QUICK MENU"; color: #ffffff88; font-size: 10px; font-weight: 900; x: 12px; y: 10px; }
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        IconButton { icon: "☰"; clicked => { root.show_quick_menu_requested(); } }
+                        IconButton { icon: "▣"; clicked => { root.save_state_requested(); } }
+                        IconButton { icon: "⇩"; clicked => { root.load_state_requested(); } }
+                        IconButton { icon: "⟳"; clicked => { root.reset_requested(); } }
+                        IconButton { icon: "⏻"; clicked => { root.stop_requested(); } }
+                    }
+                }
+            }
+            HorizontalLayout {
+                height: 58px;
+                spacing: 18px;
+                Text { text: "▣\nライブラリ"; color: #ffffff; font-size: 10px; horizontal-alignment: center; }
+                Text { text: "☷\nプレイリスト"; color: #aebbd2; font-size: 10px; horizontal-alignment: center; }
+                Text { text: "✥\nコア"; color: #aebbd2; font-size: 10px; horizontal-alignment: center; }
+                Text { text: "⚙\n設定"; color: #aebbd2; font-size: 10px; horizontal-alignment: center; }
             }
         }
     }
