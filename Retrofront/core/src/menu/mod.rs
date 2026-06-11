@@ -34,6 +34,8 @@ pub const ACTION_SAVE_STATE_SLOT_0: u32 = 27;
 pub const ACTION_LOAD_STATE_SLOT_0: u32 = 28;
 pub const ACTION_SAVE_SRAM: u32 = 29;
 pub const ACTION_STATE_SLOT: u32 = 30;
+pub const ACTION_STATE_SLOT_DECREASE: u32 = 38;
+pub const ACTION_STATE_SLOT_INCREASE: u32 = 39;
 pub const ACTION_UNDO_LOAD_STATE: u32 = 31;
 pub const ACTION_UNDO_SAVE_STATE: u32 = 32;
 pub const ACTION_REPLAY: u32 = 33;
@@ -140,6 +142,17 @@ impl MenuEngine {
     }
 
     pub fn push_quick_menu(&mut self, has_game: bool) {
+        self.push_quick_menu_with_settings(has_game, None);
+    }
+
+    pub fn push_quick_menu_with_settings(&mut self, has_game: bool, settings: Option<&Settings>) {
+        let state_slot = Self::state_slot_label(settings);
+        let auto_save = settings
+            .and_then(|s| s.get("savestate_auto_save"))
+            .map_or("false", String::as_str);
+        let auto_load = settings
+            .and_then(|s| s.get("savestate_auto_load"))
+            .map_or("false", String::as_str);
         let mut entries = vec![
             Self::action(
                 "Resume",
@@ -163,9 +176,19 @@ impl MenuEngine {
             ),
             Self::setting(
                 "State Slot",
-                "Select the active save-state slot",
-                "0",
+                "Select the active save-state slot (Auto, 0-999 like RetroArch)",
+                &state_slot,
                 ACTION_STATE_SLOT,
+            ),
+            Self::action(
+                "State Slot -",
+                "Move to the previous save-state slot; below 0 becomes Auto",
+                ACTION_STATE_SLOT_DECREASE,
+            ),
+            Self::action(
+                "State Slot +",
+                "Move to the next save-state slot; above 999 wraps to 0",
+                ACTION_STATE_SLOT_INCREASE,
             ),
             Self::action(
                 "Save State",
@@ -191,6 +214,18 @@ impl MenuEngine {
                 "Save SRAM",
                 "Flush battery-backed memory card / SRAM data",
                 ACTION_SAVE_SRAM,
+            ),
+            Self::setting(
+                "Auto Save State",
+                "Save the active slot when content closes",
+                auto_save,
+                725,
+            ),
+            Self::setting(
+                "Auto Load State",
+                "Load the active slot after launch when present",
+                auto_load,
+                726,
             ),
             Self::submenu(
                 "Core Options",
@@ -275,6 +310,17 @@ impl MenuEngine {
             title: "Quick Menu".to_string(),
             entries,
         });
+    }
+
+    fn state_slot_label(settings: Option<&Settings>) -> String {
+        match settings
+            .and_then(|settings| settings.get("state_slot"))
+            .map(String::as_str)
+        {
+            Some("-1") => "Auto".to_string(),
+            Some(value) if !value.is_empty() => value.to_string(),
+            _ => "0".to_string(),
+        }
     }
 
     pub fn push_core_list(&mut self, cores: &[CoreInfo]) {
@@ -1056,12 +1102,12 @@ impl MenuEngine {
             title: "Save States".to_string(),
             entries: vec![
                 Self::action(
-                    "Save State Slot 0",
+                    "Save State",
                     "Instantly serialize the current gameplay state",
                     ACTION_SAVE_STATE_SLOT_0,
                 ),
                 Self::action(
-                    "Load State Slot 0",
+                    "Load State",
                     "Restore the previously saved instant state",
                     ACTION_LOAD_STATE_SLOT_0,
                 ),
@@ -1071,8 +1117,24 @@ impl MenuEngine {
                     ACTION_SAVE_SRAM,
                 ),
                 Self::setting(
+                    "State Slot",
+                    "Auto plus slots 0-999 match RetroArch hotkey bounds",
+                    Self::state_slot_label(Some(settings)),
+                    ACTION_STATE_SLOT,
+                ),
+                Self::action(
+                    "State Slot -",
+                    "Previous slot; below 0 becomes Auto",
+                    ACTION_STATE_SLOT_DECREASE,
+                ),
+                Self::action(
+                    "State Slot +",
+                    "Next slot; above 999 wraps to 0",
+                    ACTION_STATE_SLOT_INCREASE,
+                ),
+                Self::setting(
                     "Auto Save State",
-                    "Save slot 0 when closing content",
+                    "Save active slot when closing content",
                     settings
                         .get("savestate_auto_save")
                         .map_or("false", String::as_str),
@@ -1080,7 +1142,7 @@ impl MenuEngine {
                 ),
                 Self::setting(
                     "Auto Load State",
-                    "Load slot 0 after launching content when present",
+                    "Load active slot after launching content when present",
                     settings
                         .get("savestate_auto_load")
                         .map_or("false", String::as_str),
@@ -1364,6 +1426,9 @@ mod tests {
             "Save State",
             "Close Content",
             "Disc Control",
+            "State Slot",
+            "Auto Save State",
+            "Auto Load State",
         ] {
             assert!(labels.contains(&expected), "missing {expected}");
         }

@@ -1,4 +1,4 @@
-.PHONY: all rust swift test clean linux-ui ios-rust xcodegen ios-device-build ios-info
+.PHONY: all rust swift swift-core test clean linux-ui ios-rust xcodegen ios-device-build ios-info
 
 all: rust swift
 
@@ -8,11 +8,16 @@ rust:
 swift: rust
 	swift build
 
+# Build/test non-GUI Swift targets without requiring libadwaita headers.
+swift-core: rust
+	RETROFRONT_DISABLE_LINUX_GUI=1 swift build
+
 test: rust
 	cargo test --manifest-path Cargo.toml
-	swift test
+	RETROFRONT_DISABLE_LINUX_GUI=1 swift test
 
 linux-ui: rust
+	@pkg-config --exists libadwaita-1 gtksourceview-5 || (echo "Missing Linux GUI development packages. Install libadwaita-1-dev and libgtksourceview-5-dev, then retry." >&2; exit 1)
 	swift build --product retrofront-linux
 
 ios-rust:

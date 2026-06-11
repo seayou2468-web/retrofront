@@ -23,6 +23,7 @@ targets:
         DEFINES_MODULE: "YES"
         SWIFT_INCLUDE_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
         HEADER_SEARCH_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
+        OTHER_SWIFT_FLAGS: "$(inherited) -Xcc -I$(SRCROOT)/frontend/CRetrofrontCore -Xcc -fmodule-map-file=$(SRCROOT)/frontend/CRetrofrontCore/module.modulemap"
         LIBRARY_SEARCH_PATHS: "$(SRCROOT)/target/aarch64-apple-ios/release"
         OTHER_LDFLAGS: "$(inherited) -lretrofront_core"
     dependencies:

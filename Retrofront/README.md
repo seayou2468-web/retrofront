@@ -1,6 +1,6 @@
 # Retrofront
 
-Retrofront is a libretro frontend foundation for iOS and Linux.
+Retrofront is a libretro frontend foundation for iOS and Linux. The Swift package is pinned to Swift tools version 6.0 so Linux hosts with Swift 6.0.3 can load the manifest without a tools-version mismatch.
 
 The emulator/game cores are libretro cores. Retrofront is a single project: Rust owns the portable frontend runtime and Swift owns the platform UI shells, both built from the same repository root and wired together through a stable C ABI.
 
@@ -29,6 +29,13 @@ cargo build --release
 swift build
 ```
 
+If the Linux host does not have GTK/libadwaita development headers installed, build or test the shared Swift/Rust runtime without the GUI target:
+
+```sh
+cd Retrofront
+RETROFRONT_DISABLE_LINUX_GUI=1 swift test
+```
+
 
 ## iOS device app
 
@@ -43,7 +50,7 @@ make ios-device-build
 
 ## Linux UI
 
-The Linux target is a Swift Adwaita application, not a CLI smoke test. Install libadwaita development files first (for example `apt install libadwaita-1-dev libgtksourceview-5-dev`), then build and launch the GUI:
+The Linux target is a Swift Adwaita application, not a CLI smoke test. Install libadwaita development files first (for example `apt install libadwaita-1-dev libgtksourceview-5-dev`), then build and launch the GUI. `make linux-ui` now checks for those packages before SwiftPM starts so a missing GUI stack fails with an actionable message instead of a C module error:
 
 ```sh
 cd Retrofront

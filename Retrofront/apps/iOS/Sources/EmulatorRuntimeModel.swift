@@ -365,20 +365,30 @@ public final class EmulatorRuntimeModel: ObservableObject {
     refresh()
   }
 
-  public func saveState(slot: UInt32 = 0) {
+  public var activeStateSlot: UInt32 {
+    UInt32(max(0, min(999, Int(settingValue("state_slot")) ?? 0)))
+  }
+
+  public var stateSlotLabel: String {
+    settingValue("state_slot") == "-1" ? "Auto" : String(activeStateSlot)
+  }
+
+  public func saveState(slot: UInt32? = nil) {
+    let targetSlot = slot ?? activeStateSlot
     do {
-      try frontend?.saveState(slot: slot)
-      statusMessage = "State saved to slot \(slot)"
+      try frontend?.saveState(slot: targetSlot)
+      statusMessage = "State saved to slot \(targetSlot)"
     } catch {
       statusMessage = "Save state failed: \(error)"
     }
     refresh()
   }
 
-  public func loadState(slot: UInt32 = 0) {
+  public func loadState(slot: UInt32? = nil) {
+    let targetSlot = slot ?? activeStateSlot
     do {
-      try frontend?.loadState(slot: slot)
-      statusMessage = "State loaded from slot \(slot)"
+      try frontend?.loadState(slot: targetSlot)
+      statusMessage = "State loaded from slot \(targetSlot)"
     } catch {
       statusMessage = "Load state failed: \(error)"
     }
@@ -451,10 +461,10 @@ public final class EmulatorRuntimeModel: ObservableObject {
       closeContent()
       return
     case 27:
-      saveState(slot: 0)
+      saveState()
       return
     case 28:
-      loadState(slot: 0)
+      loadState()
       return
     case 29:
       saveSRAMNow()
@@ -494,6 +504,10 @@ public final class EmulatorRuntimeModel: ObservableObject {
       setLibraryFileDetailsEnabled(!libraryFileDetailsEnabled)
     case 718:
       setLibraryAutoScanEnabled(!libraryAutoScanEnabled)
+    case 38:
+      cycleStateSlot(delta: -1)
+    case 39:
+      cycleStateSlot(delta: 1)
     case 725:
       let enabled = settingValue("savestate_auto_save") != "true"
       setSetting(key: "savestate_auto_save", value: enabled ? "true" : "false")
@@ -697,6 +711,18 @@ public final class EmulatorRuntimeModel: ObservableObject {
     loadCore(core)
   }
 
+
+  public func cycleStateSlot(delta: Int) {
+    let current = Int(settingValue("state_slot")) ?? 0
+    let next: Int
+    if delta > 0 {
+      next = current >= 999 ? 0 : current + 1
+    } else {
+      next = current <= 0 ? -1 : current - 1
+    }
+    setSetting(key: "state_slot", value: String(next))
+    statusMessage = "State slot: \(stateSlotLabel)"
+  }
 
   public func cycleAudioLatency() {
     cycleSetting(key: "audio_latency_ms", values: ["32", "64", "96", "128"])

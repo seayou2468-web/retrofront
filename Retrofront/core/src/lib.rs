@@ -1020,7 +1020,7 @@ impl FrontendCore {
                     .get("savestate_auto_load")
                     .is_some_and(|value| value == "true")
                 {
-                    let _ = self.load_state(0);
+                    let _ = self.load_state(self.active_state_slot());
                 }
                 Ok(plan)
             }
@@ -1039,7 +1039,7 @@ impl FrontendCore {
             .get("savestate_auto_save")
             .is_some_and(|value| value == "true")
         {
-            let _ = self.save_state(0);
+            let _ = self.save_state(self.active_state_slot());
         }
         let _ = self.save_save_ram();
         if let Some(api) = self.api.as_ref() {
@@ -1099,6 +1099,36 @@ impl FrontendCore {
         } else {
             Err("core failed to unserialize state".to_string())
         }
+    }
+
+    fn active_state_slot(&self) -> u32 {
+        self.settings
+            .get("state_slot")
+            .and_then(|value| value.parse::<i32>().ok())
+            .filter(|slot| *slot >= 0)
+            .map(|slot| slot.min(999) as u32)
+            .unwrap_or(0)
+    }
+
+    fn cycle_state_slot(&mut self, delta: i32) -> i32 {
+        let current = self
+            .settings
+            .get("state_slot")
+            .and_then(|value| value.parse::<i32>().ok())
+            .unwrap_or(0);
+        let next = if delta > 0 {
+            if current >= 999 {
+                0
+            } else {
+                current + 1
+            }
+        } else if current <= 0 {
+            -1
+        } else {
+            current - 1
+        };
+        self.settings.set("state_slot", &next.to_string());
+        next
     }
 
     fn save_path(&self) -> Result<PathBuf, String> {
@@ -2861,7 +2891,9 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
                 core.settings
                     .set_preferred_core_for_extension(&plan.content_extension, &core_info.path);
                 match core.launch_content(&plan.content_path, Some(core_info.path.clone()), None) {
-                    Ok(_) => core.menu.push_quick_menu(true),
+                    Ok(_) => core
+                        .menu
+                        .push_quick_menu_with_settings(true, Some(&core.settings)),
                     Err(error) => core.menu.push_status("Launch Failed", &error),
                 }
                 return true;
@@ -2898,7 +2930,9 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
                 LaunchDecisionKind::Selected => match plan.selected_core.clone() {
                     Some(core_path) => match core.launch_content(&game.path, Some(core_path), None)
                     {
-                        Ok(_) => core.menu.push_quick_menu(true),
+                        Ok(_) => core
+                            .menu
+                            .push_quick_menu_with_settings(true, Some(&core.settings)),
                         Err(error) => core.menu.push_status("Launch Failed", &error),
                     },
                     None => core
@@ -2942,7 +2976,8 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
                 true
             }
             menu::ACTION_SAVE_STATE_SLOT_0 => {
-                let result = core.save_state(0);
+                let slot = core.active_state_slot();
+                let result = core.save_state(slot);
                 match result {
                     Ok(path) => core
                         .menu
@@ -2952,11 +2987,12 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
                 true
             }
             menu::ACTION_LOAD_STATE_SLOT_0 => {
-                let result = core.load_state(0);
+                let slot = core.active_state_slot();
+                let result = core.load_state(slot);
                 match result {
                     Ok(()) => core
                         .menu
-                        .push_status("State Loaded", "Slot 0 was restored."),
+                        .push_status("State Loaded", &format!("Slot {slot} was restored.")),
                     Err(error) => core.menu.push_status("Load State Failed", &error),
                 }
                 true
@@ -2986,7 +3022,10 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
                 true
             }
             menu::ACTION_QUICK_MENU => {
-                core.menu.push_quick_menu(core.game_info().is_some());
+                core.menu.push_quick_menu_with_settings(
+                    core.game_info().is_some(),
+                    Some(&core.settings),
+                );
                 true
             }
             menu::ACTION_ONLINE_UPDATER => {
@@ -3061,6 +3100,22 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
             menu::ACTION_STREAMING => {
                 core.menu
                     .push_replay_recording_settings("Streaming", &core.settings);
+                true
+            }
+            menu::ACTION_STATE_SLOT_DECREASE | menu::ACTION_STATE_SLOT_INCREASE => {
+                let delta = if action_id == menu::ACTION_STATE_SLOT_INCREASE {
+                    1
+                } else {
+                    -1
+                };
+                let slot = core.cycle_state_slot(delta);
+                let label = if slot < 0 {
+                    "Auto".to_string()
+                } else {
+                    slot.to_string()
+                };
+                core.menu
+                    .push_status("State Slot", &format!("Active save-state slot: {label}"));
                 true
             }
             menu::ACTION_UNDO_LOAD_STATE | menu::ACTION_UNDO_SAVE_STATE => {

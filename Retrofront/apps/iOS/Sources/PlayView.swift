@@ -17,8 +17,8 @@ struct PlayView: View {
                     Image(uiImage: image)
                         .resizable()
                         .interpolation(.none)
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .aspectRatio(runtime.aspectRatio, contentMode: .fit)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else {
                     VStack(spacing: 10) {
                         Image(systemName: "gamecontroller")
@@ -133,8 +133,7 @@ struct RuntimeMenuScreen: View {
     var body: some View {
         ZStack {
             Color.black.opacity(0.72).ignoresSafeArea()
-            LinearGradient(colors: [OneUI.background.opacity(0.92), OneUI.surface.opacity(0.84)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                .ignoresSafeArea()
+            OneUI.ashChromeBackground.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 QuickMenuHeader(title: runtime.currentMenu?.title ?? "Quick Menu", subtitle: runtime.loadedGameURL?.lastPathComponent ?? "No game loaded", onBack: runtime.menuPop) {
@@ -143,6 +142,10 @@ struct RuntimeMenuScreen: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
+                        if runtime.currentMenu?.title == "Quick Menu" {
+                            QuickActionGrid(isPresented: $isPresented, dismissPlayer: dismissPlayer)
+                        }
+
                         if runtime.currentMenu?.title == "Core", !runtime.coreOptions.isEmpty {
                             QuickCoreOptionsSection()
                         }
@@ -215,11 +218,11 @@ struct QuickActionGrid: View {
             QuickMenuCard(title: "Restart", subtitle: "現在のゲームをリセット", icon: "restart.circle.fill", tint: .orange) {
                 runtime.resetContent()
             }
-            QuickMenuCard(title: "Save State", subtitle: "Slot 0に保存", icon: "square.and.arrow.down.fill", tint: OneUI.teal) {
-                runtime.saveState(slot: 0)
+            QuickMenuCard(title: "Save State", subtitle: "Slot \(runtime.stateSlotLabel)に保存", icon: "square.and.arrow.down.fill", tint: OneUI.teal) {
+                runtime.saveState()
             }
-            QuickMenuCard(title: "Load State", subtitle: "Slot 0から復元", icon: "arrow.counterclockwise.circle.fill", tint: OneUI.violet) {
-                runtime.loadState(slot: 0)
+            QuickMenuCard(title: "Load State", subtitle: "Slot \(runtime.stateSlotLabel)から復元", icon: "arrow.counterclockwise.circle.fill", tint: OneUI.violet) {
+                runtime.loadState()
             }
             QuickMenuCard(title: "Save SRAM", subtitle: "実セーブを即書き込み", icon: "sdcard.fill", tint: .cyan) {
                 runtime.saveSRAMNow()

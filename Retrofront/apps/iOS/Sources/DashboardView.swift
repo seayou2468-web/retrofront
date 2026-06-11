@@ -67,6 +67,15 @@ enum OneUI {
     static let radius: CGFloat = 24
     static let compactRadius: CGFloat = 18
 
+    static var ashChromeBackground: some View {
+        ZStack {
+            Color(red: 0.055, green: 0.060, blue: 0.070)
+            LinearGradient(colors: [Color.white.opacity(0.10), Color.black.opacity(0.35)], startPoint: .top, endPoint: .bottom)
+            RadialGradient(colors: [Color(red: 0.62, green: 0.68, blue: 0.78).opacity(0.22), .clear], center: .topLeading, startRadius: 20, endRadius: 440)
+            RadialGradient(colors: [Color(red: 0.22, green: 0.26, blue: 0.32).opacity(0.42), .clear], center: .bottomTrailing, startRadius: 60, endRadius: 380)
+        }
+    }
+
     static var auroraBackground: some View {
         ZStack {
             background
