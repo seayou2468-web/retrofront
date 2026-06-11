@@ -476,6 +476,7 @@ class RetrofrontNative implements RetrofrontFrontend {
     _ensureDefaultOverlayConfig();
     await _loadPersistedSettings();
     _normalizeConfiguredDirectories(root);
+    _ensureDefaultOverlayConfig();
     _applyAllSettingsToNative();
     await _installBundledAssetsIfNeeded();
     _applyAllSettingsToNative();
@@ -828,7 +829,14 @@ class RetrofrontNative implements RetrofrontFrontend {
         if (p.extension(file.path).toLowerCase() == '.cfg') paths.add(file.path);
       }
     }
-    paths.sort((a, b) => p.basenameWithoutExtension(a).toLowerCase().compareTo(p.basenameWithoutExtension(b).toLowerCase()));
+    paths.sort((a, b) {
+      final ar = _overlayRelativeSortKey(a);
+      final br = _overlayRelativeSortKey(b);
+      final ag = ar.contains('gamepads/');
+      final bg = br.contains('gamepads/');
+      if (ag != bg) return ag ? -1 : 1;
+      return _overlayDisplayLabel(a).toLowerCase().compareTo(_overlayDisplayLabel(b).toLowerCase());
+    });
     return paths;
   }
 
@@ -871,12 +879,15 @@ class RetrofrontNative implements RetrofrontFrontend {
       }
       if (package.name == 'info') {
         _applyAllSettingsToNative();
-        for (final directory in _bundledCoreDirectories()) {
-          if (Directory(directory).existsSync()) await scanCores(directory);
-        }
+        await _scanBundledCoreDirectories();
+        await scanCores(settings['libretro_directory'] ?? '');
+        _scanConfiguredCores();
       }
-      if (package.name == 'overlays' && (settings['input_overlay'] ?? '').isNotEmpty) {
-        await loadOverlay(settings['input_overlay']!);
+      if (package.name == 'overlays') {
+        _ensureDefaultOverlayConfig();
+        if ((settings['input_overlay'] ?? '').isNotEmpty) {
+          await loadOverlay(settings['input_overlay']!);
+        }
       }
       statusMessage = '${package.name}.zip installed: ${report.ref.filesWritten} files';
       return report.ref.filesWritten;
@@ -1260,6 +1271,17 @@ overlay0_desc10 = "menu_toggle,0.08,0.13,rect,0.06,0.04"
   String _systemForCore(String core) {
     if (core.isEmpty || cores.isEmpty) return 'Unknown';
     return cores.firstWhere((item) => item.name == core, orElse: () => cores.first).system;
+  }
+
+  String _overlayRelativeSortKey(String path) {
+    final overlayDir = settings['overlay_directory'];
+    if (overlayDir == null || overlayDir.isEmpty) return path.replaceAll('\\', '/');
+    return path.replaceFirst(RegExp('^${RegExp.escape(overlayDir)}(?:/|\\\\)?'), '').replaceAll('\\', '/');
+  }
+
+  String _overlayDisplayLabel(String path) {
+    final fileLabel = p.basenameWithoutExtension(path).replaceAll('_', ' ').replaceAll('-', ' ');
+    return _overlayRelativeSortKey(path).contains('gamepads/') ? fileLabel : 'Other: $fileLabel';
   }
 
   String _titleCase(String name) => name.replaceAll(RegExp('[_-]+'), ' ').split(' ').where((part) => part.isNotEmpty).map((part) => '${part[0].toUpperCase()}${part.substring(1)}').join(' ');

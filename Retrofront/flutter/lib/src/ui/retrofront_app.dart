@@ -51,11 +51,15 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
 
   Future<void> _bootstrap() async {
     await widget.frontend.initialize();
-    _coreOptions = await widget.frontend.coreOptions();
-    _overlayConfigs = await widget.frontend.availableOverlayConfigs();
+    await _refreshRuntimeLists();
     _selectedGame ??= widget.frontend.games.isNotEmpty ? widget.frontend.games.first : null;
     _selectedCore ??= widget.frontend.cores.isNotEmpty ? widget.frontend.cores.first : null;
     if (mounted) setState(() {});
+  }
+
+  Future<void> _refreshRuntimeLists() async {
+    _coreOptions = await widget.frontend.coreOptions();
+    _overlayConfigs = await widget.frontend.availableOverlayConfigs();
   }
 
   @override
@@ -66,7 +70,10 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
 
 
   Future<void> _launchGame(GameEntry game) async {
-    final plan = await widget.frontend.planContentLaunch(game.path);
+    final fileName = game.path.split(Platform.pathSeparator).last;
+    final ext = fileName.contains('.') ? fileName.split('.').last.toLowerCase() : '';
+    final preferredCorePath = ext.isEmpty ? '' : (widget.frontend.settings['content_core_$ext'] ?? '');
+    final plan = await widget.frontend.planContentLaunch(game.path, preferredCorePath: preferredCorePath);
     if (!mounted) return;
     var launchGame = game;
     if (plan.needsCoreChoice) {
@@ -87,7 +94,7 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
       return;
     }
     final ok = await widget.frontend.launch(launchGame);
-    _coreOptions = await widget.frontend.coreOptions();
+    await _refreshRuntimeLists();
     if (!mounted) return;
     setState(() => _selectedGame = launchGame);
     if (ok) {
@@ -325,7 +332,10 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
                     game: game,
                     desktop: desktop,
                     selected: selected,
-                    onTap: () => setState(() => _selectedGame = game),
+                    onTap: () {
+                      setState(() => _selectedGame = game);
+                      if (!desktop) unawaited(_launchGame(game));
+                    },
                     onPlay: () => _launchGame(game),
                   );
                 },
@@ -461,7 +471,7 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
           const SizedBox(height: 12),
           _GradientButton(label: 'コアをロード', onTap: () async {
             if (_selectedCore != null) await widget.frontend.loadCore(_selectedCore!);
-            _coreOptions = await widget.frontend.coreOptions();
+            await _refreshRuntimeLists();
             if (mounted) setState(() {});
           }),
         ]),
@@ -477,7 +487,19 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
           Row(children: const [Text('コア', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)), Spacer(), _IconPill(icon: Icons.search), SizedBox(width: 8), _IconPill(icon: Icons.tune)]),
           const SizedBox(height: 18),
           Expanded(child: _coreList(compact: false)),
-          Align(alignment: Alignment.bottomRight, child: FloatingActionButton(backgroundColor: _accent, onPressed: () {}, child: const Icon(Icons.add))),
+          Row(children: [
+            Expanded(child: _GradientButton(label: '選択中のコアをロード', onTap: () async {
+              if (_selectedCore != null) await widget.frontend.loadCore(_selectedCore!);
+              await _refreshRuntimeLists();
+              if (mounted) setState(() {});
+            })),
+            const SizedBox(width: 10),
+            FloatingActionButton(backgroundColor: _accent, onPressed: () async {
+              await widget.frontend.scanCores(widget.frontend.settings['libretro_directory'] ?? '');
+              await _refreshRuntimeLists();
+              if (mounted) setState(() {});
+            }, child: const Icon(Icons.sync)),
+          ]),
         ]),
       ),
     );
@@ -493,7 +515,14 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
       itemBuilder: (context, index) {
         final core = widget.frontend.cores[index];
         final selected = core == _selectedCore || core.loaded;
-        return _CoreRow(core: core, selected: selected, onTap: () => setState(() => _selectedCore = core));
+        return _CoreRow(core: core, selected: selected, onTap: () async {
+          setState(() => _selectedCore = core);
+          if (!compact) {
+            await widget.frontend.loadCore(core);
+            await _refreshRuntimeLists();
+            if (mounted) setState(() {});
+          }
+        });
       },
     );
   }
@@ -603,7 +632,7 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
       ]),
       _SettingsGroup(title: 'Controller', children: [
         _SettingsToggleRow(title: 'Touch Overlay', subtitle: '画面上コントローラー', value: _settingBool('input_overlay_enable'), onChanged: (v) async { await widget.frontend.setOverlayEnabled(v); if (mounted) setState(() {}); }),
-        _SettingsChoiceRow(title: 'Overlay Set', value: _overlayLabel(s['input_overlay']), choices: _overlayConfigs.isEmpty ? const ['Not selected'] : _overlayConfigs.map(_overlayLabel).toList(), onChanged: (v) async { final path = _overlayConfigs.where((path) => _overlayLabel(path) == v).firstOrNull; if (path != null) { await widget.frontend.loadOverlay(path); if (mounted) setState(() {}); } }),
+        _SettingsChoiceRow(title: 'Overlay Set', value: _overlayChoiceLabel(s['input_overlay']), choices: _overlayConfigs.isEmpty ? const ['Not selected'] : _overlayConfigs.map(_overlayChoiceLabel).toList(), onChanged: (v) async { final path = _overlayConfigs.where((path) => _overlayChoiceLabel(path) == v).firstOrNull; if (path != null) { await widget.frontend.loadOverlay(path); await _refreshRuntimeLists(); if (mounted) setState(() {}); } }),
         _SettingsChoiceRow(title: 'Overlay Opacity', value: _opacityLabel(s['input_overlay_opacity']), choices: const ['45%', '70%', '90%'], onChanged: (v) => _setMappedSetting('input_overlay_opacity', v, const {'45%': '0.45', '70%': '0.70', '90%': '0.90'})),
         _SettingsToggleRow(title: 'Haptics', subtitle: 'タッチ操作の振動フィードバック', value: _settingBool('input_haptic_feedback'), onChanged: (v) => _setBoolSetting('input_haptic_feedback', v)),
       ]),
@@ -618,13 +647,13 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
         if (widget.frontend.cores.isEmpty)
           const _SettingsRow(title: 'Bundled Cores', value: 'No bundled cores discovered')
         else
-          for (final core in widget.frontend.cores.take(10))
-            _SettingsCoreButton(core: core, onTap: () async { await widget.frontend.loadCore(core); _coreOptions = await widget.frontend.coreOptions(); if (mounted) setState(() {}); }),
+          for (final core in widget.frontend.cores)
+            _SettingsCoreButton(core: core, onTap: () async { await widget.frontend.loadCore(core); await _refreshRuntimeLists(); if (mounted) setState(() {}); }),
         if (_coreOptions.isEmpty)
           const _SettingsRow(title: 'Core Options', value: 'Load a core to edit its options')
         else
           for (final option in _coreOptions)
-            _SettingsChoiceRow(title: option.description.isEmpty ? option.key : option.description, value: option.value, choices: option.values.isEmpty ? [option.value] : option.values, onChanged: (v) async { await widget.frontend.setCoreOption(option.key, v); _coreOptions = await widget.frontend.coreOptions(); if (mounted) setState(() {}); }),
+            _SettingsChoiceRow(title: option.description.isEmpty ? option.key : option.description, value: option.value, choices: option.values.isEmpty ? [option.value] : option.values, onChanged: (v) async { await widget.frontend.setCoreOption(option.key, v); await _refreshRuntimeLists(); if (mounted) setState(() {}); }),
       ]),
       _SettingsGroup(title: 'Storage', children: [
         _SettingsRow(title: 'Content Folder', value: s['content_directory'] ?? ''),
@@ -662,6 +691,17 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
     return path.split(Platform.pathSeparator).last.replaceAll('.cfg', '').replaceAll('_', ' ').replaceAll('-', ' ');
   }
 
+  String _overlayChoiceLabel(String? path) {
+    if (path == null || path.isEmpty) return 'Not selected';
+    final parts = path.split(Platform.pathSeparator);
+    final label = _overlayLabel(path);
+    final gamepadsIndex = parts.indexOf('gamepads');
+    if (gamepadsIndex >= 0 && gamepadsIndex + 1 < parts.length) {
+      return '$label (${parts[gamepadsIndex + 1]})';
+    }
+    return parts.length > 1 ? '$label (${parts[parts.length - 2]})' : label;
+  }
+
   Widget _playlistPanel() {
     return _GlassPanel(
       child: Padding(
@@ -689,6 +729,7 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
 
   Future<void> _installAssetPackage(String name, {required bool download}) async {
     await widget.frontend.installFrontendAssetPackage(name, download: download);
+    await _refreshRuntimeLists();
     if (mounted) setState(() {});
   }
 
@@ -710,24 +751,42 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
   }
 
   Future<void> _showCoreOptions(BuildContext context) async {
+    await _refreshRuntimeLists();
+    if (!mounted) return;
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: const Color(0xFF081321),
       showDragHandle: true,
-      builder: (context) => ListView(padding: const EdgeInsets.all(18), children: [
-        const Text('起動中のコア設定', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
-        const SizedBox(height: 12),
-        for (final option in _coreOptions)
-          ListTile(
-            title: Text(option.description),
-            subtitle: Text(option.key),
-            trailing: DropdownButton<String>(
-              value: option.values.contains(option.value) ? option.value : option.values.firstOrNull,
-              items: option.values.map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
-              onChanged: (value) async { if (value != null) await widget.frontend.setCoreOption(option.key, value); },
-            ),
-          ),
-      ]),
+      builder: (context) => StatefulBuilder(builder: (context, modalSetState) {
+        final loadedCore = widget.frontend.runtime.loadedCore;
+        return ListView(padding: const EdgeInsets.all(18), children: [
+          Text(loadedCore.isEmpty ? '起動中のコア設定' : '$loadedCore のコア設定', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 12),
+          if (_coreOptions.isEmpty)
+            const ListTile(
+              leading: Icon(Icons.info_outline, color: _muted),
+              title: Text('設定可能なコアオプションがありません'),
+              subtitle: Text('コアをロードするかゲームを起動すると、コアが公開するオプションを編集できます。'),
+            )
+          else
+            for (final option in _coreOptions)
+              ListTile(
+                title: Text(option.description.isEmpty ? option.key : option.description),
+                subtitle: Text(option.key),
+                trailing: DropdownButton<String>(
+                  value: option.values.contains(option.value) ? option.value : option.values.firstOrNull,
+                  items: option.values.map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
+                  onChanged: (value) async {
+                    if (value == null) return;
+                    await widget.frontend.setCoreOption(option.key, value);
+                    await _refreshRuntimeLists();
+                    if (mounted) setState(() {});
+                    modalSetState(() {});
+                  },
+                ),
+              ),
+        ]);
+      }),
     );
   }
 }
@@ -928,7 +987,7 @@ class _SettingsCoreButton extends StatelessWidget {
 }
 
 class _SettingsAssetRow extends StatelessWidget { const _SettingsAssetRow({required this.package, required this.onBundled, required this.onDownload}); final FrontendAssetPackageEntry package; final FutureOr<void> Function() onBundled; final FutureOr<void> Function() onDownload; @override Widget build(BuildContext context) => ListTile(dense: true, contentPadding: EdgeInsets.zero, title: Text('${package.name}.zip', style: const TextStyle(color: _text, fontSize: 13)), subtitle: Text(package.label, style: const TextStyle(color: _muted, fontSize: 11)), trailing: Wrap(spacing: 8, children: [TextButton(onPressed: () => onBundled(), child: const Text('同梱')), TextButton(onPressed: () => onDownload(), child: const Text('取得'))])); }
-class _SettingsChoiceRow extends StatelessWidget { const _SettingsChoiceRow({required this.title, required this.value, required this.choices, required this.onChanged}); final String title; final String value; final List<String> choices; final ValueChanged<String> onChanged; @override Widget build(BuildContext context) => ListTile(dense: true, contentPadding: EdgeInsets.zero, title: Text(title, style: const TextStyle(color: _text, fontSize: 13)), subtitle: Text(value, style: const TextStyle(color: _muted, fontSize: 11)), trailing: DropdownButton<String>(value: choices.contains(value) ? value : choices.first, dropdownColor: _panel2, underline: const SizedBox.shrink(), items: [for (final choice in choices) DropdownMenuItem(value: choice, child: Text(choice))], onChanged: (value) { if (value != null) onChanged(value); })); }
+class _SettingsChoiceRow extends StatelessWidget { const _SettingsChoiceRow({required this.title, required this.value, required this.choices, required this.onChanged}); final String title; final String value; final List<String> choices; final ValueChanged<String> onChanged; @override Widget build(BuildContext context) { final safeChoices = choices.isEmpty ? <String>[value] : choices; return ListTile(dense: true, contentPadding: EdgeInsets.zero, title: Text(title, style: const TextStyle(color: _text, fontSize: 13)), subtitle: Text(value, style: const TextStyle(color: _muted, fontSize: 11)), trailing: DropdownButton<String>(value: safeChoices.contains(value) ? value : safeChoices.first, dropdownColor: _panel2, underline: const SizedBox.shrink(), items: [for (final choice in safeChoices) DropdownMenuItem(value: choice, child: Text(choice))], onChanged: (value) { if (value != null) onChanged(value); })); } }
 class _SettingsRow extends StatelessWidget { const _SettingsRow({required this.title, required this.value}); final String title; final String value; @override Widget build(BuildContext context) => ListTile(dense: true, contentPadding: EdgeInsets.zero, title: Text(title, style: const TextStyle(color: _text, fontSize: 13)), subtitle: Text(value, style: const TextStyle(color: _muted, fontSize: 11)), trailing: const Icon(Icons.chevron_right, color: _muted, size: 18)); }
 class _PlaylistRow extends StatelessWidget { const _PlaylistRow({required this.entry}); final PlaylistEntry entry; @override Widget build(BuildContext context) => Container(height: 68, padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: _panel2, borderRadius: BorderRadius.circular(10), border: Border.all(color: _line)), child: Row(children: [Container(width: 50, decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), gradient: const LinearGradient(colors: [Color(0xFF322267), Color(0xFF0C3F3A)])), child: Center(child: Text(entry.icon, style: const TextStyle(fontSize: 22)))), const SizedBox(width: 12), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(entry.name, style: const TextStyle(fontWeight: FontWeight.w800)), Text(entry.count, style: const TextStyle(color: _muted, fontSize: 12))])), const Icon(Icons.chevron_right, color: _muted)])); }
 Widget _settingsPreview() => Center(child: Container(width: 250, height: 130, decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), border: Border.all(color: _accent), gradient: LinearGradient(colors: [_cyan.withOpacity(.25), _accent.withOpacity(.22)])), child: const Icon(Icons.image, size: 46, color: _muted)));
