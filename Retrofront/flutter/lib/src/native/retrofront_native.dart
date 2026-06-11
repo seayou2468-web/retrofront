@@ -84,11 +84,12 @@ class GameEntry {
 }
 
 class CoreEntry {
-  const CoreEntry({required this.name, required this.system, required this.path, this.loaded = false});
+  const CoreEntry({required this.name, required this.system, required this.path, this.supportedExtensions = const {}, this.loaded = false});
 
   final String name;
   final String system;
   final String path;
+  final Set<String> supportedExtensions;
   final bool loaded;
 }
 
@@ -107,6 +108,14 @@ class CoreOptionEntry {
   final String description;
   final String value;
   final List<String> values;
+}
+
+class VideoFrame {
+  const VideoFrame({required this.width, required this.height, required this.rgba});
+
+  final int width;
+  final int height;
+  final Uint8List rgba;
 }
 
 class RuntimeState {
@@ -169,7 +178,7 @@ abstract interface class RetrofrontFrontend {
   Future<List<CoreOptionEntry>> coreOptions();
   Future<bool> setCoreOption(String key, String value);
   Future<void> setSetting(String key, String value);
-  Future<Uint8List?> copyVideoFrameRgba();
+  Future<VideoFrame?> copyVideoFrame();
   void openQuickMenu();
   void closeQuickMenu();
 }
@@ -187,11 +196,17 @@ class RetrofrontNative implements RetrofrontFrontend {
   }
 
   static ffi.DynamicLibrary? _openLibraryOrNull() {
+    final executableDir = p.dirname(Platform.resolvedExecutable);
+    final current = Directory.current.path;
     final candidates = <String>[
       if (Platform.isIOS) 'retrofront_core.framework/retrofront_core',
-      if (Platform.isIOS) 'libretrofront_core.a',
+      if (Platform.isIOS) p.join(executableDir, 'Frameworks', 'retrofront_core.framework', 'retrofront_core'),
       if (Platform.isLinux) 'libretrofront_core.so',
-      if (Platform.isLinux) p.join(Directory.current.path, 'libretrofront_core.so'),
+      if (Platform.isLinux) p.join(current, 'libretrofront_core.so'),
+      if (Platform.isLinux) p.join(current, '..', 'target', 'debug', 'libretrofront_core.so'),
+      if (Platform.isLinux) p.join(current, '..', 'target', 'release', 'libretrofront_core.so'),
+      if (Platform.isLinux) p.join(executableDir, 'libretrofront_core.so'),
+      if (Platform.isLinux) p.join(executableDir, 'lib', 'libretrofront_core.so'),
     ];
     for (final candidate in candidates) {
       try {
@@ -353,9 +368,14 @@ class RetrofrontNative implements RetrofrontFrontend {
       Directory(dir.value).createSync(recursive: true);
     }
     Directory(p.dirname(settings['input_overlay']!)).createSync(recursive: true);
+    _ensureDefaultOverlayConfig();
     await _loadPersistedSettings();
     _applyAllSettingsToNative();
+    await _scanBundledCoreDirectories();
     await scanCores(settings['libretro_directory']!);
+    if ((settings['input_overlay'] ?? '').isNotEmpty) {
+      await loadOverlay(settings['input_overlay']!);
+    }
     await scanRoms(settings['content_directory']!);
     statusMessage = _handle == null
         ? 'Native core library not found; UI is running in preview mode.'
@@ -429,12 +449,14 @@ class RetrofrontNative implements RetrofrontFrontend {
         malloc.free(cDir);
       }
     } else {
-      cores = dir
+      final found = dir
           .listSync(recursive: true)
-          .whereType<File>()
-          .where((file) => _isCoreLibrary(file.path))
-          .map((file) => CoreEntry(name: _titleCase(p.basenameWithoutExtension(file.path).replaceAll('_libretro', '')), system: 'Libretro', path: file.path))
+          .where((entity) => entity is File || (entity is Directory && entity.path.toLowerCase().endsWith('.framework')))
+          .where((entity) => _isCoreLibrary(entity.path))
+          .map((entity) => CoreEntry(name: _titleCase(p.basenameWithoutExtension(entity.path).replaceAll('_libretro', '').replaceAll('_ios', '')), system: 'Libretro', path: entity.path))
           .toList();
+      final byPath = {for (final core in [...cores, ...found]) core.path: core};
+      cores = byPath.values.toList()..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     }
   }
 
@@ -451,7 +473,7 @@ class RetrofrontNative implements RetrofrontFrontend {
       }
     }
     if (ok || handle == null) {
-      cores = [for (final item in cores) CoreEntry(name: item.name, system: item.system, path: item.path, loaded: item.name == core.name)];
+      cores = [for (final item in cores) CoreEntry(name: item.name, system: item.system, path: item.path, supportedExtensions: item.supportedExtensions, loaded: item.name == core.name)];
       runtime = runtime.copyWith(loadedCore: core.name);
     }
     return ok;
@@ -467,7 +489,8 @@ class RetrofrontNative implements RetrofrontFrontend {
     final handle = _handle;
     if (handle != null) {
       final cPath = game.path.toNativeUtf8();
-      final preferredCorePath = cores
+      final ext = p.extension(game.path).replaceFirst('.', '').toLowerCase();
+      final preferredCorePath = settings['content_core_$ext'] ?? cores
           .firstWhere((core) => core.name == game.core, orElse: () => cores.isNotEmpty ? cores.first : const CoreEntry(name: '', system: '', path: ''))
           .path;
       final cCore = preferredCorePath.toNativeUtf8();
@@ -524,6 +547,7 @@ class RetrofrontNative implements RetrofrontFrontend {
       }
     }
     settings['input_overlay'] = path;
+    await _persistSettings();
   }
 
   @override
@@ -531,6 +555,7 @@ class RetrofrontNative implements RetrofrontFrontend {
     if (_handle != null) _setOverlayEnabled(_handle!, enabled);
     runtime = runtime.copyWith(overlayEnabled: enabled);
     settings['input_overlay_enable'] = enabled.toString();
+    await _persistSettings();
   }
 
   @override
@@ -601,16 +626,16 @@ class RetrofrontNative implements RetrofrontFrontend {
   }
 
   @override
-  Future<Uint8List?> copyVideoFrameRgba() async {
+  Future<VideoFrame?> copyVideoFrame() async {
     final handle = _handle;
-    if (handle == null) return _demoFrame(runtime.frameNumber);
+    if (handle == null) return VideoFrame(width: 320, height: 180, rgba: _demoFrame(runtime.frameNumber));
     final info = malloc<RfVideoFrameInfo>();
     try {
-      if (!_videoFrameInfo(handle, info) || info.ref.rgbaLen == 0) return null;
+      if (!_videoFrameInfo(handle, info) || info.ref.rgbaLen == 0 || info.ref.width == 0 || info.ref.height == 0) return null;
       final buffer = malloc<ffi.Uint8>(info.ref.rgbaLen);
       try {
         final copied = _copyFrame(handle, buffer, info.ref.rgbaLen);
-        return Uint8List.fromList(buffer.asTypedList(copied));
+        return VideoFrame(width: info.ref.width, height: info.ref.height, rgba: Uint8List.fromList(buffer.asTypedList(copied)));
       } finally {
         malloc.free(buffer);
       }
@@ -628,6 +653,56 @@ class RetrofrontNative implements RetrofrontFrontend {
   void dispose() {
     final handle = _handle;
     if (handle != null) _destroy(handle);
+  }
+
+  Future<void> _scanBundledCoreDirectories() async {
+    for (final directory in _bundledCoreDirectories()) {
+      if (Directory(directory).existsSync()) {
+        await scanCores(directory);
+      }
+    }
+  }
+
+  List<String> _bundledCoreDirectories() {
+    final current = Directory.current.path;
+    final executableDir = p.dirname(Platform.resolvedExecutable);
+    final root = _retroArchRoot?.path;
+    return <String>{
+      if (Platform.isIOS) p.join(executableDir, 'Frameworks'),
+      if (Platform.isIOS) p.join(executableDir, 'dylibs'),
+      if (Platform.isIOS) executableDir,
+      if (Platform.isLinux) p.join(current, 'archifacts', 'linux'),
+      if (Platform.isLinux) p.join(current, '..', 'archifacts', 'linux'),
+      if (Platform.isLinux) p.join(executableDir, 'cores'),
+      if (Platform.isLinux) p.join(executableDir, 'lib', 'cores'),
+      if (root != null) p.join(root, 'cores'),
+      if (root != null) p.join(root, 'Cores'),
+    }.toList();
+  }
+
+  void _ensureDefaultOverlayConfig() {
+    final overlayPath = settings['input_overlay'];
+    if (overlayPath == null || overlayPath.isEmpty) return;
+    final file = File(overlayPath);
+    if (file.existsSync()) return;
+    file.parent.createSync(recursive: true);
+    file.writeAsStringSync("""overlays = 1
+overlay0_name = "retropad"
+overlay0_full_screen = true
+overlay0_normalized = true
+overlay0_descs = 11
+overlay0_desc0 = "up,0.16,0.70,rect,0.055,0.055"
+overlay0_desc1 = "down,0.16,0.88,rect,0.055,0.055"
+overlay0_desc2 = "left,0.07,0.79,rect,0.055,0.055"
+overlay0_desc3 = "right,0.25,0.79,rect,0.055,0.055"
+overlay0_desc4 = "b,0.78,0.83,radial,0.06,0.06"
+overlay0_desc5 = "a,0.88,0.72,radial,0.06,0.06"
+overlay0_desc6 = "y,0.68,0.72,radial,0.052,0.052"
+overlay0_desc7 = "x,0.78,0.61,radial,0.052,0.052"
+overlay0_desc8 = "select,0.42,0.92,rect,0.05,0.035"
+overlay0_desc9 = "start,0.58,0.92,rect,0.05,0.035"
+overlay0_desc10 = "menu_toggle,0.08,0.13,rect,0.06,0.04"
+""");
   }
 
   Future<Directory> _resolveRetroArchRoot() async {
@@ -670,10 +745,17 @@ class RetrofrontNative implements RetrofrontFrontend {
     try {
       for (var i = 0; i < count; i++) {
         if (_getCoreInfoNative(handle, i, out)) {
+          final extensions = out.ref.supportedExtensions
+              .toDartString()
+              .split('|')
+              .map((ext) => ext.trim().replaceFirst('.', '').toLowerCase())
+              .where((ext) => ext.isNotEmpty)
+              .toSet();
           next.add(CoreEntry(
             name: out.ref.displayName.toDartString(),
             system: out.ref.systemName.toDartString().isEmpty ? 'Libretro' : out.ref.systemName.toDartString(),
             path: out.ref.path.toDartString(),
+            supportedExtensions: extensions,
             loaded: out.ref.displayName.toDartString() == runtime.loadedCore,
           ));
         }
@@ -750,14 +832,17 @@ class RetrofrontNative implements RetrofrontFrontend {
 
   bool _isCoreLibrary(String path) {
     final lower = path.toLowerCase();
-    return lower.endsWith('_libretro.so') || lower.endsWith('_libretro.dylib') || lower.endsWith('_libretro.framework');
+    return lower.endsWith('.framework') || lower.endsWith('.so') || lower.endsWith('.dylib') || lower.endsWith('.dll');
   }
 
   static const _fallbackExtensions = {'zip', 'gba', 'gb', 'gbc', 'sfc', 'smc', 'nes', 'cue', 'chd', 'iso', 'bin', 'md', 'gen'};
 
   String _bestCoreForExtension(String ext) {
-    final compatible = cores.where((core) => core.path.toLowerCase().contains(ext) || core.name.toLowerCase().contains(ext));
+    final normalized = ext.trim().replaceFirst('.', '').toLowerCase();
+    final compatible = cores.where((core) => core.supportedExtensions.contains(normalized));
     if (compatible.isNotEmpty) return compatible.first.name;
+    final nameCompatible = cores.where((core) => core.path.toLowerCase().contains(normalized) || core.name.toLowerCase().contains(normalized));
+    if (nameCompatible.isNotEmpty) return nameCompatible.first.name;
     return cores.isNotEmpty ? cores.first.name : '';
   }
 

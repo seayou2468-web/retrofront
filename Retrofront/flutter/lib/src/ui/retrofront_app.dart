@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io' show Platform;
+import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -59,6 +60,20 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
   void dispose() {
     _frameTimer?.cancel();
     super.dispose();
+  }
+
+
+  Future<void> _launchGame(GameEntry game) async {
+    final ok = await widget.frontend.launch(game);
+    if (!mounted) return;
+    setState(() => _selectedGame = game);
+    if (ok) {
+      await Navigator.of(context).push(MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => _PlayScreen(frontend: widget.frontend, game: game),
+      ));
+      if (mounted) setState(() {});
+    }
   }
 
   @override
@@ -270,10 +285,7 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
                     desktop: desktop,
                     selected: selected,
                     onTap: () => setState(() => _selectedGame = game),
-                    onPlay: () async {
-                      await widget.frontend.launch(game);
-                      if (mounted) setState(() => _selectedGame = game);
-                    },
+                    onPlay: () => _launchGame(game),
                   );
                 },
               ),
@@ -322,7 +334,7 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
               Text(game.playTime, style: const TextStyle(color: _muted, fontSize: 12)),
             ]),
             const SizedBox(height: 18),
-            _GradientButton(label: 'プレイ', onTap: () async { await widget.frontend.launch(game); if (mounted) setState(() {}); }),
+            _GradientButton(label: 'プレイ', onTap: () => _launchGame(game)),
             const SizedBox(height: 18),
             Row(children: [
               Expanded(child: _ActionTile(icon: Icons.gamepad_outlined, label: 'コアをロード', onTap: () {})),
@@ -426,8 +438,8 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
               borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
               child: Container(
                 width: double.infinity,
-                decoration: const BoxDecoration(gradient: LinearGradient(colors: [Color(0xFF1A2431), Color(0xFF4E3019)], begin: Alignment.topLeft, end: Alignment.bottomRight)),
-                child: CustomPaint(painter: _GameScenePainter(frame: widget.frontend.runtime.frameNumber)),
+                decoration: const BoxDecoration(color: Colors.black),
+                child: _VideoFrameView(frontend: widget.frontend),
               ),
             ),
           ),
@@ -511,15 +523,19 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
     return ListView(children: [
       const Text('テーマ', style: TextStyle(color: _muted, fontSize: 12)),
       const SizedBox(height: 8),
-      Row(children: ['ダーク', 'ライト', 'システム'].map((t) => Expanded(child: Padding(padding: const EdgeInsets.only(right: 8), child: _ThemeCard(label: t, selected: t == 'ダーク')))).toList()),
+      Row(children: ['ダーク', 'ライト', 'システム'].map((t) => Expanded(child: Padding(padding: const EdgeInsets.only(right: 8), child: InkWell(onTap: () async { await widget.frontend.setSetting('theme', t == 'ダーク' ? 'dark' : t == 'ライト' ? 'light' : 'system'); if (mounted) setState(() {}); }, child: _ThemeCard(label: t, selected: widget.frontend.settings['theme'] == (t == 'ダーク' ? 'dark' : t == 'ライト' ? 'light' : 'system')))))).toList()),
       const SizedBox(height: 16),
       const Text('アクセントカラー', style: TextStyle(color: _muted, fontSize: 12)),
       const SizedBox(height: 10),
-      Wrap(spacing: 13, children: const [Color(0xFF7B61FF), Color(0xFF4058FF), Color(0xFF18A9E6), Color(0xFF11CBD7), Color(0xFF5BD17E), Color(0xFFE1C13C), Color(0xFFE98525), Color(0xFFE9485D), Color(0xFFC653A8), Color(0xFF263247)].map((c) => CircleAvatar(radius: 9, backgroundColor: c)).toList()),
+      Wrap(spacing: 13, children: const [Color(0xFF7B61FF), Color(0xFF4058FF), Color(0xFF18A9E6), Color(0xFF11CBD7), Color(0xFF5BD17E), Color(0xFFE1C13C), Color(0xFFE98525), Color(0xFFE9485D), Color(0xFFC653A8), Color(0xFF263247)].map((c) => InkWell(onTap: () async { await widget.frontend.setSetting('accent_color', c.value.toRadixString(16)); if (mounted) setState(() {}); }, child: CircleAvatar(radius: 9, backgroundColor: c))).toList()),
       const SizedBox(height: 18),
-      Row(children: [const Text('透明度（グラス効果）', style: TextStyle(color: _muted, fontSize: 12)), Expanded(child: Slider(value: .60, activeColor: _accent, onChanged: (_) {})), const Text('60%', style: TextStyle(color: _text, fontSize: 12))]),
+      Row(children: [const Text('透明度（グラス効果）', style: TextStyle(color: _muted, fontSize: 12)), Expanded(child: Slider(value: double.tryParse(widget.frontend.settings['glass_opacity'] ?? '0.60') ?? .60, activeColor: _accent, onChanged: (v) async { await widget.frontend.setSetting('glass_opacity', v.toStringAsFixed(2)); if (mounted) setState(() {}); })), Text('${(((double.tryParse(widget.frontend.settings['glass_opacity'] ?? '0.60') ?? .60) * 100).round())}%', style: const TextStyle(color: _text, fontSize: 12))]),
       const SizedBox(height: 6),
-      for (final row in rows.skip(3)) _SettingsRow(title: row.$1, value: row.$2),
+      _SettingsChoiceRow(title: 'ビデオドライバ', value: widget.frontend.settings['video_driver'] ?? 'metal', choices: const ['metal', 'opengl', 'vulkan', 'software'], onChanged: (v) async { await widget.frontend.setSetting('video_driver', v); if (mounted) setState(() {}); }),
+      _SettingsChoiceRow(title: 'スケール', value: widget.frontend.settings['video_scale_mode'] ?? 'integer_fit', choices: const ['integer_fit', 'fit', 'fill', 'stretch'], onChanged: (v) async { await widget.frontend.setSetting('video_scale_mode', v); if (mounted) setState(() {}); }),
+      _SettingsChoiceRow(title: 'オーディオ遅延', value: widget.frontend.settings['audio_latency_ms'] ?? '64', choices: const ['32', '64', '96', '128'], onChanged: (v) async { await widget.frontend.setSetting('audio_latency_ms', v); if (mounted) setState(() {}); }),
+      SwitchListTile(contentPadding: EdgeInsets.zero, dense: true, title: const Text('入力オーバーレイ', style: TextStyle(color: _text, fontSize: 13)), subtitle: Text(widget.frontend.settings['input_overlay'] ?? '', style: const TextStyle(color: _muted, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis), value: (widget.frontend.settings['input_overlay_enable'] ?? 'true') == 'true', activeColor: _accent, onChanged: (v) async { await widget.frontend.setOverlayEnabled(v); if (mounted) setState(() {}); }),
+      for (final row in rows.skip(7)) _SettingsRow(title: row.$1, value: row.$2),
     ]);
   }
 
@@ -588,6 +604,101 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
   }
 }
 
+
+class _PlayScreen extends StatefulWidget {
+  const _PlayScreen({required this.frontend, required this.game});
+  final RetrofrontFrontend frontend;
+  final GameEntry game;
+
+  @override
+  State<_PlayScreen> createState() => _PlayScreenState();
+}
+
+class _PlayScreenState extends State<_PlayScreen> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(milliseconds: 16), (_) async {
+      if (widget.frontend.runtime.running) {
+        await widget.frontend.runFrame();
+        if (mounted) setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(children: [
+        Positioned.fill(child: _VideoFrameView(frontend: widget.frontend, fit: BoxFit.contain)),
+        if (widget.frontend.runtime.overlayEnabled) _GameOverlay(onButton: (id, down) => widget.frontend.setJoypadButton(id, down), onMenu: () => setState(widget.frontend.openQuickMenu)),
+        Positioned(top: 24, left: 24, child: SafeArea(child: _ViewportButton(icon: Icons.close_fullscreen, label: '戻る', onTap: () async => Navigator.of(context).pop()))),
+        Positioned(top: 24, right: 24, child: SafeArea(child: Row(children: [
+          _ViewportButton(icon: Icons.save_outlined, label: '保存', onTap: () => widget.frontend.quickSave()),
+          const SizedBox(width: 14),
+          _ViewportButton(icon: Icons.restart_alt, label: 'リセット', onTap: () async { await widget.frontend.reset(); if (mounted) setState(() {}); }),
+        ]))),
+      ]),
+    );
+  }
+}
+
+class _VideoFrameView extends StatefulWidget {
+  const _VideoFrameView({required this.frontend, this.fit = BoxFit.contain});
+  final RetrofrontFrontend frontend;
+  final BoxFit fit;
+
+  @override
+  State<_VideoFrameView> createState() => _VideoFrameViewState();
+}
+
+class _VideoFrameViewState extends State<_VideoFrameView> {
+  ui.Image? _image;
+  int _decodedFrame = -1;
+
+  @override
+  void didUpdateWidget(covariant _VideoFrameView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _decodeLatest();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _decodeLatest();
+  }
+
+  Future<void> _decodeLatest() async {
+    final frameNumber = widget.frontend.runtime.frameNumber;
+    if (_decodedFrame == frameNumber) return;
+    _decodedFrame = frameNumber;
+    final frame = await widget.frontend.copyVideoFrame();
+    if (frame == null || !mounted) return;
+    final completer = Completer<ui.Image>();
+    ui.decodeImageFromPixels(frame.rgba, frame.width, frame.height, ui.PixelFormat.rgba8888, completer.complete);
+    final image = await completer.future;
+    if (mounted) setState(() => _image = image);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final image = _image;
+    if (image == null) {
+      return CustomPaint(painter: _GameScenePainter(frame: widget.frontend.runtime.frameNumber));
+    }
+    return ColoredBox(color: Colors.black, child: Center(child: RawImage(image: image, fit: widget.fit)));
+  }
+}
+
 class _ShellBackground extends StatelessWidget {
   const _ShellBackground({required this.child});
   final Widget child;
@@ -618,6 +729,7 @@ class _ViewportButton extends StatelessWidget { const _ViewportButton({required 
 class _QuickAction extends StatelessWidget { const _QuickAction({required this.icon, required this.title, required this.subtitle, required this.onTap}); final IconData icon; final String title; final String subtitle; final FutureOr<void> Function() onTap; @override Widget build(BuildContext context) => ListTile(onTap: () => onTap(), leading: CircleAvatar(backgroundColor: const Color(0xFF16243A), child: Icon(icon, color: _text)), title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)), subtitle: Text(subtitle), trailing: const Icon(Icons.chevron_right)); }
 class _SettingCategory extends StatelessWidget { const _SettingCategory({required this.label, required this.selected}); final String label; final bool selected; @override Widget build(BuildContext context) => Container(height: 28, margin: const EdgeInsets.only(bottom: 4), padding: const EdgeInsets.symmetric(horizontal: 10), decoration: BoxDecoration(color: selected ? const Color(0xFF2B2364) : Colors.transparent, borderRadius: BorderRadius.circular(6)), alignment: Alignment.centerLeft, child: Text(label, style: TextStyle(color: selected ? _text : _muted, fontSize: 12))); }
 class _ThemeCard extends StatelessWidget { const _ThemeCard({required this.label, required this.selected}); final String label; final bool selected; @override Widget build(BuildContext context) => Container(height: 58, alignment: Alignment.bottomCenter, padding: const EdgeInsets.only(bottom: 6), decoration: BoxDecoration(borderRadius: BorderRadius.circular(9), border: Border.all(color: selected ? _accent : _line), gradient: const LinearGradient(colors: [Color(0xFF091223), Color(0xFF203151)])), child: Text(label, style: const TextStyle(fontSize: 11))); }
+class _SettingsChoiceRow extends StatelessWidget { const _SettingsChoiceRow({required this.title, required this.value, required this.choices, required this.onChanged}); final String title; final String value; final List<String> choices; final ValueChanged<String> onChanged; @override Widget build(BuildContext context) => ListTile(dense: true, contentPadding: EdgeInsets.zero, title: Text(title, style: const TextStyle(color: _text, fontSize: 13)), subtitle: Text(value, style: const TextStyle(color: _muted, fontSize: 11)), trailing: DropdownButton<String>(value: choices.contains(value) ? value : choices.first, dropdownColor: _panel2, underline: const SizedBox.shrink(), items: [for (final choice in choices) DropdownMenuItem(value: choice, child: Text(choice))], onChanged: (value) { if (value != null) onChanged(value); })); }
 class _SettingsRow extends StatelessWidget { const _SettingsRow({required this.title, required this.value}); final String title; final String value; @override Widget build(BuildContext context) => ListTile(dense: true, contentPadding: EdgeInsets.zero, title: Text(title, style: const TextStyle(color: _text, fontSize: 13)), subtitle: Text(value, style: const TextStyle(color: _muted, fontSize: 11)), trailing: const Icon(Icons.chevron_right, color: _muted, size: 18)); }
 class _PlaylistRow extends StatelessWidget { const _PlaylistRow({required this.entry}); final PlaylistEntry entry; @override Widget build(BuildContext context) => Container(height: 68, padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: _panel2, borderRadius: BorderRadius.circular(10), border: Border.all(color: _line)), child: Row(children: [Container(width: 50, decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), gradient: const LinearGradient(colors: [Color(0xFF322267), Color(0xFF0C3F3A)])), child: Center(child: Text(entry.icon, style: const TextStyle(fontSize: 22)))), const SizedBox(width: 12), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(entry.name, style: const TextStyle(fontWeight: FontWeight.w800)), Text(entry.count, style: const TextStyle(color: _muted, fontSize: 12))])), const Icon(Icons.chevron_right, color: _muted)])); }
 Widget _settingsPreview() => Center(child: Container(width: 250, height: 130, decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), border: Border.all(color: _accent), gradient: LinearGradient(colors: [_cyan.withOpacity(.25), _accent.withOpacity(.22)])), child: const Icon(Icons.image, size: 46, color: _muted)));
