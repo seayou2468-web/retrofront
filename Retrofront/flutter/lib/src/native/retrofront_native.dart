@@ -473,6 +473,7 @@ class RetrofrontNative implements RetrofrontFrontend {
     Directory(p.dirname(settings['input_overlay']!)).createSync(recursive: true);
     _ensureDefaultOverlayConfig();
     await _loadPersistedSettings();
+    runtime = runtime.copyWith(overlayEnabled: settings['input_overlay_enable'] != 'false');
     _normalizeConfiguredDirectories(root);
     _ensureDefaultOverlayConfig();
     _applyAllSettingsToNative();

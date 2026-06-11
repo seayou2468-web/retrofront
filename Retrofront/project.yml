@@ -11,6 +11,8 @@ settings:
     CODE_SIGN_STYLE: Manual
     CODE_SIGNING_ALLOWED: "NO"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: "NO"
+    SWIFT_VERSION: ""
 
 targets:
   RetrofrontiOS:
@@ -52,6 +54,13 @@ targets:
           set -eu
           if command -v flutter >/dev/null 2>&1; then
             cd "${SRCROOT}/flutter"
+            if [ ! -d ios ]; then
+              flutter create --platforms=ios -i objc .
+            fi
+            if find ios -name '*.swift' -print | grep -q .; then
+              echo "error: Swift sources in flutter/ios would force libswift*.dylib embedding. Recreate the Flutter iOS shell with: flutter create --platforms=ios -i objc ." >&2
+              exit 1
+            fi
             flutter pub get
             flutter build ios --config-only --no-codesign
           else
@@ -87,6 +96,23 @@ targets:
               cp -f "${core}" "${destination}"
               sign_core "${destination}"
             done
+          fi
+
+      - name: Reject Swift standard libraries
+        script: |
+          set -eu
+          APP_ROOT="${TARGET_BUILD_DIR}/${WRAPPER_NAME}"
+          FRAMEWORKS_DIR="${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH:-${WRAPPER_NAME}/Frameworks}"
+
+          for dir in "${FRAMEWORKS_DIR}" "${APP_ROOT}/Frameworks" "${TARGET_BUILD_DIR}/SwiftSupport" "${BUILT_PRODUCTS_DIR}/SwiftSupport"; do
+            if [ -d "${dir}" ]; then
+              find "${dir}" -name 'libswift*.dylib' -type f -print | while IFS= read -r swiftlib; do rm -f "${swiftlib}"; done
+            fi
+          done
+
+          if [ -d "${APP_ROOT}" ] && find "${APP_ROOT}" -name 'libswift*.dylib' -type f -print | grep -q .; then
+            echo "error: libswift*.dylib is still present in ${APP_ROOT}; remove Swift sources/dependencies or set ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=NO on the owning target." >&2
+            exit 1
           fi
 
     settings:

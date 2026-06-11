@@ -8,14 +8,14 @@ import 'package:flutter/services.dart';
 
 import '../native/retrofront_native.dart';
 
-const _bg = Color(0xFF050B14);
-const _panel = Color(0xCC081321);
-const _panel2 = Color(0xDD0B1728);
-const _line = Color(0xFF1C2B40);
-const _muted = Color(0xFF8C9AB1);
-const _text = Color(0xFFEAF1FF);
-const _accent = Color(0xFF7B61FF);
-const _cyan = Color(0xFF1FD7F5);
+const _bg = Color(0xFF030813);
+const _panel = Color(0xD9071220);
+const _panel2 = Color(0xE60B1728);
+const _line = Color(0xFF22334D);
+const _muted = Color(0xFF93A1B8);
+const _text = Color(0xFFF1F6FF);
+const _accent = Color(0xFF7657FF);
+const _cyan = Color(0xFF18D4F2);
 
 class RetrofrontApp extends StatefulWidget {
   const RetrofrontApp({super.key, required this.frontend});
@@ -668,7 +668,17 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
       ]),
       _SettingsGroup(title: 'Controller', children: [
         _SettingsToggleRow(title: 'Touch Overlay', subtitle: '画面上コントローラー', value: _settingBool('input_overlay_enable'), onChanged: (v) async { await widget.frontend.setOverlayEnabled(v); if (mounted) setState(() {}); }),
-        _SettingsChoiceRow(title: 'Overlay Set', value: _overlayChoiceLabel(s['input_overlay']), choices: _overlayConfigs.isEmpty ? const ['Not selected'] : _overlayConfigs.map(_overlayChoiceLabel).toList(), onChanged: (v) async { final path = _overlayConfigs.where((path) => _overlayChoiceLabel(path) == v).firstOrNull; if (path != null) { await widget.frontend.loadOverlay(path); await _refreshRuntimeLists(); if (mounted) setState(() {}); } }),
+        _OverlayChoiceRow(
+          currentPath: s['input_overlay'] ?? '',
+          paths: _overlayConfigs,
+          labelForPath: _overlayChoiceLabel,
+          onChanged: (path) async {
+            await widget.frontend.loadOverlay(path);
+            await widget.frontend.setOverlayEnabled(true);
+            await _refreshRuntimeLists();
+            if (mounted) setState(() {});
+          },
+        ),
         _SettingsChoiceRow(title: 'Overlay Opacity', value: _opacityLabel(s['input_overlay_opacity']), choices: const ['45%', '70%', '90%'], onChanged: (v) => _setMappedSetting('input_overlay_opacity', v, const {'45%': '0.45', '70%': '0.70', '90%': '0.90'})),
         _SettingsToggleRow(title: 'Haptics', subtitle: 'タッチ操作の振動フィードバック', value: _settingBool('input_haptic_feedback'), onChanged: (v) => _setBoolSetting('input_haptic_feedback', v)),
       ]),
@@ -728,12 +738,12 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
   String _opacityLabel(String? value) => '${(((double.tryParse(value ?? '0.70') ?? .70) * 100).round())}%';
   String _overlayLabel(String? path) {
     if (path == null || path.isEmpty) return 'Not selected';
-    return path.split(Platform.pathSeparator).last.replaceAll('.cfg', '').replaceAll('_', ' ').replaceAll('-', ' ');
+    return path.split(RegExp(r'[\\/]')).last.replaceAll('.cfg', '').replaceAll('_', ' ').replaceAll('-', ' ');
   }
 
   String _overlayChoiceLabel(String? path) {
     if (path == null || path.isEmpty) return 'Not selected';
-    final parts = path.split(Platform.pathSeparator);
+    final parts = path.split(RegExp(r'[\\/]'));
     final label = _overlayLabel(path);
     final gamepadsIndex = parts.indexOf('gamepads');
     if (gamepadsIndex >= 0 && gamepadsIndex + 1 < parts.length) {
@@ -1190,20 +1200,21 @@ class _ShellBackground extends StatelessWidget {
   final Widget child;
   @override
   Widget build(BuildContext context) => DecoratedBox(
-    decoration: const BoxDecoration(gradient: LinearGradient(colors: [Color(0xFF04070F), Color(0xFF071524), Color(0xFF101B35)], begin: Alignment.topLeft, end: Alignment.bottomRight)),
+    decoration: const BoxDecoration(gradient: LinearGradient(colors: [_bg, Color(0xFF061221), Color(0xFF0B1730)], begin: Alignment.topLeft, end: Alignment.bottomRight)),
     child: Stack(children: [
-      Positioned(top: -100, left: -80, child: _Glow(color: _accent.withOpacity(.22), size: 300)),
-      Positioned(bottom: -80, right: -40, child: _Glow(color: _cyan.withOpacity(.16), size: 360)),
+      Positioned(top: -90, left: -70, child: _Glow(color: _accent.withOpacity(.26), size: 320)),
+      Positioned(top: 160, right: -120, child: _Glow(color: _cyan.withOpacity(.12), size: 360)),
+      Positioned(bottom: -100, right: 70, child: _Glow(color: _accent.withOpacity(.16), size: 420)),
       child,
     ]),
   );
 }
 
 class _Glow extends StatelessWidget { const _Glow({required this.color, required this.size}); final Color color; final double size; @override Widget build(BuildContext context) => Container(width: size, height: size, decoration: BoxDecoration(shape: BoxShape.circle, boxShadow: [BoxShadow(color: color, blurRadius: size / 2, spreadRadius: size / 5)])); }
-class _GlassPanel extends StatelessWidget { const _GlassPanel({required this.child, this.padding}); final Widget child; final EdgeInsetsGeometry? padding; @override Widget build(BuildContext context) => Container(padding: padding, decoration: BoxDecoration(color: _panel, borderRadius: BorderRadius.circular(18), border: Border.all(color: const Color(0xFF24354D)), boxShadow: [BoxShadow(color: Colors.black.withOpacity(.35), blurRadius: 28, offset: const Offset(0, 18))]), child: child); }
+class _GlassPanel extends StatelessWidget { const _GlassPanel({required this.child, this.padding}); final Widget child; final EdgeInsetsGeometry? padding; @override Widget build(BuildContext context) => ClipRRect(borderRadius: BorderRadius.circular(18), child: BackdropFilter(filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18), child: Container(padding: padding, decoration: BoxDecoration(color: _panel, borderRadius: BorderRadius.circular(18), border: Border.all(color: _line.withOpacity(.78)), boxShadow: [BoxShadow(color: Colors.black.withOpacity(.38), blurRadius: 30, offset: const Offset(0, 18)), BoxShadow(color: _accent.withOpacity(.06), blurRadius: 18, spreadRadius: -4)]), child: child))); }
 class _IconPill extends StatelessWidget { const _IconPill({required this.icon}); final IconData icon; @override Widget build(BuildContext context) => Container(width: 36, height: 36, decoration: BoxDecoration(color: const Color(0xFF101C2E), borderRadius: BorderRadius.circular(10), border: Border.all(color: _line)), child: Icon(icon, size: 18, color: _text)); }
 class _SearchBox extends StatelessWidget { const _SearchBox({this.hint = '検索'}); final String hint; @override Widget build(BuildContext context) => Container(height: 42, padding: const EdgeInsets.symmetric(horizontal: 14), decoration: BoxDecoration(color: const Color(0xFF101A2A), borderRadius: BorderRadius.circular(24), border: Border.all(color: _line)), child: Row(children: [const Icon(Icons.search, size: 18, color: _muted), const SizedBox(width: 8), Text(hint, style: const TextStyle(color: _muted, fontSize: 13))])); }
-class _RailItem extends StatelessWidget { const _RailItem({required this.label, required this.icon, required this.selected, required this.onTap}); final String label; final IconData icon; final bool selected; final VoidCallback onTap; @override Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(bottom: 8), child: InkWell(onTap: onTap, borderRadius: BorderRadius.circular(10), child: Container(height: 44, padding: const EdgeInsets.symmetric(horizontal: 14), decoration: BoxDecoration(color: selected ? const Color(0xFF13264A) : Colors.transparent, borderRadius: BorderRadius.circular(10)), child: Row(children: [Icon(icon, size: 18, color: selected ? _text : _muted), const SizedBox(width: 12), Text(label, style: TextStyle(color: selected ? _text : _muted, fontWeight: selected ? FontWeight.w700 : FontWeight.w500))])))); }
+class _RailItem extends StatelessWidget { const _RailItem({required this.label, required this.icon, required this.selected, required this.onTap}); final String label; final IconData icon; final bool selected; final VoidCallback onTap; @override Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(bottom: 8), child: InkWell(onTap: onTap, borderRadius: BorderRadius.circular(10), child: Container(height: 44, padding: const EdgeInsets.symmetric(horizontal: 14), decoration: BoxDecoration(color: selected ? const Color(0xFF172A55) : Colors.transparent, borderRadius: BorderRadius.circular(10), border: selected ? Border.all(color: _accent.withOpacity(.42)) : null), child: Row(children: [Icon(icon, size: 18, color: selected ? _text : _muted), const SizedBox(width: 12), Text(label, style: TextStyle(color: selected ? _text : _muted, fontWeight: selected ? FontWeight.w700 : FontWeight.w500))])))); }
 class _Chip extends StatelessWidget { const _Chip({required this.label}); final String label; @override Widget build(BuildContext context) => Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5), decoration: BoxDecoration(color: const Color(0xFF142033), borderRadius: BorderRadius.circular(7), border: Border.all(color: _line)), child: Text(label, style: const TextStyle(color: _text, fontSize: 12))); }
 class _GradientButton extends StatelessWidget { const _GradientButton({required this.label, required this.onTap}); final String label; final FutureOr<void> Function() onTap; @override Widget build(BuildContext context) => InkWell(onTap: () => onTap(), borderRadius: BorderRadius.circular(10), child: Container(height: 52, alignment: Alignment.center, decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), gradient: const LinearGradient(colors: [_accent, _cyan])), child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900)))); }
 class _SmallButton extends StatelessWidget { const _SmallButton({required this.label, required this.onTap}); final String label; final VoidCallback onTap; @override Widget build(BuildContext context) => OutlinedButton(onPressed: onTap, style: OutlinedButton.styleFrom(foregroundColor: _text, side: const BorderSide(color: _line), backgroundColor: const Color(0xFF111D2C)), child: Text(label)); }
@@ -1273,6 +1284,33 @@ class _SettingsCoreButton extends StatelessWidget {
 }
 
 class _SettingsAssetRow extends StatelessWidget { const _SettingsAssetRow({required this.package, required this.onBundled, required this.onDownload}); final FrontendAssetPackageEntry package; final FutureOr<void> Function() onBundled; final FutureOr<void> Function() onDownload; @override Widget build(BuildContext context) => ListTile(dense: true, contentPadding: EdgeInsets.zero, title: Text('${package.name}.zip', style: const TextStyle(color: _text, fontSize: 13)), subtitle: Text(package.label, style: const TextStyle(color: _muted, fontSize: 11)), trailing: Wrap(spacing: 8, children: [TextButton(onPressed: () => onBundled(), child: const Text('同梱')), TextButton(onPressed: () => onDownload(), child: const Text('取得'))])); }
+
+class _OverlayChoiceRow extends StatelessWidget {
+  const _OverlayChoiceRow({required this.currentPath, required this.paths, required this.labelForPath, required this.onChanged});
+  final String currentPath;
+  final List<String> paths;
+  final String Function(String?) labelForPath;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final normalizedCurrent = paths.contains(currentPath) ? currentPath : (paths.isNotEmpty ? paths.first : '');
+    return ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      title: const Text('Overlay Set', style: TextStyle(color: _text, fontSize: 13)),
+      subtitle: Text(paths.isEmpty ? 'overlays.zipを展開すると選択できます' : labelForPath(normalizedCurrent), style: const TextStyle(color: _muted, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+      trailing: DropdownButton<String>(
+        value: normalizedCurrent.isEmpty ? null : normalizedCurrent,
+        hint: const Text('Not selected'),
+        dropdownColor: _panel2,
+        underline: const SizedBox.shrink(),
+        items: [for (final path in paths) DropdownMenuItem(value: path, child: Text(labelForPath(path), overflow: TextOverflow.ellipsis))],
+        onChanged: paths.isEmpty ? null : (path) { if (path != null) onChanged(path); },
+      ),
+    );
+  }
+}
 class _SettingsChoiceRow extends StatelessWidget { const _SettingsChoiceRow({required this.title, required this.value, required this.choices, required this.onChanged}); final String title; final String value; final List<String> choices; final ValueChanged<String> onChanged; @override Widget build(BuildContext context) { final safeChoices = choices.isEmpty ? <String>[value] : choices; return ListTile(dense: true, contentPadding: EdgeInsets.zero, title: Text(title, style: const TextStyle(color: _text, fontSize: 13)), subtitle: Text(value, style: const TextStyle(color: _muted, fontSize: 11)), trailing: DropdownButton<String>(value: safeChoices.contains(value) ? value : safeChoices.first, dropdownColor: _panel2, underline: const SizedBox.shrink(), items: [for (final choice in safeChoices) DropdownMenuItem(value: choice, child: Text(choice))], onChanged: (value) { if (value != null) onChanged(value); })); } }
 class _SettingsRow extends StatelessWidget { const _SettingsRow({required this.title, required this.value}); final String title; final String value; @override Widget build(BuildContext context) => ListTile(dense: true, contentPadding: EdgeInsets.zero, title: Text(title, style: const TextStyle(color: _text, fontSize: 13)), subtitle: Text(value, style: const TextStyle(color: _muted, fontSize: 11)), trailing: const Icon(Icons.chevron_right, color: _muted, size: 18)); }
 class _PlaylistRow extends StatelessWidget { const _PlaylistRow({required this.entry}); final PlaylistEntry entry; @override Widget build(BuildContext context) => Container(height: 68, padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: _panel2, borderRadius: BorderRadius.circular(10), border: Border.all(color: _line)), child: Row(children: [Container(width: 50, decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), gradient: const LinearGradient(colors: [Color(0xFF322267), Color(0xFF0C3F3A)])), child: Center(child: Text(entry.icon, style: const TextStyle(fontSize: 22)))), const SizedBox(width: 12), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(entry.name, style: const TextStyle(fontWeight: FontWeight.w800)), Text(entry.count, style: const TextStyle(color: _muted, fontSize: 12))])), const Icon(Icons.chevron_right, color: _muted)])); }
