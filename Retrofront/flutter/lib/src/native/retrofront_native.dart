@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'dart:ffi' as ffi;
-import 'dart:io' show Directory, File, Platform;
+import 'dart:io' show Directory, File, HttpClient, HttpStatus, Platform;
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -63,6 +63,24 @@ final class RfCoreOption extends ffi.Struct {
   external int valuesCount;
 }
 
+final class RfLaunchPlan extends ffi.Struct {
+  external ffi.Pointer<Utf8> contentPath;
+  external ffi.Pointer<Utf8> contentExtension;
+  @ffi.Uint32()
+  external int decision;
+  external ffi.Pointer<Utf8> selectedCorePath;
+  @ffi.UintPtr()
+  external int candidateCount;
+  external ffi.Pointer<Utf8> reason;
+}
+
+final class RfAssetInstallReport extends ffi.Struct {
+  @ffi.UintPtr()
+  external int filesWritten;
+  @ffi.UintPtr()
+  external int directoriesCreated;
+}
+
 class GameEntry {
   const GameEntry({
     required this.title,
@@ -84,12 +102,34 @@ class GameEntry {
 }
 
 class CoreEntry {
-  const CoreEntry({required this.name, required this.system, required this.path, this.loaded = false});
+  const CoreEntry({required this.name, required this.system, required this.path, this.supportedExtensions = const {}, this.loaded = false});
 
   final String name;
   final String system;
   final String path;
+  final Set<String> supportedExtensions;
   final bool loaded;
+}
+
+class LaunchPlanEntry {
+  const LaunchPlanEntry({required this.decision, required this.contentExtension, required this.selectedCorePath, required this.candidates, required this.reason});
+
+  final int decision;
+  final String contentExtension;
+  final String selectedCorePath;
+  final List<CoreEntry> candidates;
+  final String reason;
+
+  bool get isSelected => decision == 1;
+  bool get needsCoreChoice => decision == 2;
+}
+
+class FrontendAssetPackageEntry {
+  const FrontendAssetPackageEntry({required this.name, required this.destinationSettingKey, required this.label});
+
+  final String name;
+  final String destinationSettingKey;
+  final String label;
 }
 
 class PlaylistEntry {
@@ -107,6 +147,14 @@ class CoreOptionEntry {
   final String description;
   final String value;
   final List<String> values;
+}
+
+class VideoFrame {
+  const VideoFrame({required this.width, required this.height, required this.rgba});
+
+  final int width;
+  final int height;
+  final Uint8List rgba;
 }
 
 class RuntimeState {
@@ -158,18 +206,21 @@ abstract interface class RetrofrontFrontend {
   Future<void> scanRoms(String directory);
   Future<void> scanCores(String directory);
   Future<bool> loadCore(CoreEntry core);
+  Future<LaunchPlanEntry> planContentLaunch(String path, {String preferredCorePath = ''});
   Future<bool> launch(GameEntry game);
   Future<bool> runFrame();
   Future<bool> quickSave({int slot = 0});
   Future<bool> quickLoad({int slot = 0});
   Future<bool> reset();
   Future<void> setJoypadButton(int buttonId, bool pressed);
+  Future<void> setOverlayTouch(int slot, double x, double y, bool active);
   Future<void> loadOverlay(String path);
   Future<void> setOverlayEnabled(bool enabled);
   Future<List<CoreOptionEntry>> coreOptions();
   Future<bool> setCoreOption(String key, String value);
   Future<void> setSetting(String key, String value);
-  Future<Uint8List?> copyVideoFrameRgba();
+  Future<int> installFrontendAssetPackage(String name, {bool download = false});
+  Future<VideoFrame?> copyVideoFrame();
   void openQuickMenu();
   void closeQuickMenu();
 }
@@ -182,16 +233,28 @@ class RetrofrontNative implements RetrofrontFrontend {
     }
   }
 
+  static const frontendAssetPackages = <FrontendAssetPackageEntry>[
+    FrontendAssetPackageEntry(name: 'assets', destinationSettingKey: 'assets_directory', label: 'Menu assets'),
+    FrontendAssetPackageEntry(name: 'info', destinationSettingKey: 'libretro_info_path', label: 'Core info'),
+    FrontendAssetPackageEntry(name: 'overlays', destinationSettingKey: 'overlay_directory', label: 'Input overlays'),
+  ];
+
   factory RetrofrontNative.create() {
     return RetrofrontNative._(_openLibraryOrNull());
   }
 
   static ffi.DynamicLibrary? _openLibraryOrNull() {
+    final executableDir = p.dirname(Platform.resolvedExecutable);
+    final current = Directory.current.path;
     final candidates = <String>[
       if (Platform.isIOS) 'retrofront_core.framework/retrofront_core',
-      if (Platform.isIOS) 'libretrofront_core.a',
+      if (Platform.isIOS) p.join(executableDir, 'Frameworks', 'retrofront_core.framework', 'retrofront_core'),
       if (Platform.isLinux) 'libretrofront_core.so',
-      if (Platform.isLinux) p.join(Directory.current.path, 'libretrofront_core.so'),
+      if (Platform.isLinux) p.join(current, 'libretrofront_core.so'),
+      if (Platform.isLinux) p.join(current, '..', 'target', 'debug', 'libretrofront_core.so'),
+      if (Platform.isLinux) p.join(current, '..', 'target', 'release', 'libretrofront_core.so'),
+      if (Platform.isLinux) p.join(executableDir, 'libretrofront_core.so'),
+      if (Platform.isLinux) p.join(executableDir, 'lib', 'libretrofront_core.so'),
     ];
     for (final candidate in candidates) {
       try {
@@ -217,6 +280,7 @@ class RetrofrontNative implements RetrofrontFrontend {
   late final bool Function(ffi.Pointer<RfFrontend>, int) _saveState;
   late final bool Function(ffi.Pointer<RfFrontend>, int) _loadState;
   late final bool Function(ffi.Pointer<RfFrontend>, int, bool) _setJoypadButton;
+  late final bool Function(ffi.Pointer<RfFrontend>, int, double, double, bool) _setOverlayTouchNative;
   late final bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>) _loadOverlay;
   late final void Function(ffi.Pointer<RfFrontend>, bool) _setOverlayEnabled;
   late final bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<RfOverlayInfo>) _overlayInfo;
@@ -226,6 +290,10 @@ class RetrofrontNative implements RetrofrontFrontend {
   late final bool Function(ffi.Pointer<RfFrontend>, int, ffi.Pointer<RfCoreOption>) _getOption;
   late final bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>) _setOption;
   late final bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>) _setSettingNative;
+  late final bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Pointer<RfLaunchPlan>) _planContentLaunchNative;
+  late final int Function(ffi.Pointer<RfFrontend>) _launchCandidateCountNative;
+  late final bool Function(ffi.Pointer<RfFrontend>, int, ffi.Pointer<RfCoreInfo>) _getLaunchCandidateNative;
+  late final bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Pointer<RfAssetInstallReport>) _installAssetsZipNative;
   late final void Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>) _setBaseDirNative;
   late final void Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>) _setInfoDirNative;
   late final void Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>) _scanCoresNative;
@@ -305,6 +373,7 @@ class RetrofrontNative implements RetrofrontFrontend {
     _saveState = lib.lookupFunction<ffi.Bool Function(ffi.Pointer<RfFrontend>, ffi.Uint32), bool Function(ffi.Pointer<RfFrontend>, int)>('rf_frontend_save_state');
     _loadState = lib.lookupFunction<ffi.Bool Function(ffi.Pointer<RfFrontend>, ffi.Uint32), bool Function(ffi.Pointer<RfFrontend>, int)>('rf_frontend_load_state');
     _setJoypadButton = lib.lookupFunction<ffi.Bool Function(ffi.Pointer<RfFrontend>, ffi.Uint32, ffi.Bool), bool Function(ffi.Pointer<RfFrontend>, int, bool)>('rf_frontend_set_joypad_button');
+    _setOverlayTouchNative = lib.lookupFunction<ffi.Bool Function(ffi.Pointer<RfFrontend>, ffi.UintPtr, ffi.Float, ffi.Float, ffi.Bool), bool Function(ffi.Pointer<RfFrontend>, int, double, double, bool)>('rf_frontend_set_overlay_touch');
     _loadOverlay = lib.lookupFunction<ffi.Bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>), bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>)>('rf_frontend_load_overlay');
     _setOverlayEnabled = lib.lookupFunction<ffi.Void Function(ffi.Pointer<RfFrontend>, ffi.Bool), void Function(ffi.Pointer<RfFrontend>, bool)>('rf_frontend_set_overlay_enabled');
     _overlayInfo = lib.lookupFunction<ffi.Bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<RfOverlayInfo>), bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<RfOverlayInfo>)>('rf_frontend_overlay_info');
@@ -314,6 +383,10 @@ class RetrofrontNative implements RetrofrontFrontend {
     _getOption = lib.lookupFunction<ffi.Bool Function(ffi.Pointer<RfFrontend>, ffi.UintPtr, ffi.Pointer<RfCoreOption>), bool Function(ffi.Pointer<RfFrontend>, int, ffi.Pointer<RfCoreOption>)>('rf_frontend_get_option');
     _setOption = lib.lookupFunction<ffi.Bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>), bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>)>('rf_frontend_set_option');
     _setSettingNative = lib.lookupFunction<ffi.Bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>), bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>)>('rf_frontend_set_setting');
+    _planContentLaunchNative = lib.lookupFunction<ffi.Bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Pointer<RfLaunchPlan>), bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Pointer<RfLaunchPlan>)>('rf_frontend_plan_content_launch');
+    _launchCandidateCountNative = lib.lookupFunction<ffi.UintPtr Function(ffi.Pointer<RfFrontend>), int Function(ffi.Pointer<RfFrontend>)>('rf_frontend_launch_candidate_count');
+    _getLaunchCandidateNative = lib.lookupFunction<ffi.Bool Function(ffi.Pointer<RfFrontend>, ffi.UintPtr, ffi.Pointer<RfCoreInfo>), bool Function(ffi.Pointer<RfFrontend>, int, ffi.Pointer<RfCoreInfo>)>('rf_frontend_get_launch_candidate');
+    _installAssetsZipNative = lib.lookupFunction<ffi.Bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Pointer<RfAssetInstallReport>), bool Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Pointer<RfAssetInstallReport>)>('rf_frontend_install_assets_zip');
     _setBaseDirNative = lib.lookupFunction<ffi.Void Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>), void Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>)>('rf_frontend_set_base_dir');
     _setInfoDirNative = lib.lookupFunction<ffi.Void Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>), void Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>)>('rf_frontend_set_info_dir');
     _scanCoresNative = lib.lookupFunction<ffi.Void Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>), void Function(ffi.Pointer<RfFrontend>, ffi.Pointer<Utf8>)>('rf_frontend_scan_cores');
@@ -353,9 +426,14 @@ class RetrofrontNative implements RetrofrontFrontend {
       Directory(dir.value).createSync(recursive: true);
     }
     Directory(p.dirname(settings['input_overlay']!)).createSync(recursive: true);
+    _ensureDefaultOverlayConfig();
     await _loadPersistedSettings();
     _applyAllSettingsToNative();
+    await _scanBundledCoreDirectories();
     await scanCores(settings['libretro_directory']!);
+    if ((settings['input_overlay'] ?? '').isNotEmpty) {
+      await loadOverlay(settings['input_overlay']!);
+    }
     await scanRoms(settings['content_directory']!);
     statusMessage = _handle == null
         ? 'Native core library not found; UI is running in preview mode.'
@@ -429,12 +507,14 @@ class RetrofrontNative implements RetrofrontFrontend {
         malloc.free(cDir);
       }
     } else {
-      cores = dir
+      final found = dir
           .listSync(recursive: true)
-          .whereType<File>()
-          .where((file) => _isCoreLibrary(file.path))
-          .map((file) => CoreEntry(name: _titleCase(p.basenameWithoutExtension(file.path).replaceAll('_libretro', '')), system: 'Libretro', path: file.path))
+          .where((entity) => entity is File || (entity is Directory && entity.path.toLowerCase().endsWith('.framework')))
+          .where((entity) => _isCoreLibrary(entity.path))
+          .map((entity) => CoreEntry(name: _titleCase(p.basenameWithoutExtension(entity.path).replaceAll('_libretro', '').replaceAll('_ios', '')), system: 'Libretro', path: entity.path))
           .toList();
+      final byPath = {for (final core in [...cores, ...found]) core.path: core};
+      cores = byPath.values.toList()..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     }
   }
 
@@ -451,10 +531,57 @@ class RetrofrontNative implements RetrofrontFrontend {
       }
     }
     if (ok || handle == null) {
-      cores = [for (final item in cores) CoreEntry(name: item.name, system: item.system, path: item.path, loaded: item.name == core.name)];
+      cores = [for (final item in cores) CoreEntry(name: item.name, system: item.system, path: item.path, supportedExtensions: item.supportedExtensions, loaded: item.name == core.name)];
       runtime = runtime.copyWith(loadedCore: core.name);
     }
     return ok;
+  }
+
+  @override
+  Future<LaunchPlanEntry> planContentLaunch(String path, {String preferredCorePath = ''}) async {
+    final handle = _handle;
+    if (handle == null) {
+      final ext = p.extension(path).replaceFirst('.', '').toLowerCase();
+      final compatible = cores.where((core) => core.supportedExtensions.contains(ext) || core.name.toLowerCase().contains(ext) || core.path.toLowerCase().contains(ext)).toList();
+      return LaunchPlanEntry(
+        decision: compatible.length > 1 ? 2 : compatible.isEmpty ? 0 : 1,
+        contentExtension: ext,
+        selectedCorePath: compatible.length == 1 ? compatible.first.path : '',
+        candidates: compatible,
+        reason: compatible.isEmpty ? 'No compatible core found' : 'Preview launch plan',
+      );
+    }
+    final cPath = path.toNativeUtf8();
+    final cPreferred = preferredCorePath.toNativeUtf8();
+    final out = malloc<RfLaunchPlan>();
+    try {
+      if (!_planContentLaunchNative(handle, cPath, cPreferred, out)) {
+        return const LaunchPlanEntry(decision: 0, contentExtension: '', selectedCorePath: '', candidates: [], reason: 'Launch planning failed');
+      }
+      final candidates = <CoreEntry>[];
+      final rawCore = malloc<RfCoreInfo>();
+      try {
+        final count = _launchCandidateCountNative(handle);
+        for (var i = 0; i < count; i++) {
+          if (_getLaunchCandidateNative(handle, i, rawCore)) {
+            candidates.add(_coreEntryFromNative(rawCore.ref));
+          }
+        }
+      } finally {
+        malloc.free(rawCore);
+      }
+      return LaunchPlanEntry(
+        decision: out.ref.decision,
+        contentExtension: out.ref.contentExtension.toDartString(),
+        selectedCorePath: out.ref.selectedCorePath.toDartString(),
+        candidates: candidates,
+        reason: out.ref.reason.toDartString(),
+      );
+    } finally {
+      malloc.free(cPath);
+      malloc.free(cPreferred);
+      malloc.free(out);
+    }
   }
 
   @override
@@ -467,7 +594,8 @@ class RetrofrontNative implements RetrofrontFrontend {
     final handle = _handle;
     if (handle != null) {
       final cPath = game.path.toNativeUtf8();
-      final preferredCorePath = cores
+      final ext = p.extension(game.path).replaceFirst('.', '').toLowerCase();
+      final preferredCorePath = settings['content_core_$ext'] ?? cores
           .firstWhere((core) => core.name == game.core, orElse: () => cores.isNotEmpty ? cores.first : const CoreEntry(name: '', system: '', path: ''))
           .path;
       final cCore = preferredCorePath.toNativeUtf8();
@@ -514,6 +642,11 @@ class RetrofrontNative implements RetrofrontFrontend {
   }
 
   @override
+  Future<void> setOverlayTouch(int slot, double x, double y, bool active) async {
+    if (_handle != null) _setOverlayTouchNative(_handle!, slot, x, y, active);
+  }
+
+  @override
   Future<void> loadOverlay(String path) async {
     if (_handle != null) {
       final cPath = path.toNativeUtf8();
@@ -524,6 +657,7 @@ class RetrofrontNative implements RetrofrontFrontend {
       }
     }
     settings['input_overlay'] = path;
+    await _persistSettings();
   }
 
   @override
@@ -531,6 +665,7 @@ class RetrofrontNative implements RetrofrontFrontend {
     if (_handle != null) _setOverlayEnabled(_handle!, enabled);
     runtime = runtime.copyWith(overlayEnabled: enabled);
     settings['input_overlay_enable'] = enabled.toString();
+    await _persistSettings();
   }
 
   @override
@@ -601,16 +736,71 @@ class RetrofrontNative implements RetrofrontFrontend {
   }
 
   @override
-  Future<Uint8List?> copyVideoFrameRgba() async {
+  Future<int> installFrontendAssetPackage(String name, {bool download = false}) async {
+    final package = frontendAssetPackages.firstWhere(
+      (entry) => entry.name == name,
+      orElse: () => throw ArgumentError('Unknown frontend asset package: $name'),
+    );
+    final destination = settings[package.destinationSettingKey];
+    if (destination == null || destination.isEmpty) {
+      statusMessage = 'Install failed: destination is not configured for ${package.name}.zip';
+      return 0;
+    }
+    File? zipFile;
+    try {
+      zipFile = download ? await _downloadFrontendAssetPackage(package.name) : _findBundledAssetZip(package.name);
+    } catch (error) {
+      statusMessage = 'Download failed for ${package.name}.zip: $error';
+      return 0;
+    }
+    if (zipFile == null || !zipFile.existsSync()) {
+      statusMessage = 'Install failed: ${package.name}.zip was not found.';
+      return 0;
+    }
     final handle = _handle;
-    if (handle == null) return _demoFrame(runtime.frameNumber);
+    if (handle == null) {
+      statusMessage = 'Install failed: native core library is required to extract ${package.name}.zip.';
+      return 0;
+    }
+    Directory(destination).createSync(recursive: true);
+    final cZip = zipFile.path.toNativeUtf8();
+    final cDestination = destination.toNativeUtf8();
+    final report = malloc<RfAssetInstallReport>();
+    try {
+      final ok = _installAssetsZipNative(handle, cZip, cDestination, report);
+      if (!ok) {
+        statusMessage = 'Install failed: could not extract ${package.name}.zip.';
+        return 0;
+      }
+      if (package.name == 'info') {
+        _applyAllSettingsToNative();
+        for (final directory in _bundledCoreDirectories()) {
+          if (Directory(directory).existsSync()) await scanCores(directory);
+        }
+      }
+      if (package.name == 'overlays' && (settings['input_overlay'] ?? '').isNotEmpty) {
+        await loadOverlay(settings['input_overlay']!);
+      }
+      statusMessage = '${package.name}.zip installed: ${report.ref.filesWritten} files';
+      return report.ref.filesWritten;
+    } finally {
+      malloc.free(cZip);
+      malloc.free(cDestination);
+      malloc.free(report);
+    }
+  }
+
+  @override
+  Future<VideoFrame?> copyVideoFrame() async {
+    final handle = _handle;
+    if (handle == null) return VideoFrame(width: 320, height: 180, rgba: _demoFrame(runtime.frameNumber));
     final info = malloc<RfVideoFrameInfo>();
     try {
-      if (!_videoFrameInfo(handle, info) || info.ref.rgbaLen == 0) return null;
+      if (!_videoFrameInfo(handle, info) || info.ref.rgbaLen == 0 || info.ref.width == 0 || info.ref.height == 0) return null;
       final buffer = malloc<ffi.Uint8>(info.ref.rgbaLen);
       try {
         final copied = _copyFrame(handle, buffer, info.ref.rgbaLen);
-        return Uint8List.fromList(buffer.asTypedList(copied));
+        return VideoFrame(width: info.ref.width, height: info.ref.height, rgba: Uint8List.fromList(buffer.asTypedList(copied)));
       } finally {
         malloc.free(buffer);
       }
@@ -628,6 +818,94 @@ class RetrofrontNative implements RetrofrontFrontend {
   void dispose() {
     final handle = _handle;
     if (handle != null) _destroy(handle);
+  }
+
+  Future<void> _scanBundledCoreDirectories() async {
+    for (final directory in _bundledCoreDirectories()) {
+      if (Directory(directory).existsSync()) {
+        await scanCores(directory);
+      }
+    }
+  }
+
+  List<String> _bundledCoreDirectories() {
+    final current = Directory.current.path;
+    final executableDir = p.dirname(Platform.resolvedExecutable);
+    final root = _retroArchRoot?.path;
+    return <String>{
+      if (Platform.isIOS) p.join(executableDir, 'Frameworks'),
+      if (Platform.isIOS) p.join(executableDir, 'dylibs'),
+      if (Platform.isIOS) executableDir,
+      if (Platform.isLinux) p.join(current, 'archifacts', 'linux'),
+      if (Platform.isLinux) p.join(current, '..', 'archifacts', 'linux'),
+      if (Platform.isLinux) p.join(executableDir, 'cores'),
+      if (Platform.isLinux) p.join(executableDir, 'lib', 'cores'),
+      if (root != null) p.join(root, 'cores'),
+      if (root != null) p.join(root, 'Cores'),
+    }.toList();
+  }
+
+  void _ensureDefaultOverlayConfig() {
+    final overlayPath = settings['input_overlay'];
+    if (overlayPath == null || overlayPath.isEmpty) return;
+    final file = File(overlayPath);
+    if (file.existsSync()) return;
+    file.parent.createSync(recursive: true);
+    file.writeAsStringSync("""overlays = 1
+overlay0_name = "retropad"
+overlay0_full_screen = true
+overlay0_normalized = true
+overlay0_descs = 11
+overlay0_desc0 = "up,0.16,0.70,rect,0.055,0.055"
+overlay0_desc1 = "down,0.16,0.88,rect,0.055,0.055"
+overlay0_desc2 = "left,0.07,0.79,rect,0.055,0.055"
+overlay0_desc3 = "right,0.25,0.79,rect,0.055,0.055"
+overlay0_desc4 = "b,0.78,0.83,radial,0.06,0.06"
+overlay0_desc5 = "a,0.88,0.72,radial,0.06,0.06"
+overlay0_desc6 = "y,0.68,0.72,radial,0.052,0.052"
+overlay0_desc7 = "x,0.78,0.61,radial,0.052,0.052"
+overlay0_desc8 = "select,0.42,0.92,rect,0.05,0.035"
+overlay0_desc9 = "start,0.58,0.92,rect,0.05,0.035"
+overlay0_desc10 = "menu_toggle,0.08,0.13,rect,0.06,0.04"
+""");
+  }
+
+  File? _findBundledAssetZip(String name) {
+    final current = Directory.current.path;
+    final executableDir = p.dirname(Platform.resolvedExecutable);
+    final candidates = <String>[
+      p.join(current, 'apps', 'iOS', 'Resources', '$name.zip'),
+      p.join(current, '..', 'apps', 'iOS', 'Resources', '$name.zip'),
+      p.join(current, 'assets', 'retroarch', '$name.zip'),
+      p.join(executableDir, '$name.zip'),
+      p.join(executableDir, 'Resources', '$name.zip'),
+      p.join(executableDir, 'assets', 'retroarch', '$name.zip'),
+    ];
+    for (final candidate in candidates) {
+      final file = File(candidate);
+      if (file.existsSync()) return file;
+    }
+    return null;
+  }
+
+  Future<File> _downloadFrontendAssetPackage(String name) async {
+    final cache = Directory(p.join((_retroArchRoot ?? await _resolveRetroArchRoot()).path, 'cache', 'frontend-assets'));
+    cache.createSync(recursive: true);
+    final destination = File(p.join(cache.path, '$name.zip'));
+    final uri = Uri.parse('https://buildbot.libretro.com/assets/frontend/$name.zip');
+    final client = HttpClient();
+    try {
+      final request = await client.getUrl(uri);
+      final response = await request.close();
+      if (response.statusCode != HttpStatus.ok) {
+        throw StateError('HTTP ${response.statusCode}');
+      }
+      if (destination.existsSync()) destination.deleteSync();
+      await response.pipe(destination.openWrite());
+      return destination;
+    } finally {
+      client.close(force: true);
+    }
   }
 
   Future<Directory> _resolveRetroArchRoot() async {
@@ -661,6 +939,24 @@ class RetrofrontNative implements RetrofrontFrontend {
     }
   }
 
+  CoreEntry _coreEntryFromNative(RfCoreInfo info) {
+    final extensions = info.supportedExtensions
+        .toDartString()
+        .split('|')
+        .map((ext) => ext.trim().replaceFirst('.', '').toLowerCase())
+        .where((ext) => ext.isNotEmpty)
+        .toSet();
+    final displayName = info.displayName.toDartString();
+    final systemName = info.systemName.toDartString();
+    return CoreEntry(
+      name: displayName,
+      system: systemName.isEmpty ? 'Libretro' : systemName,
+      path: info.path.toDartString(),
+      supportedExtensions: extensions,
+      loaded: displayName == runtime.loadedCore,
+    );
+  }
+
   void _refreshNativeCores() {
     final handle = _handle;
     if (handle == null) return;
@@ -670,12 +966,7 @@ class RetrofrontNative implements RetrofrontFrontend {
     try {
       for (var i = 0; i < count; i++) {
         if (_getCoreInfoNative(handle, i, out)) {
-          next.add(CoreEntry(
-            name: out.ref.displayName.toDartString(),
-            system: out.ref.systemName.toDartString().isEmpty ? 'Libretro' : out.ref.systemName.toDartString(),
-            path: out.ref.path.toDartString(),
-            loaded: out.ref.displayName.toDartString() == runtime.loadedCore,
-          ));
+          next.add(_coreEntryFromNative(out.ref));
         }
       }
     } finally {
@@ -750,14 +1041,17 @@ class RetrofrontNative implements RetrofrontFrontend {
 
   bool _isCoreLibrary(String path) {
     final lower = path.toLowerCase();
-    return lower.endsWith('_libretro.so') || lower.endsWith('_libretro.dylib') || lower.endsWith('_libretro.framework');
+    return lower.endsWith('.framework') || lower.endsWith('.so') || lower.endsWith('.dylib') || lower.endsWith('.dll');
   }
 
   static const _fallbackExtensions = {'zip', 'gba', 'gb', 'gbc', 'sfc', 'smc', 'nes', 'cue', 'chd', 'iso', 'bin', 'md', 'gen'};
 
   String _bestCoreForExtension(String ext) {
-    final compatible = cores.where((core) => core.path.toLowerCase().contains(ext) || core.name.toLowerCase().contains(ext));
+    final normalized = ext.trim().replaceFirst('.', '').toLowerCase();
+    final compatible = cores.where((core) => core.supportedExtensions.contains(normalized));
     if (compatible.isNotEmpty) return compatible.first.name;
+    final nameCompatible = cores.where((core) => core.path.toLowerCase().contains(normalized) || core.name.toLowerCase().contains(normalized));
+    if (nameCompatible.isNotEmpty) return nameCompatible.first.name;
     return cores.isNotEmpty ? cores.first.name : '';
   }
 

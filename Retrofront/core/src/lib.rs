@@ -2249,7 +2249,9 @@ pub unsafe extern "C" fn rf_frontend_launch_content(
     let Some(path_str) = ptr_to_str(path) else {
         return false;
     };
-    let preferred = ptr_to_str(preferred_core).map(PathBuf::from);
+    let preferred = ptr_to_str(preferred_core)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from);
     let meta_str = ptr_to_str(meta);
     let res = with_active_frontend(|core| core.launch_content(path_str, preferred, meta_str));
     match res {
@@ -3053,7 +3055,9 @@ pub unsafe extern "C" fn rf_frontend_plan_content_launch(
     let Some(path_str) = ptr_to_str(path) else {
         return false;
     };
-    let preferred = ptr_to_str(preferred_core).map(PathBuf::from);
+    let preferred = ptr_to_str(preferred_core)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from);
 
     with_active_frontend(|core| {
         if core.core_info.cores.is_empty() {
@@ -3567,7 +3571,7 @@ pub unsafe extern "C" fn rf_frontend_set_base_dir(
         );
         core.settings.set(
             "libretro_info_path",
-            &base_dir.join("cores").to_string_lossy(),
+            &base_dir.join("info").to_string_lossy(),
         );
         core.settings.set(
             "core_options_path",
