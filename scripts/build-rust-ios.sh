@@ -11,15 +11,12 @@ RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-dead_strip" \
 cargo build \
   --manifest-path "$ROOT_DIR/Cargo.toml" \
   --release \
-  -p retrofront-ui \
-  --lib \
-  --target "$TARGET" \
-  --features ios \
-  --no-default-features
+  -p retrofront-core \
+  --target "$TARGET"
 
-UI_LIB="$PROFILE_DIR/libretrofront_ui.a"
-if [[ ! -f "$UI_LIB" ]]; then
-  echo "Missing expected Rust Slint UI static library: $UI_LIB" >&2
+CORE_LIB="$PROFILE_DIR/libretrofront_core.a"
+if [[ ! -f "$CORE_LIB" ]]; then
+  echo "Missing expected Rust FFI static library: $CORE_LIB" >&2
   exit 1
 fi
 
@@ -34,13 +31,13 @@ if [[ -z "$STRIP_TOOL" ]]; then
 fi
 if [[ -n "$STRIP_TOOL" ]]; then
   if [[ "$(basename "$STRIP_TOOL")" == "xcrun" ]]; then
-    xcrun strip -S "$UI_LIB" 2>/dev/null || true
+    xcrun strip -S "$CORE_LIB" 2>/dev/null || true
   else
-    "$STRIP_TOOL" -S "$UI_LIB" 2>/dev/null || true
+    "$STRIP_TOOL" -S "$CORE_LIB" 2>/dev/null || true
   fi
 fi
 
-printf 'Built %s (%s)\n' "$UI_LIB" "$(du -h "$UI_LIB" | awk '{print $1}')"
+printf 'Built %s (%s)\n' "$CORE_LIB" "$(du -h "$CORE_LIB" | awk '{print $1}')"
 printf 'Largest iOS core artifacts (kept, not filtered):\n'
 if [[ -d "$ROOT_DIR/archifacts/ios" ]]; then
   find "$ROOT_DIR/archifacts/ios" -maxdepth 1 \( -name '*.dylib' -o -name '*.framework' \) -print0 \

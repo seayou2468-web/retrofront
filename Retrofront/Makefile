@@ -1,25 +1,37 @@
-.PHONY: all rust swift test clean linux-ui linux-appimage frontend-assets ios-rust xcodegen ios-device-build ios-info
+.PHONY: all rust flutter-test flutter-linux flutter-ios test clean linux-ui linux-appimage frontend-assets ios-rust xcodegen ios-device-build ios-info
 
-all: rust swift
+FLUTTER ?= flutter
+FLUTTER_DIR := flutter
+
+all: rust flutter-test
 
 rust:
-	cargo build --manifest-path Cargo.toml --release
+	cargo build --manifest-path Cargo.toml --release -p retrofront-core
 
-swift: rust
-	swift build
+flutter-test:
+	cd $(FLUTTER_DIR) && $(FLUTTER) test
 
 test: rust
-	cargo test --manifest-path Cargo.toml
-	swift test
+	cargo test --manifest-path Cargo.toml -p retrofront-core
+	@if command -v $(FLUTTER) >/dev/null 2>&1; then \
+		$(MAKE) flutter-test; \
+	else \
+		echo "flutter not found; skipping Flutter tests"; \
+	fi
 
-linux-ui:
-	cargo build --manifest-path Cargo.toml --release -p retrofront-ui --bin retrofront
+flutter-linux: rust
+	cd $(FLUTTER_DIR) && $(FLUTTER) build linux --release
 
-linux-appimage: frontend-assets
+flutter-ios: ios-rust frontend-assets
+	cd $(FLUTTER_DIR) && $(FLUTTER) build ios --release --no-codesign
+
+linux-ui: flutter-linux
+
+linux-appimage: frontend-assets flutter-linux
 	../scripts/build-linux-appimage.sh
 
 frontend-assets:
-	../scripts/fetch-frontend-assets.sh apps/iOS/Resources
+	../scripts/fetch-frontend-assets.sh flutter/assets/retroarch
 
 ios-rust:
 	../scripts/build-rust-ios.sh
@@ -28,15 +40,15 @@ xcodegen:
 	../scripts/generate-xcodeproj.sh
 
 ios-device-build: ios-rust xcodegen
-	xcodebuild -project Retrofront.xcodeproj -scheme RetrofrontiOS -destination 'generic/platform=iOS' -configuration Debug CODE_SIGNING_ALLOWED=NO build
+	cd $(FLUTTER_DIR) && $(FLUTTER) build ios --release --no-codesign
 
 clean:
 	cargo clean --manifest-path Cargo.toml
-	swift package clean
+	@if command -v $(FLUTTER) >/dev/null 2>&1; then cd $(FLUTTER_DIR) && $(FLUTTER) clean; fi
 
-# Build the Rust static library for an iOS target after installing the target, e.g.:
+# Build the native Retrofront FFI library for an iOS target after installing it:
 #   rustup target add aarch64-apple-ios
 #   make ios-info IOS_TARGET=aarch64-apple-ios
 ios-info:
-	@echo "Build iOS Slint UI with: cargo build --manifest-path Cargo.toml --release -p retrofront-ui --lib --target $${IOS_TARGET:-aarch64-apple-ios} --features ios --no-default-features"
-	@echo "Then link libretrofront_ui.a into the iOS app target; SwiftUI is not used."
+	@echo "Build the Rust FFI core with: cargo build --manifest-path Cargo.toml --release -p retrofront-core --target $${IOS_TARGET:-aarch64-apple-ios}"
+	@echo "Flutter uses flutter/lib/main.dart for both iOS and Linux; no Slint UI is built."

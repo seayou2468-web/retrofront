@@ -1,12 +1,11 @@
 [workspace]
-members = ["core", "ui"]
+members = ["core"]
 resolver = "2"
 
-
 [profile.release]
-# iOS bundles were dominated by unstripped Rust/Slint objects. Link-time
-# optimization, a single codegen unit, aborting panics, and symbol stripping keep
-# the staticlib/app binary small without removing any bundled libretro cores.
+# Rust is now a single libretro frontend core that is consumed by Flutter via FFI.
+# UI code lives in the Flutter project, so these settings optimize the native
+# static/dynamic library without pulling platform UI dependencies into Cargo.
 lto = "fat"
 codegen-units = 1
 panic = "abort"

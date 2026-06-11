@@ -12,14 +12,15 @@ settings:
     CODE_SIGNING_ALLOWED: "NO"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
 targets:
-  RetrofrontSwift:
+  RetrofrontCoreBridge:
     type: framework
     platform: iOS
     sources:
       - path: apps/frontend/Sources/RetrofrontSwift
+      - path: apps/frontend/CRetrofrontCore
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.retrofront.swift
+        PRODUCT_BUNDLE_IDENTIFIER: com.retrofront.corebridge
         DEFINES_MODULE: "YES"
         SWIFT_INCLUDE_PATHS: "$(SRCROOT)/apps/frontend/CRetrofrontCore"
         HEADER_SEARCH_PATHS: "$(SRCROOT)/apps/frontend/CRetrofrontCore"
@@ -34,11 +35,11 @@ targets:
     type: application
     platform: iOS
     sources:
-      - path: apps/iOS/Sources
+      - path: flutter/ios/Runner
+        optional: true
       - path: apps/iOS/Resources
     dependencies:
-      - framework: target/aarch64-apple-ios/release/libretrofront_ui.a
-        embed: false
+      - target: RetrofrontCoreBridge
       - sdk: UIKit.framework
       - sdk: Foundation.framework
       - sdk: CoreFoundation.framework
@@ -50,6 +51,17 @@ targets:
       - sdk: GameController.framework
       - sdk: Metal.framework
       - sdk: MetalKit.framework
+    preBuildScripts:
+      - name: Build shared Flutter UI
+        script: |
+          set -eu
+          if command -v flutter >/dev/null 2>&1; then
+            cd "${SRCROOT}/flutter"
+            flutter pub get
+            flutter build ios --config-only --no-codesign
+          else
+            echo "warning: flutter not found; run 'flutter create --platforms=ios .' in Retrofront/flutter before archiving"
+          fi
     postBuildScripts:
       - name: Copy libretro cores
         script: |
@@ -64,17 +76,11 @@ targets:
           }
 
           mkdir -p "${CORES_DST}"
+          cp -f "${SRCROOT}/target/aarch64-apple-ios/release/libretrofront_core.a" "${CORES_DST}/" 2>/dev/null || true
           if [ -d "${CORES_SRC}" ]; then
             find "${CORES_SRC}" -maxdepth 1 -type f -name '*.dylib' -print | while IFS= read -r core; do
               destination="${CORES_DST}/$(basename "${core}")"
               cp -f "${core}" "${destination}"
-              sign_core "${destination}"
-            done
-
-            find "${CORES_SRC}" -maxdepth 1 -type d -name '*.framework' -print | while IFS= read -r core; do
-              destination="${CORES_DST}/$(basename "${core}")"
-              rm -rf "${destination}"
-              ditto "${core}" "${destination}"
               sign_core "${destination}"
             done
           fi
@@ -88,7 +94,7 @@ targets:
         LIBRARY_SEARCH_PATHS: "$(inherited) $(SRCROOT)/target/aarch64-apple-ios/release"
         SWIFT_INCLUDE_PATHS: "$(SRCROOT)/apps/frontend/CRetrofrontCore"
         HEADER_SEARCH_PATHS: "$(SRCROOT)/apps/frontend/CRetrofrontCore"
-        OTHER_LDFLAGS: "$(inherited) -lc++ -ObjC"
+        OTHER_LDFLAGS: "$(inherited) -lretrofront_core -lc++ -ObjC"
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"
         DEAD_CODE_STRIPPING: "YES"
         STRIP_INSTALLED_PRODUCT: "YES"

@@ -187,12 +187,12 @@ impl Settings {
     fn apply_retroarch_defaults(&mut self, base_dir: &Path) {
         let defaults = [
             ("libretro_directory", base_dir.join("cores")),
-            ("libretro_info_path", base_dir.join("cores")),
+            ("libretro_info_path", base_dir.join("info")),
             (
                 "core_options_path",
                 base_dir.join("retroarch-core-options.cfg"),
             ),
-            ("content_directory", base_dir.join("Roms")),
+            ("content_directory", base_dir.join("downloads")),
             ("savefile_directory", base_dir.join("saves")),
             ("savestate_directory", base_dir.join("states")),
             ("system_directory", base_dir.join("system")),
@@ -436,7 +436,11 @@ mod tests {
         );
         assert_eq!(
             settings.libretro_info_path(),
-            PathBuf::from("/tmp/Retrofront/cores")
+            PathBuf::from("/tmp/Retrofront/info")
+        );
+        assert_eq!(
+            settings.content_directory(),
+            PathBuf::from("/tmp/Retrofront/downloads")
         );
     }
 }

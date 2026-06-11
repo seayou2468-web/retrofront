@@ -16,14 +16,12 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  FLUTTER_VERSION: "3.27.1"
 
 jobs:
   linux:
-    name: Linux Swift/Rust UI
+    name: Linux Flutter/Rust frontend
     runs-on: ubuntu-latest
-
-    container:
-      image: swift:6.0-jammy
 
     steps:
       - name: Checkout
@@ -32,21 +30,17 @@ jobs:
       - name: Install native dependencies
         shell: bash
         run: |
-          apt-get update
-
-          apt-get install -y \
+          sudo apt-get update
+          sudo apt-get install -y \
             clang \
-            libclang-dev \
-            make \
+            cmake \
             curl \
             file \
-            desktop-file-utils \
+            libgtk-3-dev \
+            liblzma-dev \
+            ninja-build \
             pkg-config \
-            libfontconfig1-dev \
-            libxkbcommon-dev \
-            libwayland-dev \
-            libegl1-mesa-dev \
-            libgl1-mesa-dev
+            desktop-file-utils
 
       - name: Install Rust
         shell: bash
@@ -56,8 +50,14 @@ jobs:
             -sSf \
             https://sh.rustup.rs \
             | sh -s -- -y --profile minimal --default-toolchain stable
-
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
 
       - name: Cache Cargo registry and target
         uses: actions/cache@v5
@@ -70,26 +70,31 @@ jobs:
           restore-keys: |
             linux-cargo-${{ runner.os }}-
 
-      - name: Fetch bundled frontend assets
+      - name: Fetch bundled RetroArch assets
         working-directory: Retrofront
         shell: bash
-        run: ../scripts/fetch-frontend-assets.sh apps/iOS/Resources
+        run: ../scripts/fetch-frontend-assets.sh flutter/assets/retroarch
 
-      - name: Test Linux workspace
-        working-directory: Retrofront
-        shell: bash
-        run: |
-          . "$HOME/.cargo/env"
-
-          make test
-
-      - name: Build Linux UI
+      - name: Test Rust core
         working-directory: Retrofront
         shell: bash
         run: |
           . "$HOME/.cargo/env"
+          cargo test --manifest-path Cargo.toml -p retrofront-core
 
-          make linux-ui
+      - name: Test Flutter UI
+        working-directory: Retrofront/flutter
+        shell: bash
+        run: |
+          flutter pub get
+          flutter test
+
+      - name: Build Linux Flutter UI
+        working-directory: Retrofront
+        shell: bash
+        run: |
+          . "$HOME/.cargo/env"
+          make flutter-linux
 
       - name: Download appimagetool
         working-directory: Retrofront
@@ -104,7 +109,6 @@ jobs:
         shell: bash
         run: |
           . "$HOME/.cargo/env"
-
           APPIMAGETOOL="$PWD/appimagetool-x86_64.AppImage" make linux-appimage
           file dist/Retrofront-x86_64.AppImage
 
@@ -117,12 +121,19 @@ jobs:
           compression-level: 0
 
   ios-device:
-    name: iOS Device Build
+    name: iOS Flutter Device Build
     runs-on: macos-15
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
 
       - name: Install XcodeGen
         shell: bash
@@ -140,91 +151,63 @@ jobs:
           restore-keys: |
             ios-cargo-${{ runner.os }}-
 
-      - name: Fetch bundled frontend assets
+      - name: Fetch bundled RetroArch assets
         working-directory: Retrofront
         shell: bash
-        run: ../scripts/fetch-frontend-assets.sh apps/iOS/Resources
+        run: ../scripts/fetch-frontend-assets.sh flutter/assets/retroarch
 
       - name: Install Rust iOS target
         shell: bash
         run: rustup target add aarch64-apple-ios
 
-      - name: Build Rust static library for iOS device
+      - name: Build Rust FFI core for iOS device
         working-directory: Retrofront
         shell: bash
-        env:
-          IOS_RUST_FEATURES: ios
+        run: make ios-rust
+
+      - name: Prepare Flutter iOS project files
+        working-directory: Retrofront/flutter
+        shell: bash
         run: |
-          make ios-rust
+          if [ ! -d ios ]; then
+            flutter create --platforms=ios .
+          fi
+          flutter pub get
 
       - name: Generate Xcode project
         working-directory: Retrofront
         shell: bash
-        run: |
-          make xcodegen
+        run: make xcodegen
 
       - name: Verify bundled libretro core exists
         working-directory: Retrofront
         shell: bash
-        run: |
-          test -f archifacts/ios/mgba_libretro_ios.dylib
+        run: test -f archifacts/ios/mgba_libretro_ios.dylib
 
-      - name: Build app for generic iOS device
-        working-directory: Retrofront
+      - name: Build Flutter app for generic iOS device
+        working-directory: Retrofront/flutter
         shell: bash
-        run: |
-          xcodebuild \
-            -project Retrofront.xcodeproj \
-            -scheme RetrofrontiOS \
-            -destination "generic/platform=iOS" \
-            -configuration Release \
-            CODE_SIGNING_ALLOWED=NO \
-            -derivedDataPath DerivedData \
-            build
+        run: flutter build ios --release --no-codesign
 
       - name: Create IPA
-        working-directory: Retrofront
+        working-directory: Retrofront/flutter
         shell: bash
         run: |
-          APP_PATH=$(
-            find DerivedData/Build/Products \
-              -type d \
-              -name "*.app" \
-              | head -n 1
-          )
-
-          if [ -z "$APP_PATH" ]; then
-            echo "No .app found"
-            exit 1
-          fi
-
-          echo "Found app:"
-          echo "$APP_PATH"
-
-          rm -rf Payload
-          rm -f Retrofront.ipa
-
+          APP_PATH="build/ios/iphoneos/Runner.app"
+          test -d "$APP_PATH"
+          rm -rf Payload Retrofront.ipa
           mkdir -p Payload
-
-          cp -R "$APP_PATH" Payload/
-
-          echo "Payload contents:"
-          find Payload
-
+          cp -R "$APP_PATH" Payload/Retrofront.app
+          mkdir -p Payload/Retrofront.app/Frameworks
+          cp ../archifacts/ios/*.dylib Payload/Retrofront.app/Frameworks/ 2>/dev/null || true
           zip -r Retrofront.ipa Payload
-
-          echo "IPA contents:"
           unzip -l Retrofront.ipa
-
-          test -f Payload/Retrofront.app/Frameworks/mgba_libretro_ios.dylib
-
-          ls -lah Retrofront.ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v5
         with:
           name: Retrofront-IPA
-          path: Retrofront/Retrofront.ipa
+          path: Retrofront/flutter/Retrofront.ipa
           if-no-files-found: error
           compression-level: 0
 
@@ -232,5 +215,5 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: Retrofront-APP
-          path: Retrofront/Payload/*.app
+          path: Retrofront/flutter/Payload/*.app
           if-no-files-found: warn
