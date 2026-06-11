@@ -1,4 +1,4 @@
-.PHONY: all rust flutter-test flutter-linux flutter-ios test clean linux-ui linux-appimage frontend-assets ios-rust xcodegen ios-device-build ios-info
+.PHONY: all rust flutter-test flutter-linux flutter-ios test clean linux-ui linux-appimage frontend-assets ios-rust flutter-ios-prepare xcodegen ios-device-build ios-info
 
 FLUTTER ?= flutter
 FLUTTER_DIR := flutter
@@ -22,7 +22,10 @@ test: rust
 flutter-linux: rust
 	cd $(FLUTTER_DIR) && $(FLUTTER) build linux --release
 
-flutter-ios: ios-rust frontend-assets
+flutter-ios-prepare:
+	../scripts/prepare-flutter-ios.sh
+
+flutter-ios: ios-rust frontend-assets flutter-ios-prepare
 	cd $(FLUTTER_DIR) && $(FLUTTER) build ios --release --no-codesign
 
 linux-ui: flutter-linux
@@ -39,7 +42,7 @@ ios-rust:
 xcodegen:
 	../scripts/generate-xcodeproj.sh
 
-ios-device-build: ios-rust xcodegen
+ios-device-build: ios-rust flutter-ios-prepare xcodegen
 	cd $(FLUTTER_DIR) && $(FLUTTER) build ios --release --no-codesign
 
 clean:

@@ -1,6 +1,6 @@
+#import "RetrofrontIosBridgePlugin.h"
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import <Flutter/Flutter.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 @interface RetrofrontDocumentPickerDelegate : NSObject <UIDocumentPickerDelegate>
@@ -59,49 +59,16 @@
 
 @end
 
-@interface RetrofrontDocumentPicker : NSObject
-@property(nonatomic, strong) FlutterMethodChannel *channel;
+@interface RetrofrontIosBridgePlugin ()
 @property(nonatomic, strong) RetrofrontDocumentPickerDelegate *delegate;
-- (UIViewController *)applicationRootViewController;
 @end
 
-@implementation RetrofrontDocumentPicker
+@implementation RetrofrontIosBridgePlugin
 
-+ (void)load {
-  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(applicationDidFinishLaunching:) name:UIApplicationDidFinishLaunchingNotification object:nil];
-}
-
-+ (void)applicationDidFinishLaunching:(NSNotification *)notification {
-  dispatch_async(dispatch_get_main_queue(), ^{
-    [RetrofrontDocumentPicker.shared installChannelIfNeeded];
-  });
-}
-
-+ (instancetype)shared {
-  static RetrofrontDocumentPicker *shared;
-  static dispatch_once_t onceToken;
-  dispatch_once(&onceToken, ^{
-    shared = [[RetrofrontDocumentPicker alloc] init];
-  });
-  return shared;
-}
-
-- (void)installChannelIfNeeded {
-  if (self.channel != nil) {
-    return;
-  }
-  FlutterViewController *controller = (FlutterViewController *)[self applicationRootViewController];
-  if (![controller isKindOfClass:FlutterViewController.class]) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-      [self installChannelIfNeeded];
-    });
-    return;
-  }
-  self.channel = [FlutterMethodChannel methodChannelWithName:@"retrofront/document_picker" binaryMessenger:controller.binaryMessenger];
-  __weak typeof(self) weakSelf = self;
-  [self.channel setMethodCallHandler:^(FlutterMethodCall *call, FlutterResult result) {
-    [weakSelf handleMethodCall:call result:result];
-  }];
++ (void)registerWithRegistrar:(NSObject<FlutterPluginRegistrar> *)registrar {
+  FlutterMethodChannel *channel = [FlutterMethodChannel methodChannelWithName:@"retrofront/document_picker" binaryMessenger:registrar.messenger];
+  RetrofrontIosBridgePlugin *instance = [[RetrofrontIosBridgePlugin alloc] init];
+  [registrar addMethodCallDelegate:instance channel:channel];
 }
 
 - (void)handleMethodCall:(FlutterMethodCall *)call result:(FlutterResult)result {
@@ -133,14 +100,12 @@
   [presenter presentViewController:picker animated:YES completion:nil];
 }
 
+
 - (UIViewController *)applicationRootViewController {
-  id<UIApplicationDelegate> appDelegate = UIApplication.sharedApplication.delegate;
   UIWindow *window = nil;
+  id<UIApplicationDelegate> appDelegate = UIApplication.sharedApplication.delegate;
   if ([appDelegate respondsToSelector:@selector(window)]) {
     window = [appDelegate performSelector:@selector(window)];
-  }
-  if (window == nil) {
-    window = UIApplication.sharedApplication.keyWindow;
   }
   if (window == nil) {
     for (UIWindow *candidate in UIApplication.sharedApplication.windows) {

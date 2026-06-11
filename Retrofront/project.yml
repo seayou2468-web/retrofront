@@ -53,15 +53,8 @@ targets:
         script: |
           set -eu
           if command -v flutter >/dev/null 2>&1; then
+            "${SRCROOT}/../scripts/prepare-flutter-ios.sh"
             cd "${SRCROOT}/flutter"
-            if [ ! -d ios ]; then
-              flutter create --platforms=ios -i objc .
-            fi
-            if find ios -name '*.swift' -print | grep -q .; then
-              echo "error: Swift sources in flutter/ios would force libswift*.dylib embedding. Recreate the Flutter iOS shell with: flutter create --platforms=ios -i objc ." >&2
-              exit 1
-            fi
-            flutter pub get
             flutter build ios --config-only --no-codesign
           else
             echo "warning: flutter not found; run 'flutter create --platforms=ios -i objc .' in Retrofront/flutter before archiving"

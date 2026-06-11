@@ -248,9 +248,18 @@ class RetrofrontNative implements RetrofrontFrontend {
     final executableDir = p.dirname(Platform.resolvedExecutable);
     final current = Directory.current.path;
     final bundledNativeDir = Platform.environment['RETROFRONT_BUNDLED_NATIVE_DIR'];
+    final iosBundleRoots = Platform.isIOS ? _iosBundleRoots() : const <String>[];
     final candidates = <String>[
       if (Platform.isIOS) 'libretrofront_core.dylib',
+      if (Platform.isIOS) '@rpath/libretrofront_core.dylib',
+      if (Platform.isIOS) 'Frameworks/libretrofront_core.dylib',
       if (Platform.isIOS) 'retrofront_core.framework/retrofront_core',
+      if (Platform.isIOS) '@rpath/retrofront_core.framework/retrofront_core',
+      for (final root in iosBundleRoots) ...[
+        p.join(root, 'libretrofront_core.dylib'),
+        p.join(root, 'Frameworks', 'libretrofront_core.dylib'),
+        p.join(root, 'Frameworks', 'retrofront_core.framework', 'retrofront_core'),
+      ],
       if (Platform.isIOS) p.join(executableDir, 'Frameworks', 'libretrofront_core.dylib'),
       if (Platform.isIOS) p.join(executableDir, 'Frameworks', 'retrofront_core.framework', 'retrofront_core'),
       if (Platform.isLinux) 'libretrofront_core.so',
@@ -276,6 +285,19 @@ class RetrofrontNative implements RetrofrontFrontend {
       }
     }
     return null;
+  }
+
+  static List<String> _iosBundleRoots() {
+    final roots = <String>{};
+    var cursor = Directory(p.dirname(Platform.resolvedExecutable));
+    for (var depth = 0; depth < 8; depth++) {
+      roots.add(cursor.path);
+      if (cursor.path.endsWith('.app')) break;
+      final parent = cursor.parent;
+      if (parent.path == cursor.path) break;
+      cursor = parent;
+    }
+    return roots.toList();
   }
 
   static ffi.DynamicLibrary? _openAndValidateLibrary(String candidate) {
@@ -1067,8 +1089,15 @@ class RetrofrontNative implements RetrofrontFrontend {
     final executableDir = p.dirname(Platform.resolvedExecutable);
     final root = _retroArchRoot?.path;
     final envCoreDir = Platform.environment['RETROFRONT_BUNDLED_CORE_DIR'];
+    final iosBundleRoots = Platform.isIOS ? _iosBundleRoots() : const <String>[];
     return <String>{
       if (envCoreDir != null && envCoreDir.isNotEmpty) envCoreDir,
+      for (final bundleRoot in iosBundleRoots) ...[
+        p.join(bundleRoot, 'dylibs'),
+        p.join(bundleRoot, 'Resources', 'dylibs'),
+        p.join(bundleRoot, 'Frameworks'),
+        bundleRoot,
+      ],
       if (Platform.isIOS) p.join(executableDir, 'dylibs'),
       if (Platform.isIOS) p.join(executableDir, 'Resources', 'dylibs'),
       if (Platform.isIOS) p.join(executableDir, 'Frameworks'),

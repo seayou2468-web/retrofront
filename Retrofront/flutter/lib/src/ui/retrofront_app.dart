@@ -806,8 +806,8 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
     }
     if (!mounted) return;
     setState(() => _selectedGame = importedGames.isNotEmpty ? importedGames.first : _selectedGame);
-    if (importedGames.length == 1) {
-      await _launchGame(importedGames.single);
+    if (importedGames.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${importedGames.length}件のROMをインポートしました。プレイボタンで起動します。')));
     }
   }
 
