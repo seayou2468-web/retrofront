@@ -14,9 +14,9 @@ cargo build \
   -p retrofront-core \
   --target "$TARGET"
 
-CORE_LIB="$PROFILE_DIR/libretrofront_core.a"
+CORE_LIB="$PROFILE_DIR/libretrofront_core.dylib"
 if [[ ! -f "$CORE_LIB" ]]; then
-  echo "Missing expected Rust FFI static library: $CORE_LIB" >&2
+  echo "Missing expected Rust FFI dynamic library: $CORE_LIB" >&2
   exit 1
 fi
 
@@ -37,7 +37,7 @@ if [[ -n "$STRIP_TOOL" ]]; then
   fi
 fi
 
-printf 'Built %s (%s)\n' "$CORE_LIB" "$(du -h "$CORE_LIB" | awk '{print $1}')"
+printf 'Built dynamic FFI library %s (%s)\n' "$CORE_LIB" "$(du -h "$CORE_LIB" | awk '{print $1}')"
 printf 'Largest iOS core artifacts (kept, not filtered):\n'
 if [[ -d "$ROOT_DIR/archifacts/ios" ]]; then
   find "$ROOT_DIR/archifacts/ios" -maxdepth 1 \( -name '*.dylib' -o -name '*.framework' \) -print0 \

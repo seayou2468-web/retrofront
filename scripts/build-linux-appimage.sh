@@ -37,6 +37,7 @@ cat > "${APPDIR}/AppRun" <<'APPRUN'
 HERE="$(dirname "$(readlink -f "$0")")"
 export RETROFRONT_BUNDLED_CORE_DIR="${HERE}/usr/lib/retrofront/cores"
 export RETROFRONT_BUNDLED_ASSET_DIR="${HERE}/usr/share/retrofront/assets"
+export RETROFRONT_BUNDLED_NATIVE_DIR="${HERE}/usr/lib/retrofront/native"
 export LD_LIBRARY_PATH="${HERE}/usr/lib/retrofront/native:${HERE}/usr/bin/lib:${LD_LIBRARY_PATH:-}"
 exec "${HERE}/usr/bin/retrofront" "$@"
 APPRUN

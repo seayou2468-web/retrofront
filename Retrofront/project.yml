@@ -29,7 +29,7 @@ targets:
         DEAD_CODE_STRIPPING: "YES"
         STRIP_INSTALLED_PRODUCT: "YES"
     dependencies:
-      - framework: target/aarch64-apple-ios/release/libretrofront_core.a
+      - framework: target/aarch64-apple-ios/release/libretrofront_core.dylib
         embed: false
   RetrofrontiOS:
     type: application
@@ -76,7 +76,10 @@ targets:
           }
 
           mkdir -p "${CORES_DST}"
-          cp -f "${SRCROOT}/target/aarch64-apple-ios/release/libretrofront_core.a" "${CORES_DST}/" 2>/dev/null || true
+          if [ -f "${SRCROOT}/target/aarch64-apple-ios/release/libretrofront_core.dylib" ]; then
+            cp -f "${SRCROOT}/target/aarch64-apple-ios/release/libretrofront_core.dylib" "${CORES_DST}/"
+            sign_core "${CORES_DST}/libretrofront_core.dylib"
+          fi
           if [ -d "${CORES_SRC}" ]; then
             find "${CORES_SRC}" -maxdepth 1 -type f -name '*.dylib' -print | while IFS= read -r core; do
               destination="${CORES_DST}/$(basename "${core}")"
@@ -94,7 +97,7 @@ targets:
         LIBRARY_SEARCH_PATHS: "$(inherited) $(SRCROOT)/target/aarch64-apple-ios/release"
         SWIFT_INCLUDE_PATHS: "$(SRCROOT)/apps/frontend/CRetrofrontCore"
         HEADER_SEARCH_PATHS: "$(SRCROOT)/apps/frontend/CRetrofrontCore"
-        OTHER_LDFLAGS: "$(inherited) -lretrofront_core -lc++ -ObjC"
+        OTHER_LDFLAGS: "$(inherited) -lc++ -ObjC"
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"
         DEAD_CODE_STRIPPING: "YES"
         STRIP_INSTALLED_PRODUCT: "YES"
