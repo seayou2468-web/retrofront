@@ -382,7 +382,11 @@ impl MenuEngine {
             .as_ref()
             .map(|status| match status.backend {
                 GfxBackendKind::Software => "software",
-                GfxBackendKind::Bgfx => "bgfx",
+                GfxBackendKind::Wgpu => "wgpu",
+                GfxBackendKind::Metal => "wgpu-metal",
+                GfxBackendKind::OpenGl => "wgpu-opengl",
+                GfxBackendKind::Vulkan => "wgpu-vulkan",
+                GfxBackendKind::MoltenVk => "wgpu-moltenvk",
             })
             .unwrap_or("not rendered yet");
         let content = game_info

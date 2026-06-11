@@ -1,6 +1,6 @@
+import Adwaita
 import Foundation
 import RetrofrontSwift
-import CGtk
 
 final class LinuxRetrofrontRuntime {
   let frontend: Retrofront
@@ -33,9 +33,6 @@ final class LinuxRetrofrontRuntime {
     }.joined(separator: "\n") ?? "No menu entries"
 
     return """
-    Retrofront Linux GTK
-    ====================
-
     State: \(frontend.state)
     RetroArch root: \(layout.root.path)
     Config: \(layout.configFile.path)
@@ -48,7 +45,8 @@ final class LinuxRetrofrontRuntime {
   }
 }
 
-final class GtkDashboard {
+@MainActor
+final class AdwaitaDashboard {
   private let runtime: LinuxRetrofrontRuntime
 
   init(runtime: LinuxRetrofrontRuntime) {
@@ -56,47 +54,60 @@ final class GtkDashboard {
   }
 
   func run() {
-    gtk_init(nil, nil)
+    let app = Application(id: "com.retrofront.linux")
+    app.onActivate { [runtime] in
+      let window = ApplicationWindow(application: app)
+      window.title = "Retrofront"
+      window.defaultWidth = 980
+      window.defaultHeight = 680
 
-    let window = rf_gtk_window_new()
-    rf_gtk_window_set_title(window, "Retrofront")
-    rf_gtk_window_set_default_size(window, 920, 640)
-    rf_gtk_window_quit_on_destroy(window)
+      let toolbar = ToolbarView()
+      toolbar.addTopBar(HeaderBar())
 
-    let box = rf_gtk_box_new_vertical(0)
-    rf_gtk_container_add(window, box)
+      let content = Box(orientation: .vertical, spacing: 16)
+      content.setMargins(24)
 
-    let title = gtk_label_new("Retrofront")
-    gtk_widget_set_margin_top(title, 18)
-    gtk_widget_set_margin_bottom(title, 8)
-    rf_gtk_label_set_xalign(title, 0.0)
-    rf_gtk_box_pack_start(box, title, 0, 0, 0)
+      let title = Label("Retrofront")
+        .cssClass(.title1)
+        .halign(.start)
+      content.append(title)
 
-    let subtitle = gtk_label_new("GTK shell using the shared Swift/Rust frontend runtime")
-    gtk_widget_set_margin_bottom(subtitle, 12)
-    rf_gtk_label_set_xalign(subtitle, 0.0)
-    rf_gtk_box_pack_start(box, subtitle, 0, 0, 0)
+      let subtitle = Label("Swift Adwaita shell using the shared Swift/Rust runtime")
+        .cssClass(.caption)
+        .halign(.start)
+      content.append(subtitle)
 
-    let textView = gtk_text_view_new()
-    rf_gtk_text_view_set_editable(textView, 0)
-    rf_gtk_text_view_set_cursor_visible(textView, 0)
-    if let buffer = rf_gtk_text_view_get_buffer(textView) {
-      gtk_text_buffer_set_text(buffer, runtime.dashboardText, -1)
+      let scroller = ScrolledWindow()
+      let body = TextView()
+      body.text = runtime.dashboardText
+      body.editable = false
+      body.cursorVisible = false
+      body.monospace = true
+      body.wrapMode = GTK_WRAP_WORD_CHAR
+      body.hexpand()
+      body.vexpand()
+      scroller.child = body
+      scroller.hexpand()
+      scroller.vexpand()
+      content.append(scroller)
+
+      toolbar.setContent(content)
+      window.setContent(toolbar)
+      window.present()
     }
-
-    let scroller = gtk_scrolled_window_new(nil, nil)
-    rf_gtk_container_add(scroller, textView)
-    rf_gtk_box_pack_start(box, scroller, 1, 1, 0)
-
-    gtk_widget_show_all(window)
-    gtk_main()
+    app.run()
   }
 }
 
-do {
-  let runtime = try LinuxRetrofrontRuntime()
-  GtkDashboard(runtime: runtime).run()
-} catch {
-  fputs("retrofront-linux: \(error)\n", stderr)
-  exit(1)
+@MainActor
+func main() {
+  do {
+    let runtime = try LinuxRetrofrontRuntime()
+    AdwaitaDashboard(runtime: runtime).run()
+  } catch {
+    FileHandle.standardError.write(Data("retrofront-linux: \(error)\n".utf8))
+    exit(1)
+  }
 }
+
+main()

@@ -1,4 +1,4 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.1
 import PackageDescription
 import Foundation
 
@@ -8,12 +8,15 @@ let rustReleasePath = "\(packageRoot)/target/release"
 let package = Package(
   name: "Retrofront",
   platforms: [
-    .iOS(.v15),
+    .iOS(.v18),
     .macOS(.v13),
   ],
   products: [
     .library(name: "RetrofrontSwift", targets: ["RetrofrontSwift"]),
     .executable(name: "retrofront-linux", targets: ["RetrofrontLinux"]),
+  ],
+  dependencies: [
+    .package(url: "https://github.com/makoni/swift-adwaita.git", .upToNextMinor(from: "1.1.0")),
   ],
   targets: [
     .target(
@@ -30,18 +33,9 @@ let package = Package(
         .linkedLibrary("retrofront_core"),
       ]
     ),
-    .systemLibrary(
-      name: "CGtk",
-      path: "apps/linux/CGtk",
-      pkgConfig: "gtk+-3.0",
-      providers: [
-        .apt(["libgtk-3-dev"]),
-        .brew(["gtk+3"]),
-      ]
-    ),
     .executableTarget(
       name: "RetrofrontLinux",
-      dependencies: ["RetrofrontSwift", "CGtk"],
+      dependencies: ["RetrofrontSwift", .product(name: "Adwaita", package: "swift-adwaita")],
       path: "apps/linux/Sources"
     ),
     .testTarget(

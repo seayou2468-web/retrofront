@@ -49,9 +49,13 @@ public enum JoypadButton: UInt32, CaseIterable, Sendable {
   case r3 = 15
 }
 
-public enum GfxBackend: UInt32, Equatable, Sendable {
+public enum GfxBackend: UInt32, Equatable, Sendable, CaseIterable {
   case software = 0
-  case bgfx = 1
+  case wgpu = 1
+  case metal = 2
+  case openGL = 3
+  case vulkan = 4
+  case moltenVK = 5
 }
 
 public enum GfxScaleMode: UInt32, Equatable, Sendable {

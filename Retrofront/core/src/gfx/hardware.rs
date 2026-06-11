@@ -6,8 +6,25 @@ use std::os::raw::{c_char, c_void};
 pub enum GfxBackendKind {
     /// CPU-backed path. Always available and used as compatibility fallback.
     Software = 0,
-    /// bgfx-backed path. Supports OpenGL, Vulkan, Metal, etc.
-    Bgfx = 1,
+    /// Automatic wgpu path. The host chooses the best available adapter/backend.
+    Wgpu = 1,
+    /// wgpu using Metal where available.
+    Metal = 2,
+    /// wgpu using OpenGL/OpenGL ES where available.
+    OpenGl = 3,
+    /// wgpu using Vulkan where available.
+    Vulkan = 4,
+    /// wgpu using Vulkan over MoltenVK on Apple platforms.
+    MoltenVk = 5,
+}
+
+impl GfxBackendKind {
+    pub fn is_wgpu_family(self) -> bool {
+        matches!(
+            self,
+            Self::Wgpu | Self::Metal | Self::OpenGl | Self::Vulkan | Self::MoltenVk
+        )
+    }
 }
 
 /// Information captured from `RETRO_ENVIRONMENT_SET_HW_RENDER`.
@@ -66,7 +83,7 @@ impl HardwareRenderRequest {
     pub fn preferred_backend(self) -> GfxBackendKind {
         match self.context_type {
             value if value == libretro::retro_hw_context_type_RETRO_HW_CONTEXT_VULKAN => {
-                GfxBackendKind::Bgfx
+                GfxBackendKind::Vulkan
             }
             value
                 if value == libretro::retro_hw_context_type_RETRO_HW_CONTEXT_OPENGL
@@ -76,17 +93,17 @@ impl HardwareRenderRequest {
                     || value
                         == libretro::retro_hw_context_type_RETRO_HW_CONTEXT_OPENGLES_VERSION =>
             {
-                GfxBackendKind::Bgfx
+                GfxBackendKind::OpenGl
             }
             _ => GfxBackendKind::Software,
         }
     }
 }
 
-/// Immutable command sent to the native bgfx renderer.
+/// Immutable command sent to the native wgpu renderer.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct BgfxRenderCommand {
+pub struct WgpuRenderCommand {
     pub native_view: u64,
     pub context: u64,
     pub framebuffer: usize,
@@ -102,8 +119,8 @@ pub struct BgfxRenderCommand {
     pub clear_color: [f32; 4],
 }
 
-pub type BgfxRenderCallback = unsafe extern "C" fn(
-    command: *const BgfxRenderCommand,
+pub type WgpuRenderCallback = unsafe extern "C" fn(
+    command: *const WgpuRenderCommand,
     rgba: *const u8,
     rgba_len: usize,
     user_data: *mut c_void,
@@ -120,7 +137,7 @@ pub struct HostRenderHandles {
     pub native_view: u64,
     pub context: u64,
     pub framebuffer: usize,
-    pub render_callback: Option<BgfxRenderCallback>,
+    pub render_callback: Option<WgpuRenderCallback>,
     pub get_proc_address: Option<GetProcAddressCallback>,
     pub user_data: *mut c_void,
 }

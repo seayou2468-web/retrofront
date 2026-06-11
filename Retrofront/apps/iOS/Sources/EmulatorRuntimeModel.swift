@@ -844,9 +844,16 @@ public final class EmulatorRuntimeModel: ObservableObject {
 
   private func applyRendererSetting(_ frontend: Retrofront) {
     let value = frontend.setting("video_driver") ?? "metal"
-    let backend: GfxBackend = value == "software" ? .software : .bgfx
+    let backend: GfxBackend = switch value.lowercased() {
+    case "software": .software
+    case "opengl", "gl", "gles", "opengles": .openGL
+    case "vulkan", "vulkn": .vulkan
+    case "moltenvk": .moltenVK
+    case "metal": .metal
+    default: .wgpu
+    }
     try? frontend.setGfxBackend(backend)
-    try? frontend.setSetting(key: "video_bgfx_renderer", value: value == "software" ? "metal" : value)
+    try? frontend.setSetting(key: "video_wgpu_renderer", value: value == "software" ? "metal" : value)
   }
 
   public func setOption(key: String, value: String) {

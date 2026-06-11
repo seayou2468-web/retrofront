@@ -260,7 +260,7 @@ impl Settings {
             ),
             ("dynamic_wallpapers_directory", base_dir.join("wallpapers")),
             ("video_driver", PathBuf::from("metal")),
-            ("video_bgfx_renderer", PathBuf::from("metal")),
+            ("video_wgpu_renderer", PathBuf::from("metal")),
             ("audio_driver", PathBuf::from("swift")),
             ("input_driver", PathBuf::from("swift")),
             ("menu_driver", PathBuf::from("oneui")),

@@ -52,9 +52,10 @@ impl ContextDriver {
 
     pub fn hardware_ready(&self) -> bool {
         self.request
-            .map(|request| match request.preferred_backend() {
-                GfxBackendKind::Software => true,
-                GfxBackendKind::Bgfx => self.handles.is_valid(),
+            .map(|request| {
+                let backend = request.preferred_backend();
+                backend == GfxBackendKind::Software
+                    || (backend.is_wgpu_family() && self.handles.is_valid())
             })
             .unwrap_or(false)
     }

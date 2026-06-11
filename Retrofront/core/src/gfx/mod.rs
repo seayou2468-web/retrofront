@@ -7,12 +7,12 @@ pub mod hardware;
 use crate::libretro;
 pub use config::{GfxFilterMode, GfxScaleMode, GfxVideoConfig};
 pub use context::ContextDriver;
-pub use drivers::bgfx::{BgfxDrawCall, BgfxDriver};
 use drivers::software::SoftwareDriver;
+pub use drivers::wgpu::{WgpuDrawCall, WgpuDriver};
 pub use drivers::{DriverFrame, GfxDriver, PresentStatus};
 pub use frame::{PixelFormat, VideoFrame};
 pub use hardware::{
-    BgfxRenderCommand, GfxBackendKind, HardwareFrame, HardwareRenderRequest, HostRenderHandles,
+    GfxBackendKind, HardwareFrame, HardwareRenderRequest, HostRenderHandles, WgpuRenderCommand,
 };
 
 pub const CLEAR_COLOR_RGBA: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
@@ -27,7 +27,7 @@ pub struct GfxStatus {
 pub struct GfxRuntime {
     backend: GfxBackendKind,
     pub software: SoftwareDriver,
-    pub bgfx: BgfxDriver,
+    pub wgpu: WgpuDriver,
     pub context: ContextDriver,
     pixel_format: PixelFormat,
     video_config: GfxVideoConfig,
@@ -39,7 +39,7 @@ impl GfxRuntime {
         Self {
             backend: GfxBackendKind::Software,
             software: SoftwareDriver::default(),
-            bgfx: BgfxDriver::default(),
+            wgpu: WgpuDriver::default(),
             context: ContextDriver::new(),
             pixel_format: PixelFormat::ZeroRgb1555,
             video_config: GfxVideoConfig::default(),
@@ -66,12 +66,12 @@ impl GfxRuntime {
     pub fn set_video_config(&mut self, config: GfxVideoConfig) {
         self.video_config = config;
         self.software.set_video_config(config);
-        self.bgfx.set_video_config(config);
+        self.wgpu.set_video_config(config);
     }
 
     pub fn set_host_handles(&mut self, handles: HostRenderHandles) {
         self.context.set_handles(handles);
-        self.bgfx.configure(&self.context);
+        self.wgpu.configure(&self.context);
         self.status.hardware_ready = self.context.hardware_ready();
     }
 
@@ -94,7 +94,7 @@ impl GfxRuntime {
     ) -> Result<VideoFrame, String> {
         let frame =
             frame::convert_frame_to_rgba(data.cast(), width, height, pitch, self.pixel_format)?;
-        let status = if self.backend == GfxBackendKind::Bgfx && !self.context.handles().is_valid() {
+        let status = if self.backend.is_wgpu_family() && !self.context.handles().is_valid() {
             self.software
                 .present(&DriverFrame::Software(frame.clone()))?
         } else {
@@ -132,8 +132,8 @@ impl GfxRuntime {
         }
     }
 
-    pub fn bgfx_draw_call(&self) -> Option<&BgfxDrawCall> {
-        self.bgfx.last_draw_call()
+    pub fn wgpu_draw_call(&self) -> Option<&WgpuDrawCall> {
+        self.wgpu.last_draw_call()
     }
 
     pub fn context_handles(&self) -> HostRenderHandles {
@@ -155,17 +155,11 @@ impl GfxRuntime {
         self.status.frame_counter
     }
 
-    fn driver(&self) -> &dyn GfxDriver {
-        match self.backend {
-            GfxBackendKind::Software => &self.software,
-            GfxBackendKind::Bgfx => &self.bgfx,
-        }
-    }
-
     fn driver_mut(&mut self) -> &mut dyn GfxDriver {
-        match self.backend {
-            GfxBackendKind::Software => &mut self.software,
-            GfxBackendKind::Bgfx => &mut self.bgfx,
+        if self.backend.is_wgpu_family() {
+            &mut self.wgpu
+        } else {
+            &mut self.software
         }
     }
 }
@@ -174,7 +168,11 @@ impl GfxBackendKind {
     pub fn from_code(code: u32) -> Option<Self> {
         match code {
             0 => Some(Self::Software),
-            1 => Some(Self::Bgfx),
+            1 => Some(Self::Wgpu),
+            2 => Some(Self::Metal),
+            3 => Some(Self::OpenGl),
+            4 => Some(Self::Vulkan),
+            5 => Some(Self::MoltenVk),
             _ => None,
         }
     }
@@ -184,8 +182,8 @@ impl GfxBackendKind {
 mod tests {
     use super::*;
 
-    unsafe extern "C" fn test_bgfx_render(
-        command: *const BgfxRenderCommand,
+    unsafe extern "C" fn test_wgpu_render(
+        command: *const WgpuRenderCommand,
         _rgba: *const u8,
         _rgba_len: usize,
         _user_data: *mut std::os::raw::c_void,
@@ -193,8 +191,8 @@ mod tests {
         !command.is_null()
     }
 
-    unsafe extern "C" fn counting_bgfx_render(
-        command: *const BgfxRenderCommand,
+    unsafe extern "C" fn counting_wgpu_render(
+        command: *const WgpuRenderCommand,
         _rgba: *const u8,
         rgba_len: usize,
         user_data: *mut std::os::raw::c_void,
@@ -227,31 +225,35 @@ mod tests {
     #[test]
     fn backend_codes_are_stable() {
         assert_eq!(GfxBackendKind::from_code(0), Some(GfxBackendKind::Software));
-        assert_eq!(GfxBackendKind::from_code(1), Some(GfxBackendKind::Bgfx));
+        assert_eq!(GfxBackendKind::from_code(1), Some(GfxBackendKind::Wgpu));
+        assert_eq!(GfxBackendKind::from_code(2), Some(GfxBackendKind::Metal));
+        assert_eq!(GfxBackendKind::from_code(3), Some(GfxBackendKind::OpenGl));
+        assert_eq!(GfxBackendKind::from_code(4), Some(GfxBackendKind::Vulkan));
+        assert_eq!(GfxBackendKind::from_code(5), Some(GfxBackendKind::MoltenVk));
         assert_eq!(GfxBackendKind::from_code(99), None);
     }
 
     #[test]
-    fn bgfx_hardware_frame_builds_draw_call() {
+    fn wgpu_hardware_frame_builds_draw_call() {
         let mut gfx = GfxRuntime::new();
         gfx.set_hardware_render_request(HardwareRenderRequest::opengles(3, 0));
         gfx.set_host_handles(HostRenderHandles {
             native_view: 7,
             context: 9,
             framebuffer: 13,
-            render_callback: Some(test_bgfx_render),
+            render_callback: Some(test_wgpu_render),
             ..HostRenderHandles::default()
         });
         gfx.ingest_hardware_frame(320, 240).expect("hardware frame");
-        let call = gfx.bgfx_draw_call().expect("draw call");
+        let call = gfx.wgpu_draw_call().expect("draw call");
         assert_eq!(call.viewport, [0, 0, 320, 240]);
         assert_eq!(call.framebuffer, 13);
     }
 
     #[test]
-    fn bgfx_without_host_handles_falls_back_to_software_frames() {
+    fn wgpu_without_host_handles_falls_back_to_software_frames() {
         let mut gfx = GfxRuntime::new();
-        gfx.set_backend(GfxBackendKind::Bgfx);
+        gfx.set_backend(GfxBackendKind::Wgpu);
         gfx.set_pixel_format(PixelFormat::Xrgb8888);
         let pixel = 0x0012_3456u32.to_ne_bytes();
         gfx.ingest_software_frame(pixel.as_ptr().cast(), 1, 1, 4)
@@ -262,30 +264,30 @@ mod tests {
     }
 
     #[test]
-    fn bgfx_software_frame_invokes_host_renderer_with_rgba() {
+    fn wgpu_software_frame_invokes_host_renderer_with_rgba() {
         let mut gfx = GfxRuntime::new();
         let mut uploaded_len = 0usize;
-        gfx.set_backend(GfxBackendKind::Bgfx);
+        gfx.set_backend(GfxBackendKind::Wgpu);
         gfx.set_host_handles(HostRenderHandles {
             native_view: 1,
             context: 2,
             framebuffer: 3,
-            render_callback: Some(counting_bgfx_render),
+            render_callback: Some(counting_wgpu_render),
             user_data: (&mut uploaded_len as *mut usize).cast(),
             ..HostRenderHandles::default()
         });
         gfx.set_pixel_format(PixelFormat::Xrgb8888);
         let pixel = 0x0012_3456u32.to_ne_bytes();
         gfx.ingest_software_frame(pixel.as_ptr().cast(), 1, 1, 4)
-            .expect("bgfx software upload");
+            .expect("wgpu software upload");
         assert_eq!(uploaded_len, 4);
-        assert_eq!(gfx.bgfx_draw_call().expect("draw call").framebuffer, 3);
+        assert_eq!(gfx.wgpu_draw_call().expect("draw call").framebuffer, 3);
     }
 
     #[test]
-    fn video_config_controls_bgfx_viewport_and_sampling() {
+    fn video_config_controls_wgpu_viewport_and_sampling() {
         let mut gfx = GfxRuntime::new();
-        gfx.set_backend(GfxBackendKind::Bgfx);
+        gfx.set_backend(GfxBackendKind::Wgpu);
         gfx.set_video_config(GfxVideoConfig {
             output_width: 1280,
             output_height: 720,
@@ -299,14 +301,14 @@ mod tests {
             native_view: 1,
             context: 2,
             framebuffer: 3,
-            render_callback: Some(test_bgfx_render),
+            render_callback: Some(test_wgpu_render),
             ..HostRenderHandles::default()
         });
         gfx.set_pixel_format(PixelFormat::Xrgb8888);
         let pixels = vec![0u8; 320 * 240 * 4];
         gfx.ingest_software_frame(pixels.as_ptr().cast(), 320, 240, 320 * 4)
-            .expect("bgfx configured render");
-        let call = gfx.bgfx_draw_call().expect("draw call");
+            .expect("wgpu configured render");
+        let call = gfx.wgpu_draw_call().expect("draw call");
         assert_eq!(call.output_size, [1280, 720]);
         assert_eq!(call.viewport, [160, 0, 960, 720]);
         assert_eq!(call.rotation_quarters, 1);

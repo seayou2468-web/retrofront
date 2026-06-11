@@ -34,7 +34,7 @@ typedef struct RfVideoFrameInfo {
     uint64_t frame_number;
 } RfVideoFrameInfo;
 
-typedef struct RfBgfxRenderCommand {
+typedef struct RfWgpuRenderCommand {
     uint64_t native_view;
     uint64_t context;
     uintptr_t framebuffer;
@@ -48,9 +48,9 @@ typedef struct RfBgfxRenderCommand {
     uint32_t filter_mode;
     bool vsync;
     float clear_color[4];
-} RfBgfxRenderCommand;
+} RfWgpuRenderCommand;
 
-typedef bool (*RfBgfxRenderCallback)(const RfBgfxRenderCommand *command, const uint8_t *rgba, uintptr_t rgba_len, void *user_data);
+typedef bool (*RfWgpuRenderCallback)(const RfWgpuRenderCommand *command, const uint8_t *rgba, uintptr_t rgba_len, void *user_data);
 typedef void (*RfRetroProcAddress)(void);
 typedef RfRetroProcAddress (*RfGetProcAddressCallback)(const char *symbol, void *user_data);
 
@@ -72,7 +72,7 @@ typedef struct RfGfxHostHandles {
     uint64_t native_view;
     uint64_t context;
     uintptr_t framebuffer;
-    RfBgfxRenderCallback render_callback;
+    RfWgpuRenderCallback render_callback;
     RfGetProcAddressCallback get_proc_address;
     void *user_data;
 } RfGfxHostHandles;

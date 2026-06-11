@@ -11,7 +11,7 @@ The emulator/game cores are libretro cores. Retrofront is a single project: Rust
 - `frontend/CRetrofrontCore/` — C header/module map for Swift ↔ Rust FFI.
 - `frontend/Sources/RetrofrontSwift/` — Swift wrapper API for UI code.
 - `apps/iOS/Sources/` — iOS SwiftUI app only.
-- `apps/linux/Sources/` — Linux GTK app only; it is GUI-first and shares the same Swift/Rust runtime as iOS.
+- `apps/linux/Sources/` — Linux Swift Adwaita app only; it is GUI-first and shares the same Swift/Rust runtime as iOS.
 - `docs/ARCHITECTURE.md` — architecture and platform notes.
 
 ## Build and test
@@ -43,7 +43,7 @@ make ios-device-build
 
 ## Linux UI
 
-The Linux target is a GTK application, not a CLI smoke test. Install GTK 3 development files first (for example `apt install libgtk-3-dev`), then build and launch the GUI:
+The Linux target is a Swift Adwaita application, not a CLI smoke test. Install libadwaita development files first (for example `apt install libadwaita-1-dev libgtksourceview-5-dev`), then build and launch the GUI:
 
 ```sh
 cd Retrofront

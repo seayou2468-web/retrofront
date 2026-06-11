@@ -2,12 +2,12 @@ use super::{DriverFrame, GfxDriver, PresentStatus};
 use crate::gfx::config::GfxVideoConfig;
 use crate::gfx::context::ContextDriver;
 use crate::gfx::frame::VideoFrame;
-use crate::gfx::hardware::{BgfxRenderCommand, GfxBackendKind, HostRenderHandles};
+use crate::gfx::hardware::{GfxBackendKind, HostRenderHandles, WgpuRenderCommand};
 use crate::gfx::CLEAR_COLOR_RGBA;
 use std::ptr;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BgfxDrawCall {
+pub struct WgpuDrawCall {
     pub viewport: [i32; 4],
     pub output_size: [u32; 2],
     pub texture_size: [u32; 2],
@@ -20,19 +20,19 @@ pub struct BgfxDrawCall {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct BgfxDriver {
+pub struct WgpuDriver {
     handles: HostRenderHandles,
-    last_draw_call: Option<BgfxDrawCall>,
+    last_draw_call: Option<WgpuDrawCall>,
     video_config: GfxVideoConfig,
     initialized: bool,
 }
 
-impl BgfxDriver {
+impl WgpuDriver {
     pub fn configure(&mut self, context: &ContextDriver) {
         self.handles = context.handles();
     }
 
-    pub fn last_draw_call(&self) -> Option<&BgfxDrawCall> {
+    pub fn last_draw_call(&self) -> Option<&WgpuDrawCall> {
         self.last_draw_call.as_ref()
     }
 
@@ -46,11 +46,11 @@ impl BgfxDriver {
         height: u32,
         bottom_left_origin: bool,
         source_is_hardware: bool,
-    ) -> Result<BgfxDrawCall, String> {
+    ) -> Result<WgpuDrawCall, String> {
         if !self.handles.is_valid() {
-            return Err("bgfx backend requires valid host handles".into());
+            return Err("wgpu backend requires valid host handles".into());
         }
-        Ok(BgfxDrawCall {
+        Ok(WgpuDrawCall {
             viewport: self.video_config.viewport(width, height),
             output_size: self.video_config.output_size(width, height),
             texture_size: [width, height],
@@ -63,13 +63,13 @@ impl BgfxDriver {
         })
     }
 
-    fn execute(&self, call: &BgfxDrawCall, rgba: Option<&[u8]>) -> Result<(), String> {
+    fn execute(&self, call: &WgpuDrawCall, rgba: Option<&[u8]>) -> Result<(), String> {
         let callback = self
             .handles
             .render_callback
-            .ok_or_else(|| "bgfx render callback was not configured".to_string())?;
+            .ok_or_else(|| "wgpu render callback was not configured".to_string())?;
 
-        let command = BgfxRenderCommand {
+        let command = WgpuRenderCommand {
             native_view: call.native_view,
             context: call.context,
             framebuffer: call.framebuffer,
@@ -90,14 +90,14 @@ impl BgfxDriver {
         if rendered {
             Ok(())
         } else {
-            Err("bgfx render callback reported failure".into())
+            Err("wgpu render callback reported failure".into())
         }
     }
 }
 
-impl GfxDriver for BgfxDriver {
+impl GfxDriver for WgpuDriver {
     fn name(&self) -> &'static str {
-        "bgfx-host"
+        "wgpu-host"
     }
     fn init(&mut self, context: &ContextDriver, _bootstrap_frame: &VideoFrame) {
         self.configure(context);
@@ -134,10 +134,10 @@ impl GfxDriver for BgfxDriver {
         self.execute(&call, rgba)?;
         self.last_draw_call = Some(call);
         Ok(PresentStatus {
-            backend: GfxBackendKind::Bgfx,
+            backend: GfxBackendKind::Wgpu,
             frame_number,
             rendered: true,
-            details: format!("bgfx rendered {width}x{height} through host callback"),
+            details: format!("wgpu rendered {width}x{height} through host callback"),
         })
     }
     fn destroy(&mut self) {
