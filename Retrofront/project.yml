@@ -48,7 +48,8 @@ targets:
       - sdk: AudioToolbox.framework
       - sdk: AVFoundation.framework
       - sdk: GameController.framework
-        weak: true
+      - sdk: Metal.framework
+      - sdk: MetalKit.framework
     postBuildScripts:
       - name: Copy libretro cores
         script: |
@@ -87,7 +88,7 @@ targets:
         LIBRARY_SEARCH_PATHS: "$(inherited) $(SRCROOT)/target/aarch64-apple-ios/release"
         SWIFT_INCLUDE_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
         HEADER_SEARCH_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
-        OTHER_LDFLAGS: "$(inherited) -lretrofront_ui -lc++ -ObjC"
+        OTHER_LDFLAGS: "$(inherited) -lc++ -ObjC"
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"
         DEAD_CODE_STRIPPING: "YES"
         STRIP_INSTALLED_PRODUCT: "YES"
