@@ -17,10 +17,9 @@ path = "src/main.rs"
 [features]
 default = ["desktop"]
 desktop = ["slint/backend-winit", "slint/renderer-femtovg"]
-# iOS uses the native SwiftUI shell and links retrofront-core directly. Keeping
-# Slint out of the iOS target avoids the winit/Skia staticlib size spike and the
-# empty-backend startup failure that occurred when this feature had no backend.
-ios = []
+# iOS runs the same Slint shell as Linux. The software renderer keeps the
+# app independent from GLKit/OpenGL while winit provides the native iOS event loop.
+ios = ["slint/backend-winit", "slint/renderer-software"]
 
 [dependencies]
 retrofront-core = { path = "../core" }

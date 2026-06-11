@@ -38,5 +38,5 @@ clean:
 #   rustup target add aarch64-apple-ios
 #   make ios-info IOS_TARGET=aarch64-apple-ios
 ios-info:
-	@echo "Build iOS Slint UI with: cargo build --manifest-path Cargo.toml --release -p retrofront-ui --lib --target $${IOS_TARGET:-aarch64-apple-ios}"
+	@echo "Build iOS Slint UI with: cargo build --manifest-path Cargo.toml --release -p retrofront-ui --lib --target $${IOS_TARGET:-aarch64-apple-ios} --features ios --no-default-features"
 	@echo "Then link libretrofront_ui.a into the iOS app target; SwiftUI is not used."

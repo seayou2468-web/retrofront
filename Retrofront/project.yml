@@ -37,7 +37,7 @@ targets:
       - path: apps/iOS/Sources
       - path: apps/iOS/Resources
     dependencies:
-      - framework: target/aarch64-apple-ios/release/libretrofront_core.a
+      - framework: target/aarch64-apple-ios/release/libretrofront_ui.a
         embed: false
       - sdk: UIKit.framework
       - sdk: Foundation.framework
@@ -87,7 +87,7 @@ targets:
         LIBRARY_SEARCH_PATHS: "$(inherited) $(SRCROOT)/target/aarch64-apple-ios/release"
         SWIFT_INCLUDE_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
         HEADER_SEARCH_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
-        OTHER_LDFLAGS: "$(inherited) -lretrofront_core -ObjC"
+        OTHER_LDFLAGS: "$(inherited) -lretrofront_ui -lc++ -ObjC"
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"
         DEAD_CODE_STRIPPING: "YES"
         STRIP_INSTALLED_PRODUCT: "YES"
