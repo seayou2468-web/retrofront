@@ -2,10 +2,18 @@
 set -euo pipefail
 
 TARGET="${IOS_RUST_TARGET:-aarch64-apple-ios}"
+FEATURES="${IOS_RUST_FEATURES:-ios}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 rustup target add "$TARGET"
-cargo build --manifest-path "$ROOT_DIR/Cargo.toml" --release -p retrofront-ui --lib --target "$TARGET"
+cargo build \
+  --manifest-path "$ROOT_DIR/Cargo.toml" \
+  --release \
+  -p retrofront-ui \
+  --lib \
+  --target "$TARGET" \
+  --no-default-features \
+  --features "$FEATURES"
 
 LIB="$ROOT_DIR/target/$TARGET/release/libretrofront_ui.a"
 if [[ ! -f "$LIB" ]]; then

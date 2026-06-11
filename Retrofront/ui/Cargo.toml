@@ -15,7 +15,8 @@ name = "retrofront"
 path = "src/main.rs"
 
 [features]
-default = ["slint/backend-winit", "slint/renderer-femtovg"]
+default = ["desktop"]
+desktop = ["slint/backend-winit", "slint/renderer-femtovg"]
 ios = []
 
 [dependencies]

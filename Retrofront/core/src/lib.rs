@@ -994,13 +994,16 @@ impl FrontendCore {
 
     pub fn libretro_api_summaries(&self) -> Vec<UiSettingEntry> {
         vec![
-            ("Core lifecycle", "init/deinit, API version, system info, AV info, load/unload, reset, run"),
-            ("Video", "software frames, pixel formats, geometry/rotation, HW render negotiation stubs"),
-            ("Audio", "sample, batch, audio callback requests, latency and buffer status acknowledgements"),
-            ("Input", "joypad bitmasks, descriptors, max users, controller info, rumble, sensors"),
-            ("Storage", "SaveRAM, savestates, VFS v4, content/save/system/core asset/playlists directories"),
-            ("Options", "v0/v1/v2/intl core options, live updates, display callbacks"),
-            ("Platform", "performance, LEDs, MIDI stubs, camera/location stubs, proc-address stub, throttle context"),
+            ("Core lifecycle", "retro_init/deinit, API version, system info, AV info, load/unload, reset, run, no-game support"),
+            ("Environment negotiation", "pixel format, rotation, geometry, messages, shutdown, overscan, can-dupe, achievement and serialization flags"),
+            ("Video pipeline", "software frame ingest, RGBA conversion, frame counters, viewport config, bgfx host callbacks and HW render negotiation"),
+            ("Audio pipeline", "sample, batch, callback requests, target sample rate, latency and buffer-status acknowledgements"),
+            ("Input subsystem", "joypad bitmasks, descriptors, max users, controller info, keyboard callback, rumble, sensors and overlays"),
+            ("Storage and VFS", "SaveRAM, savestates, VFS v4 open/read/write/seek/stat/dir ops, system/save/core-assets/playlist/browser directories"),
+            ("Core options", "v0/v1/v2/intl definitions, current values, variable update checks, display callbacks and FFI option export"),
+            ("Content metadata", "game_info_ext, zip preparation, fullpath/in-memory loading, content-info overrides and launch planning"),
+            ("Platform services", "performance counters, LEDs, MIDI, camera/location, proc-address, throttle, JIT/netplay responses and exec-memory safety"),
+            ("Native bridge", "C ABI exports for Swift/iOS and desktop hosts: cores, games, menus, settings, overlays, video frames and gfx driver state"),
         ]
         .into_iter()
         .map(|(key, value)| UiSettingEntry {

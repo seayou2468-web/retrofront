@@ -40,7 +40,13 @@ jobs:
             make \
             curl \
             file \
-            desktop-file-utils
+            desktop-file-utils \
+            pkg-config \
+            libfontconfig1-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libegl1-mesa-dev \
+            libgl1-mesa-dev
 
       - name: Install Rust
         shell: bash
@@ -139,9 +145,15 @@ jobs:
         shell: bash
         run: ./scripts/fetch-frontend-assets.sh apps/iOS/Resources
 
+      - name: Install Rust iOS target
+        shell: bash
+        run: rustup target add aarch64-apple-ios
+
       - name: Build Rust static library for iOS device
         working-directory: Retrofront
         shell: bash
+        env:
+          IOS_RUST_FEATURES: ios
         run: |
           make ios-rust
 
