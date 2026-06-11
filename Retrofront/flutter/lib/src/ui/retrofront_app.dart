@@ -36,8 +36,8 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
   @override
   void initState() {
     super.initState();
-    _selectedGame = widget.frontend.games.first;
-    _selectedCore = widget.frontend.cores.first;
+    _selectedGame = widget.frontend.games.isNotEmpty ? widget.frontend.games.first : null;
+    _selectedCore = widget.frontend.cores.isNotEmpty ? widget.frontend.cores.first : null;
     unawaited(_bootstrap());
     _frameTimer = Timer.periodic(const Duration(milliseconds: 16), (_) async {
       if (widget.frontend.runtime.running) {
@@ -50,6 +50,8 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
   Future<void> _bootstrap() async {
     await widget.frontend.initialize();
     _coreOptions = await widget.frontend.coreOptions();
+    _selectedGame ??= widget.frontend.games.isNotEmpty ? widget.frontend.games.first : null;
+    _selectedCore ??= widget.frontend.cores.isNotEmpty ? widget.frontend.cores.first : null;
     if (mounted) setState(() {});
   }
 
@@ -82,7 +84,7 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
   }
 
   Widget _desktopHome(BuildContext context) {
-    final game = _selectedGame ?? widget.frontend.games.first;
+    final game = _selectedGame;
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: SafeArea(
@@ -98,7 +100,7 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
                     const SizedBox(width: 10),
                     Expanded(flex: 9, child: _libraryPanel(desktop: true)),
                     const SizedBox(width: 10),
-                    SizedBox(width: 305, child: _gameDetails(game)),
+                    SizedBox(width: 305, child: game == null ? _emptyDetails() : _gameDetails(game)),
                   ],
                 ),
               ),
@@ -126,7 +128,7 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
 
   Widget _mobileHome(BuildContext context) {
     final pages = [
-      _libraryPanel(desktop: false),
+      _mobileLibraryPage(),
       _playlistPanel(),
       _coreMobilePanel(),
       _settingsPanel(desktop: false),
@@ -143,6 +145,36 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
               const SizedBox(height: 10),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _mobileLibraryPage() {
+    return Column(
+      children: [
+        Expanded(child: _libraryPanel(desktop: false)),
+        const SizedBox(height: 10),
+        SizedBox(height: 220, child: _gameViewport()),
+      ],
+    );
+  }
+
+  Widget _emptyDetails() {
+    return _GlassPanel(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.videogame_asset_off_outlined, size: 52, color: _muted),
+            const SizedBox(height: 20),
+            const Text('ライブラリが空です', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
+            const SizedBox(height: 10),
+            Text(widget.frontend.statusMessage, style: const TextStyle(color: _muted)),
+            const Spacer(),
+            _GradientButton(label: 'ROMをインポート', onTap: _pickRom),
+          ],
         ),
       ),
     );
@@ -205,11 +237,13 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text('すべてのゲーム', style: TextStyle(fontSize: desktop ? 18 : 12, color: _muted)),
-                    Text(desktop ? '1837 ゲーム' : 'ライブラリ', style: TextStyle(fontSize: desktop ? 26 : 20, fontWeight: FontWeight.w800, color: _text)),
+                    Text(desktop ? '${widget.frontend.games.length} ゲーム' : 'ライブラリ', style: TextStyle(fontSize: desktop ? 26 : 20, fontWeight: FontWeight.w800, color: _text)),
                   ]),
                 ),
                 if (desktop) const SizedBox(width: 235, child: _SearchBox()),
                 if (!desktop) _IconPill(icon: Icons.search),
+                const SizedBox(width: 8),
+                InkWell(onTap: _pickRom, child: const _IconPill(icon: Icons.file_upload_outlined)),
                 const SizedBox(width: 8),
                 _IconPill(icon: Icons.filter_alt_outlined),
                 const SizedBox(width: 8),
@@ -223,7 +257,9 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
                 child: Row(children: [Expanded(flex: 3, child: Text('タイトル', style: TextStyle(color: _muted, fontSize: 12))), Expanded(child: Text('コア', style: TextStyle(color: _muted, fontSize: 12))), Expanded(child: Text('最後にプレイ', style: TextStyle(color: _muted, fontSize: 12))), Expanded(child: Text('プレイ時間', style: TextStyle(color: _muted, fontSize: 12)))]),
               ),
             Expanded(
-              child: ListView.separated(
+              child: widget.frontend.games.isEmpty
+                  ? _EmptyLibrary(onImport: _pickRom, message: widget.frontend.statusMessage)
+                  : ListView.separated(
                 itemCount: widget.frontend.games.length,
                 separatorBuilder: (_, __) => Divider(color: desktop ? _line.withOpacity(.55) : Colors.transparent, height: desktop ? 1 : 8),
                 itemBuilder: (context, index) {
@@ -366,6 +402,9 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
   }
 
   Widget _coreList({required bool compact}) {
+    if (widget.frontend.cores.isEmpty) {
+      return _EmptyLibrary(onImport: () => widget.frontend.scanCores(widget.frontend.settings['libretro_directory'] ?? '').then((_) { if (mounted) setState(() {}); }), message: 'libretro_directory に *_libretro コアを配置してスキャンしてください。');
+    }
     return ListView.separated(
       itemCount: widget.frontend.cores.length,
       separatorBuilder: (_, __) => const SizedBox(height: 6),
@@ -582,6 +621,33 @@ class _ThemeCard extends StatelessWidget { const _ThemeCard({required this.label
 class _SettingsRow extends StatelessWidget { const _SettingsRow({required this.title, required this.value}); final String title; final String value; @override Widget build(BuildContext context) => ListTile(dense: true, contentPadding: EdgeInsets.zero, title: Text(title, style: const TextStyle(color: _text, fontSize: 13)), subtitle: Text(value, style: const TextStyle(color: _muted, fontSize: 11)), trailing: const Icon(Icons.chevron_right, color: _muted, size: 18)); }
 class _PlaylistRow extends StatelessWidget { const _PlaylistRow({required this.entry}); final PlaylistEntry entry; @override Widget build(BuildContext context) => Container(height: 68, padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: _panel2, borderRadius: BorderRadius.circular(10), border: Border.all(color: _line)), child: Row(children: [Container(width: 50, decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), gradient: const LinearGradient(colors: [Color(0xFF322267), Color(0xFF0C3F3A)])), child: Center(child: Text(entry.icon, style: const TextStyle(fontSize: 22)))), const SizedBox(width: 12), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(entry.name, style: const TextStyle(fontWeight: FontWeight.w800)), Text(entry.count, style: const TextStyle(color: _muted, fontSize: 12))])), const Icon(Icons.chevron_right, color: _muted)])); }
 Widget _settingsPreview() => Center(child: Container(width: 250, height: 130, decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), border: Border.all(color: _accent), gradient: LinearGradient(colors: [_cyan.withOpacity(.25), _accent.withOpacity(.22)])), child: const Icon(Icons.image, size: 46, color: _muted)));
+
+
+class _EmptyLibrary extends StatelessWidget {
+  const _EmptyLibrary({required this.onImport, required this.message});
+
+  final VoidCallback onImport;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.inventory_2_outlined, color: _muted, size: 42),
+            const SizedBox(height: 12),
+            const Text('まだコンテンツがありません', style: TextStyle(color: _text, fontWeight: FontWeight.w900)),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Text(message, textAlign: TextAlign.center, style: const TextStyle(color: _muted, fontSize: 12)),
+            ),
+            const SizedBox(height: 14),
+            _SmallButton(label: 'インポート / 再スキャン', onTap: onImport),
+          ],
+        ),
+      );
+}
 
 class _GameOverlay extends StatelessWidget { const _GameOverlay({required this.onButton, required this.onMenu}); final void Function(int, bool) onButton; final VoidCallback onMenu; @override Widget build(BuildContext context) => Positioned.fill(child: Stack(children: [Positioned(left: 28, bottom: 92, child: _OverlayButton(label: 'MENU', onTap: onMenu)), Positioned(right: 38, bottom: 115, child: _OverlayButton(label: 'A', onTap: () => onButton(8, true))), Positioned(right: 88, bottom: 80, child: _OverlayButton(label: 'B', onTap: () => onButton(0, true))), Positioned(left: 90, bottom: 130, child: _Dpad(onButton: onButton))])); }
 class _OverlayButton extends StatelessWidget { const _OverlayButton({required this.label, required this.onTap}); final String label; final VoidCallback onTap; @override Widget build(BuildContext context) => InkWell(onTap: onTap, customBorder: const CircleBorder(), child: Container(width: 54, height: 54, alignment: Alignment.center, decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.black.withOpacity(.34), border: Border.all(color: Colors.white24)), child: Text(label, style: const TextStyle(fontWeight: FontWeight.w900)))); }
