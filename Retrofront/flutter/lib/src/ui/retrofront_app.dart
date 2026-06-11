@@ -64,16 +64,52 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
 
 
   Future<void> _launchGame(GameEntry game) async {
-    final ok = await widget.frontend.launch(game);
+    final plan = await widget.frontend.planContentLaunch(game.path);
     if (!mounted) return;
-    setState(() => _selectedGame = game);
+    var launchGame = game;
+    if (plan.needsCoreChoice) {
+      final selected = await _chooseCoreForGame(game, plan.candidates);
+      if (selected == null) return;
+      await widget.frontend.setSetting('content_core_${plan.contentExtension}', selected.path);
+      launchGame = GameEntry(title: game.title, system: selected.system, core: selected.name, lastPlayed: game.lastPlayed, playTime: game.playTime, path: game.path, initials: game.initials);
+    } else if (plan.decision == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(plan.reason.isEmpty ? '互換コアが見つかりません。info.zipを取得してコアを再スキャンしてください。' : plan.reason)));
+      return;
+    }
+    final ok = await widget.frontend.launch(launchGame);
+    if (!mounted) return;
+    setState(() => _selectedGame = launchGame);
     if (ok) {
       await Navigator.of(context).push(MaterialPageRoute<void>(
         fullscreenDialog: true,
-        builder: (_) => _PlayScreen(frontend: widget.frontend, game: game),
+        builder: (_) => _PlayScreen(frontend: widget.frontend, game: launchGame),
       ));
       if (mounted) setState(() {});
     }
+  }
+
+  Future<CoreEntry?> _chooseCoreForGame(GameEntry game, List<CoreEntry> candidates) {
+    return showModalBottomSheet<CoreEntry>(
+      context: context,
+      backgroundColor: const Color(0xFF081321),
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('${game.title} のコアを選択', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
+            const SizedBox(height: 12),
+            for (final core in candidates)
+              ListTile(
+                leading: const Icon(Icons.extension, color: _accent),
+                title: Text(core.name),
+                subtitle: Text('${core.system} • ${core.supportedExtensions.join(', ')}'),
+                onTap: () => Navigator.of(context).pop(core),
+              ),
+          ]),
+        ),
+      ),
+    );
   }
 
   @override
@@ -128,7 +164,7 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
                     const SizedBox(width: 10),
                     Expanded(flex: 3, child: _coreLoadPanel()),
                     const SizedBox(width: 10),
-                    Expanded(flex: 5, child: _gameViewport()),
+                    Expanded(flex: 5, child: _assetInstallPanel()),
                   ],
                 ),
               ),
@@ -166,13 +202,7 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
   }
 
   Widget _mobileLibraryPage() {
-    return Column(
-      children: [
-        Expanded(child: _libraryPanel(desktop: false)),
-        const SizedBox(height: 10),
-        SizedBox(height: 220, child: _gameViewport()),
-      ],
-    );
+    return _libraryPanel(desktop: false);
   }
 
   Widget _emptyDetails() {
@@ -378,6 +408,35 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
     );
   }
 
+  Widget _assetInstallPanel() {
+    return _GlassPanel(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('RetroArch フロントエンド資産', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 8),
+          const Text('assets.zip / info.zip / overlays.zip を取得して展開します。info.zip はコアとROM拡張子の紐付け、overlays.zip はcfgオーバーレイに必要です。', style: TextStyle(color: _muted, fontSize: 12)),
+          const SizedBox(height: 14),
+          Expanded(
+            child: ListView(children: [
+              for (final package in RetrofrontNative.frontendAssetPackages)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _AssetPackageRow(
+                    package: package,
+                    destination: widget.frontend.settings[package.destinationSettingKey] ?? '',
+                    onBundled: () => _installAssetPackage(package.name, download: false),
+                    onDownload: () => _installAssetPackage(package.name, download: true),
+                  ),
+                ),
+            ]),
+          ),
+          Text(widget.frontend.statusMessage, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: _muted, fontSize: 11)),
+        ]),
+      ),
+    );
+  }
+
   Widget _coreLoadPanel() {
     return _GlassPanel(
       child: Padding(
@@ -535,6 +594,10 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
       _SettingsChoiceRow(title: 'スケール', value: widget.frontend.settings['video_scale_mode'] ?? 'integer_fit', choices: const ['integer_fit', 'fit', 'fill', 'stretch'], onChanged: (v) async { await widget.frontend.setSetting('video_scale_mode', v); if (mounted) setState(() {}); }),
       _SettingsChoiceRow(title: 'オーディオ遅延', value: widget.frontend.settings['audio_latency_ms'] ?? '64', choices: const ['32', '64', '96', '128'], onChanged: (v) async { await widget.frontend.setSetting('audio_latency_ms', v); if (mounted) setState(() {}); }),
       SwitchListTile(contentPadding: EdgeInsets.zero, dense: true, title: const Text('入力オーバーレイ', style: TextStyle(color: _text, fontSize: 13)), subtitle: Text(widget.frontend.settings['input_overlay'] ?? '', style: const TextStyle(color: _muted, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis), value: (widget.frontend.settings['input_overlay_enable'] ?? 'true') == 'true', activeColor: _accent, onChanged: (v) async { await widget.frontend.setOverlayEnabled(v); if (mounted) setState(() {}); }),
+      const SizedBox(height: 12),
+      const Text('Frontend ZIP Assets', style: TextStyle(color: _muted, fontSize: 12)),
+      const SizedBox(height: 6),
+      for (final package in RetrofrontNative.frontendAssetPackages) _SettingsAssetRow(package: package, onBundled: () => _installAssetPackage(package.name, download: false), onDownload: () => _installAssetPackage(package.name, download: true)),
       for (final row in rows.skip(7)) _SettingsRow(title: row.$1, value: row.$2),
     ]);
   }
@@ -562,6 +625,11 @@ class _RetrofrontAppState extends State<RetrofrontApp> {
           InkWell(onTap: () => setState(() => _tab = i), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(items[i].$1, color: i == _tab ? _text : _muted, size: 20), const SizedBox(height: 4), Text(items[i].$2, style: TextStyle(color: i == _tab ? _text : _muted, fontSize: 10))])),
       ]),
     );
+  }
+
+  Future<void> _installAssetPackage(String name, {required bool download}) async {
+    await widget.frontend.installFrontendAssetPackage(name, download: download);
+    if (mounted) setState(() {});
   }
 
   Future<void> _pickRom() async {
@@ -638,16 +706,29 @@ class _PlayScreenState extends State<_PlayScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      body: Stack(children: [
-        Positioned.fill(child: _VideoFrameView(frontend: widget.frontend, fit: BoxFit.contain)),
-        if (widget.frontend.runtime.overlayEnabled) _GameOverlay(onButton: (id, down) => widget.frontend.setJoypadButton(id, down), onMenu: () => setState(widget.frontend.openQuickMenu)),
-        Positioned(top: 24, left: 24, child: SafeArea(child: _ViewportButton(icon: Icons.close_fullscreen, label: '戻る', onTap: () async => Navigator.of(context).pop()))),
-        Positioned(top: 24, right: 24, child: SafeArea(child: Row(children: [
-          _ViewportButton(icon: Icons.save_outlined, label: '保存', onTap: () => widget.frontend.quickSave()),
-          const SizedBox(width: 14),
-          _ViewportButton(icon: Icons.restart_alt, label: 'リセット', onTap: () async { await widget.frontend.reset(); if (mounted) setState(() {}); }),
-        ]))),
-      ]),
+      body: LayoutBuilder(builder: (context, constraints) {
+        void sendTouch(Offset position, bool active) {
+          final x = (position.dx / constraints.maxWidth).clamp(0.0, 1.0);
+          final y = (position.dy / constraints.maxHeight).clamp(0.0, 1.0);
+          widget.frontend.setOverlayTouch(0, x, y, active);
+        }
+        return Listener(
+          onPointerDown: (event) => sendTouch(event.localPosition, true),
+          onPointerMove: (event) => sendTouch(event.localPosition, true),
+          onPointerUp: (event) => sendTouch(event.localPosition, false),
+          onPointerCancel: (event) => widget.frontend.setOverlayTouch(0, 0, 0, false),
+          child: Stack(children: [
+            Positioned.fill(child: _VideoFrameView(frontend: widget.frontend, fit: BoxFit.contain)),
+            if (widget.frontend.runtime.overlayEnabled) _GameOverlay(onButton: (id, down) => widget.frontend.setJoypadButton(id, down), onMenu: () => setState(widget.frontend.openQuickMenu)),
+            Positioned(top: 24, left: 24, child: SafeArea(child: _ViewportButton(icon: Icons.close_fullscreen, label: '戻る', onTap: () async => Navigator.of(context).pop()))),
+            Positioned(top: 24, right: 24, child: SafeArea(child: Row(children: [
+              _ViewportButton(icon: Icons.save_outlined, label: '保存', onTap: () => widget.frontend.quickSave()),
+              const SizedBox(width: 14),
+              _ViewportButton(icon: Icons.restart_alt, label: 'リセット', onTap: () async { await widget.frontend.reset(); if (mounted) setState(() {}); }),
+            ]))),
+          ]),
+        );
+      }),
     );
   }
 }
@@ -729,6 +810,8 @@ class _ViewportButton extends StatelessWidget { const _ViewportButton({required 
 class _QuickAction extends StatelessWidget { const _QuickAction({required this.icon, required this.title, required this.subtitle, required this.onTap}); final IconData icon; final String title; final String subtitle; final FutureOr<void> Function() onTap; @override Widget build(BuildContext context) => ListTile(onTap: () => onTap(), leading: CircleAvatar(backgroundColor: const Color(0xFF16243A), child: Icon(icon, color: _text)), title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)), subtitle: Text(subtitle), trailing: const Icon(Icons.chevron_right)); }
 class _SettingCategory extends StatelessWidget { const _SettingCategory({required this.label, required this.selected}); final String label; final bool selected; @override Widget build(BuildContext context) => Container(height: 28, margin: const EdgeInsets.only(bottom: 4), padding: const EdgeInsets.symmetric(horizontal: 10), decoration: BoxDecoration(color: selected ? const Color(0xFF2B2364) : Colors.transparent, borderRadius: BorderRadius.circular(6)), alignment: Alignment.centerLeft, child: Text(label, style: TextStyle(color: selected ? _text : _muted, fontSize: 12))); }
 class _ThemeCard extends StatelessWidget { const _ThemeCard({required this.label, required this.selected}); final String label; final bool selected; @override Widget build(BuildContext context) => Container(height: 58, alignment: Alignment.bottomCenter, padding: const EdgeInsets.only(bottom: 6), decoration: BoxDecoration(borderRadius: BorderRadius.circular(9), border: Border.all(color: selected ? _accent : _line), gradient: const LinearGradient(colors: [Color(0xFF091223), Color(0xFF203151)])), child: Text(label, style: const TextStyle(fontSize: 11))); }
+class _AssetPackageRow extends StatelessWidget { const _AssetPackageRow({required this.package, required this.destination, required this.onBundled, required this.onDownload}); final FrontendAssetPackageEntry package; final String destination; final FutureOr<void> Function() onBundled; final FutureOr<void> Function() onDownload; @override Widget build(BuildContext context) => Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: _panel2, borderRadius: BorderRadius.circular(12), border: Border.all(color: _line)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('${package.name}.zip', style: const TextStyle(fontWeight: FontWeight.w900)), const SizedBox(height: 4), Text('${package.label} → $destination', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: _muted, fontSize: 11)), const SizedBox(height: 10), Row(children: [Expanded(child: _SmallButton(label: '同梱ZIPを展開', onTap: onBundled)), const SizedBox(width: 8), Expanded(child: _SmallButton(label: '最新版を取得', onTap: onDownload))]) ])); }
+class _SettingsAssetRow extends StatelessWidget { const _SettingsAssetRow({required this.package, required this.onBundled, required this.onDownload}); final FrontendAssetPackageEntry package; final FutureOr<void> Function() onBundled; final FutureOr<void> Function() onDownload; @override Widget build(BuildContext context) => ListTile(dense: true, contentPadding: EdgeInsets.zero, title: Text('${package.name}.zip', style: const TextStyle(color: _text, fontSize: 13)), subtitle: Text(package.label, style: const TextStyle(color: _muted, fontSize: 11)), trailing: Wrap(spacing: 8, children: [TextButton(onPressed: () => onBundled(), child: const Text('同梱')), TextButton(onPressed: () => onDownload(), child: const Text('取得'))])); }
 class _SettingsChoiceRow extends StatelessWidget { const _SettingsChoiceRow({required this.title, required this.value, required this.choices, required this.onChanged}); final String title; final String value; final List<String> choices; final ValueChanged<String> onChanged; @override Widget build(BuildContext context) => ListTile(dense: true, contentPadding: EdgeInsets.zero, title: Text(title, style: const TextStyle(color: _text, fontSize: 13)), subtitle: Text(value, style: const TextStyle(color: _muted, fontSize: 11)), trailing: DropdownButton<String>(value: choices.contains(value) ? value : choices.first, dropdownColor: _panel2, underline: const SizedBox.shrink(), items: [for (final choice in choices) DropdownMenuItem(value: choice, child: Text(choice))], onChanged: (value) { if (value != null) onChanged(value); })); }
 class _SettingsRow extends StatelessWidget { const _SettingsRow({required this.title, required this.value}); final String title; final String value; @override Widget build(BuildContext context) => ListTile(dense: true, contentPadding: EdgeInsets.zero, title: Text(title, style: const TextStyle(color: _text, fontSize: 13)), subtitle: Text(value, style: const TextStyle(color: _muted, fontSize: 11)), trailing: const Icon(Icons.chevron_right, color: _muted, size: 18)); }
 class _PlaylistRow extends StatelessWidget { const _PlaylistRow({required this.entry}); final PlaylistEntry entry; @override Widget build(BuildContext context) => Container(height: 68, padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: _panel2, borderRadius: BorderRadius.circular(10), border: Border.all(color: _line)), child: Row(children: [Container(width: 50, decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), gradient: const LinearGradient(colors: [Color(0xFF322267), Color(0xFF0C3F3A)])), child: Center(child: Text(entry.icon, style: const TextStyle(fontSize: 22)))), const SizedBox(width: 12), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(entry.name, style: const TextStyle(fontWeight: FontWeight.w800)), Text(entry.count, style: const TextStyle(color: _muted, fontSize: 12))])), const Icon(Icons.chevron_right, color: _muted)])); }
