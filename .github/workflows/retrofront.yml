@@ -47,11 +47,6 @@ jobs:
 
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
-      - name: Fetch bundled frontend assets
-        working-directory: Retrofront
-        shell: bash
-        run: |
-          ./scripts/fetch-frontend-assets.sh apps/iOS/Resources
 
       - name: Test Linux workspace
         working-directory: Retrofront
