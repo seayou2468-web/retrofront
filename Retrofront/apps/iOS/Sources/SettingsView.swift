@@ -108,11 +108,11 @@ struct SettingsView: View {
                         } label: {
                             Label("Install bundled \(archive.displayName)", systemImage: "archivebox.fill")
                                 .font(.subheadline.bold())
-                                .foregroundColor(OneUI.accent)
+                                .foregroundColor(RetroArchMenuPalette.driver("materialui").accent)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(12)
-                                .background(OneUI.elevated)
-                                .clipShape(RoundedRectangle(cornerRadius: OneUI.compactRadius, style: .continuous))
+                                .background(RetroArchMenuPalette.driver("materialui").elevated)
+                                .clipShape(RoundedRectangle(cornerRadius: RetroArchMenuMetrics.compactRadius, style: .continuous))
                         }
                         .buttonStyle(.plain)
 
@@ -121,10 +121,10 @@ struct SettingsView: View {
                         } label: {
                             Label("Fetch", systemImage: "icloud.and.arrow.down.fill")
                                 .font(.subheadline.bold())
-                                .foregroundColor(OneUI.teal)
+                                .foregroundColor(RetroArchMenuPalette.teal)
                                 .padding(12)
-                                .background(OneUI.elevated)
-                                .clipShape(RoundedRectangle(cornerRadius: OneUI.compactRadius, style: .continuous))
+                                .background(RetroArchMenuPalette.driver("materialui").elevated)
+                                .clipShape(RoundedRectangle(cornerRadius: RetroArchMenuMetrics.compactRadius, style: .continuous))
                         }
                         .buttonStyle(.plain)
                     }

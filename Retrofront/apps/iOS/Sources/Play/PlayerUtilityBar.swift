@@ -19,7 +19,7 @@ struct PlayerUtilityBar: View {
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.white)
                     .frame(width: 58, height: 42)
-                    .background(Capsule().fill(OneUI.accent.opacity(0.9)))
+                    .background(Capsule().fill(RetroArchMenuPalette.driver("materialui").accent.opacity(0.9)))
             }
             .buttonStyle(.plain)
             Button {

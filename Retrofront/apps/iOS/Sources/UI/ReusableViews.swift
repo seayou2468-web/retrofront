@@ -27,7 +27,7 @@ struct PrimaryAction: View {
             .padding(14)
             .frame(maxWidth: .infinity, minHeight: 76)
             .background(skin.palette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: skin.rowCornerRadius == 0 ? 0 : OneUI.radius, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: skin.rowCornerRadius == 0 ? 0 : RetroArchMenuMetrics.radius, style: .continuous))
             .shadow(color: .black.opacity(0.05), radius: 14, y: 8)
         }
         .buttonStyle(.plain)
@@ -106,7 +106,7 @@ struct GameRow: View {
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.caption.bold())
-                    .foregroundColor(OneUI.muted)
+                    .foregroundColor(RetroArchMenuPalette.driver("materialui").muted)
             }
             .padding(15)
             .background(skin.palette.surface)
@@ -123,7 +123,7 @@ struct CoreRow: View {
     var body: some View {
         let skin = RetroArchMenuSkin.current(runtime: runtime)
         HStack(spacing: 14) {
-            RoundedIcon(systemName: "cpu.fill", tint: OneUI.violet)
+            RoundedIcon(systemName: "cpu.fill", tint: RetroArchMenuPalette.violet)
             VStack(alignment: .leading, spacing: 4) {
                 Text(core.displayName)
                     .font(skin.rowFont)
@@ -190,7 +190,7 @@ struct EmptyPanel: View {
         VStack(spacing: 8) {
             Image(systemName: icon)
                 .font(.system(size: 28, weight: .semibold))
-                .foregroundColor(OneUI.muted)
+                .foregroundColor(RetroArchMenuPalette.driver("materialui").muted)
             Text(title)
                 .font(.headline)
                 .foregroundColor(skin.palette.ink)
@@ -202,6 +202,6 @@ struct EmptyPanel: View {
         .frame(maxWidth: .infinity)
         .padding(24)
         .background(skin.palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: skin.rowCornerRadius == 0 ? 0 : OneUI.radius, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: skin.rowCornerRadius == 0 ? 0 : RetroArchMenuMetrics.radius, style: .continuous))
     }
 }

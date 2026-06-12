@@ -3,8 +3,9 @@ use crate::gfx::{GfxBackendKind, GfxStatus};
 use crate::scanner::GameEntry;
 use crate::settings::Settings;
 use crate::{GameInfo, SystemInfo};
-use std::ffi::CStr;
-use std::os::raw::{c_char, c_uint};
+use std::ffi::{CStr, CString};
+use std::os::raw::{c_char, c_uint, c_void};
+use std::path::Path;
 
 #[repr(C)]
 struct NativeMenuDriverSpec {
@@ -14,12 +15,168 @@ struct NativeMenuDriverSpec {
     input_model: *const c_char,
     thumbnail_model: *const c_char,
     animation_model: *const c_char,
+    asset_subdirectory: *const c_char,
+    default_theme: *const c_char,
+}
+
+#[repr(C)]
+struct NativeMenuHostCallbacks {
+    get_setting: Option<extern "C" fn(*const c_char, *mut c_void) -> *const c_char>,
+    set_setting: Option<extern "C" fn(*const c_char, *const c_char, *mut c_void) -> c_uint>,
+    directory_exists: Option<extern "C" fn(*const c_char, *mut c_void) -> c_uint>,
+    userdata: *mut c_void,
+}
+
+#[repr(C)]
+struct NativeMenuRuntimeConfig {
+    driver: *const NativeMenuDriverSpec,
+    driver_ident: *const c_char,
+    assets_directory: *const c_char,
+    theme: *const c_char,
+    assets_ready: c_uint,
 }
 
 extern "C" {
     fn rf_menu_driver_at(index: c_uint) -> *const NativeMenuDriverSpec;
     fn rf_menu_driver_default() -> *const NativeMenuDriverSpec;
     fn rf_menu_driver_next_ident(ident: *const c_char) -> *const c_char;
+    fn rf_menu_connect_host(callbacks: *const NativeMenuHostCallbacks);
+    fn rf_menu_get_runtime_config(out_config: *mut NativeMenuRuntimeConfig) -> c_uint;
+}
+
+#[derive(Debug)]
+pub struct NativeMenuBridge {
+    settings: Vec<(CString, CString)>,
+}
+
+impl NativeMenuBridge {
+    pub fn from_settings(settings: &Settings) -> Self {
+        Self {
+            settings: settings
+                .values
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        CString::new(key.as_str()).unwrap_or_default(),
+                        CString::new(value.as_str()).unwrap_or_default(),
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    pub fn sync_runtime_config(&mut self) -> NativeMenuRuntimeSnapshot {
+        let callbacks = NativeMenuHostCallbacks {
+            get_setting: Some(native_bridge_get_setting),
+            set_setting: Some(native_bridge_set_setting),
+            directory_exists: Some(native_bridge_directory_exists),
+            userdata: (self as *mut Self).cast(),
+        };
+        unsafe { rf_menu_connect_host(&callbacks) };
+        let mut raw = NativeMenuRuntimeConfig {
+            driver: std::ptr::null(),
+            driver_ident: std::ptr::null(),
+            assets_directory: std::ptr::null(),
+            theme: std::ptr::null(),
+            assets_ready: 0,
+        };
+        let ok = unsafe { rf_menu_get_runtime_config(&mut raw) } != 0;
+        unsafe { rf_menu_connect_host(std::ptr::null()) };
+        if !ok {
+            return NativeMenuRuntimeSnapshot::default();
+        }
+        NativeMenuRuntimeSnapshot {
+            driver: native_str(raw.driver_ident, "materialui").to_string(),
+            theme: native_str(raw.theme, "dark").to_string(),
+            assets_directory: native_str(raw.assets_directory, "").to_string(),
+            assets_ready: raw.assets_ready != 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeMenuRuntimeSnapshot {
+    pub driver: String,
+    pub theme: String,
+    pub assets_directory: String,
+    pub assets_ready: bool,
+}
+
+impl Default for NativeMenuRuntimeSnapshot {
+    fn default() -> Self {
+        Self {
+            driver: "materialui".to_string(),
+            theme: "dark".to_string(),
+            assets_directory: String::new(),
+            assets_ready: false,
+        }
+    }
+}
+
+extern "C" fn native_bridge_get_setting(
+    key: *const c_char,
+    userdata: *mut c_void,
+) -> *const c_char {
+    let Some(bridge) = (unsafe { (userdata as *mut NativeMenuBridge).as_ref() }) else {
+        return std::ptr::null();
+    };
+    let Some(key) = c_str_lossy(key) else {
+        return std::ptr::null();
+    };
+    bridge
+        .settings
+        .iter()
+        .find(|(stored_key, _)| stored_key.as_c_str().to_bytes() == key.as_bytes())
+        .map_or(std::ptr::null(), |(_, value)| value.as_ptr())
+}
+
+extern "C" fn native_bridge_set_setting(
+    key: *const c_char,
+    value: *const c_char,
+    userdata: *mut c_void,
+) -> c_uint {
+    let Some(bridge) = (unsafe { (userdata as *mut NativeMenuBridge).as_mut() }) else {
+        return 0;
+    };
+    let Some(key) = c_str_lossy(key) else {
+        return 0;
+    };
+    let Some(value) = c_str_lossy(value) else {
+        return 0;
+    };
+    let key_c = CString::new(key.as_bytes()).unwrap_or_default();
+    let value_c = CString::new(value.as_bytes()).unwrap_or_default();
+    if let Some((_, stored_value)) = bridge
+        .settings
+        .iter_mut()
+        .find(|(stored_key, _)| stored_key.as_c_str().to_bytes() == key_c.as_c_str().to_bytes())
+    {
+        *stored_value = value_c;
+    } else {
+        bridge.settings.push((key_c, value_c));
+    }
+    1
+}
+
+extern "C" fn native_bridge_directory_exists(
+    path: *const c_char,
+    _userdata: *mut c_void,
+) -> c_uint {
+    let Some(path) = c_str_lossy(path) else {
+        return 0;
+    };
+    Path::new(&path).is_dir() as c_uint
+}
+
+fn c_str_lossy(ptr: *const c_char) -> Option<String> {
+    if ptr.is_null() {
+        return None;
+    }
+    Some(
+        unsafe { CStr::from_ptr(ptr) }
+            .to_string_lossy()
+            .into_owned(),
+    )
 }
 
 fn native_str(ptr: *const c_char, fallback: &'static str) -> &'static str {
@@ -46,6 +203,8 @@ fn native_spec(ptr: *const NativeMenuDriverSpec) -> MenuDriverSpec {
         input_model: native_str(spec.input_model, "touch_navigation_retropad"),
         thumbnail_model: native_str(spec.thumbnail_model, "responsive_dual_thumbnail_list"),
         animation_model: native_str(spec.animation_model, "material_elevation_ripple"),
+        asset_subdirectory: native_str(spec.asset_subdirectory, "materialui"),
+        default_theme: native_str(spec.default_theme, "dark"),
     }
 }
 
@@ -119,6 +278,8 @@ pub struct MenuDriverSpec {
     pub input_model: &'static str,
     pub thumbnail_model: &'static str,
     pub animation_model: &'static str,
+    pub asset_subdirectory: &'static str,
+    pub default_theme: &'static str,
 }
 
 impl MenuDriverSpec {
@@ -130,6 +291,8 @@ impl MenuDriverSpec {
             input_model: "touch_navigation_retropad",
             thumbnail_model: "responsive_dual_thumbnail_list",
             animation_model: "material_elevation_ripple",
+            asset_subdirectory: "materialui",
+            default_theme: "dark",
         }
     }
 }
@@ -664,22 +827,12 @@ impl MenuEngine {
     }
 
     pub fn apply_skin_from_settings(&mut self, settings: &Settings) {
-        let driver = settings
-            .get("menu_driver")
-            .map_or(MenuDriver::MaterialUi, |value| {
-                MenuDriver::from_ident(value)
-            });
-        let spec = driver.spec();
+        let mut bridge = NativeMenuBridge::from_settings(settings);
+        let snapshot = bridge.sync_runtime_config();
         self.skin = MenuSkin {
-            driver: spec.ident.to_string(),
-            theme: settings
-                .get("menu_theme")
-                .cloned()
-                .unwrap_or_else(|| "dark".to_string()),
-            assets_directory: settings
-                .menu_assets_directory()
-                .to_string_lossy()
-                .into_owned(),
+            driver: snapshot.driver,
+            theme: snapshot.theme,
+            assets_directory: snapshot.assets_directory,
         };
     }
 
@@ -725,7 +878,7 @@ impl MenuEngine {
             ),
             Self::setting(
                 "Skin Assets",
-                "Common menu asset root used by ozone/materialui/rgui/xmb",
+                "Common menu asset root used by the active RetroArch menu driver",
                 &self.skin.assets_directory,
                 ACTION_SKIN_SETTINGS + 6,
             ),
@@ -1748,6 +1901,28 @@ mod tests {
         ] {
             assert!(labels.contains(&expected), "missing {expected}");
         }
+    }
+
+    #[test]
+    fn native_menu_bridge_reads_rust_settings_and_assets() {
+        let root = std::env::temp_dir().join(format!(
+            "retrofront-menu-assets-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("ozone")).unwrap();
+        let mut settings = Settings::new();
+        settings.set("menu_driver", "ozone");
+        settings.set("menu_theme", "dark");
+        settings.set("menu_assets_directory", &root.to_string_lossy());
+        let mut bridge = NativeMenuBridge::from_settings(&settings);
+        let snapshot = bridge.sync_runtime_config();
+        assert_eq!(snapshot.driver, "ozone");
+        assert_eq!(snapshot.assets_directory, root.to_string_lossy());
+        assert!(snapshot.assets_ready);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

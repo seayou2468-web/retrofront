@@ -45,7 +45,7 @@ struct PlayerControls: View {
                         .font(.system(size: 18, weight: .bold))
                         .foregroundColor(.white)
                         .frame(width: 58, height: 42)
-                        .background(Capsule().fill(OneUI.accent))
+                        .background(Capsule().fill(RetroArchMenuPalette.driver("materialui").accent))
                 }
                 .buttonStyle(.plain)
                 UtilityButton(label: "Start", button: .start)

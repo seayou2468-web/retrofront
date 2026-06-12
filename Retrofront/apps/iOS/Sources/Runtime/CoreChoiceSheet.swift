@@ -9,7 +9,7 @@ struct NowPlayingView: View {
         AppScreen(title: "Play", subtitle: "現在のゲームセッション") {
             VStack(alignment: .leading, spacing: 18) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: OneUI.radius, style: .continuous)
+                    RoundedRectangle(cornerRadius: RetroArchMenuMetrics.radius, style: .continuous)
                         .fill(Color.black)
                         .aspectRatio(16.0 / 10.0, contentMode: .fit)
                     if let image = runtime.displayImage {
@@ -17,7 +17,7 @@ struct NowPlayingView: View {
                             .resizable()
                             .interpolation(.none)
                             .scaledToFit()
-                            .clipShape(RoundedRectangle(cornerRadius: OneUI.radius, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: RetroArchMenuMetrics.radius, style: .continuous))
                     } else {
                         VStack(spacing: 10) {
                             Image(systemName: "display")
@@ -32,10 +32,10 @@ struct NowPlayingView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(runtime.loadedGameURL?.lastPathComponent ?? "ゲーム未選択")
                         .font(.title3.bold())
-                        .foregroundColor(OneUI.ink)
+                        .foregroundColor(RetroArchMenuPalette.driver("materialui").ink)
                     Text(runtime.systemInfo?.libraryName ?? "Libraryからゲームを選択すると起動します。")
                         .font(.subheadline)
-                        .foregroundColor(OneUI.secondary)
+                        .foregroundColor(RetroArchMenuPalette.driver("materialui").secondary)
                 }
 
                 Button {
@@ -46,14 +46,14 @@ struct NowPlayingView: View {
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 15)
-                        .background(Capsule().fill(runtime.loadedGameURL == nil ? OneUI.muted : OneUI.accent))
+                        .background(Capsule().fill(runtime.loadedGameURL == nil ? RetroArchMenuPalette.driver("materialui").muted : RetroArchMenuPalette.driver("materialui").accent))
                 }
                 .buttonStyle(.plain)
                 .disabled(runtime.loadedGameURL == nil)
             }
             .padding(18)
-            .background(OneUI.surface)
-            .clipShape(RoundedRectangle(cornerRadius: OneUI.radius, style: .continuous))
+            .background(RetroArchMenuPalette.driver("materialui").surface)
+            .clipShape(RoundedRectangle(cornerRadius: RetroArchMenuMetrics.radius, style: .continuous))
             .shadow(color: .black.opacity(0.05), radius: 18, y: 10)
         }
     }
@@ -79,7 +79,7 @@ struct CoreChoiceSheet: View {
                 }
                 .padding(18)
             }
-            .background(OneUI.background)
+            .background(RetroArchMenuPalette.driver("materialui").background)
             .navigationBarTitle("Select Core", displayMode: .inline)
             .navigationBarItems(leading: Button("Cancel") { runtime.cancelCoreChoice() })
         }

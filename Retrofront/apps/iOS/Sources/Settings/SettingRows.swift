@@ -15,7 +15,7 @@ struct SettingsGroup<Content: View>: View {
             VStack(spacing: 1) { content }
                 .padding(6)
                 .background(skin.palette.surface)
-                .clipShape(RoundedRectangle(cornerRadius: skin.rowCornerRadius == 0 ? 0 : OneUI.radius, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: skin.rowCornerRadius == 0 ? 0 : RetroArchMenuMetrics.radius, style: .continuous))
         }
     }
 }

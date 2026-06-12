@@ -6,6 +6,9 @@ public enum FrontendAssetArchive: String, CaseIterable, Identifiable, Sendable {
   case assets
   case info
   case overlays
+  case autoconfig
+  case cheats
+  case databaseRdb = "database-rdb"
 
   public var id: String { rawValue }
   public var fileName: String { "\(rawValue).zip" }
@@ -98,8 +101,20 @@ extension EmulatorRuntimeModel {
       probes = [storageLayout.infoDirectory.appendingPathComponent("mgba_libretro.info")]
     case .overlays:
       probes = [storageLayout.overlaysDirectory.appendingPathComponent("gamepads", isDirectory: true)]
+    case .autoconfig:
+      probes = [storageLayout.autoconfigDirectory.appendingPathComponent("udev", isDirectory: true)]
+    case .cheats:
+      probes = [storageLayout.cheatsDirectory]
+    case .databaseRdb:
+      probes = [storageLayout.databaseDirectory]
     }
-    return probes.contains { !FileManager.default.fileExists(atPath: $0.path) }
+    return probes.contains { probe in
+      var isDirectory: ObjCBool = false
+      guard FileManager.default.fileExists(atPath: probe.path, isDirectory: &isDirectory) else { return true }
+      guard isDirectory.boolValue else { return false }
+      let contents = (try? FileManager.default.contentsOfDirectory(atPath: probe.path)) ?? []
+      return contents.isEmpty
+    }
   }
 
   public func installBundledAssets() {
@@ -172,6 +187,9 @@ extension EmulatorRuntimeModel {
     case .assets: return storageLayout.assetsDirectory
     case .info: return storageLayout.infoDirectory
     case .overlays: return storageLayout.overlaysDirectory
+    case .autoconfig: return storageLayout.autoconfigDirectory
+    case .cheats: return storageLayout.cheatsDirectory
+    case .databaseRdb: return storageLayout.databaseDirectory
     }
   }
 

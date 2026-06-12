@@ -8,10 +8,10 @@ struct LibraryView: View {
     var body: some View {
         AppScreen(title: "すべてのゲーム", subtitle: "\(runtime.availableGames.count)ゲーム") {
             HStack(spacing: 12) {
-                PrimaryAction(title: "ROMをインポート", subtitle: "ドラッグ＆ドロップ相当", icon: "square.and.arrow.down.fill", tint: OneUI.accent) {
+                PrimaryAction(title: "ROMをインポート", subtitle: "ドラッグ＆ドロップ相当", icon: "square.and.arrow.down.fill", tint: RetroArchMenuPalette.driver("materialui").accent) {
                     onImport()
                 }
-                PrimaryAction(title: "スキャン", subtitle: "ライブラリを更新", icon: "arrow.clockwise", tint: OneUI.teal) {
+                PrimaryAction(title: "スキャン", subtitle: "ライブラリを更新", icon: "arrow.clockwise", tint: RetroArchMenuPalette.teal) {
                     runtime.rescanLibrary()
                 }
             }
@@ -19,8 +19,8 @@ struct LibraryView: View {
             StatusPill(message: runtime.statusMessage)
 
             HStack(spacing: 10) {
-                LibraryStatCard(title: "ROMs", value: "\(runtime.availableGames.count)", icon: "gamecontroller.fill", tint: OneUI.accent)
-                LibraryStatCard(title: "Types", value: "\(runtime.libraryRomTypeCount)", icon: "doc.fill", tint: OneUI.violet)
+                LibraryStatCard(title: "ROMs", value: "\(runtime.availableGames.count)", icon: "gamecontroller.fill", tint: RetroArchMenuPalette.driver("materialui").accent)
+                LibraryStatCard(title: "Types", value: "\(runtime.libraryRomTypeCount)", icon: "doc.fill", tint: RetroArchMenuPalette.violet)
             }
 
             ContentSection(title: "タイトル", count: runtime.availableGames.count) {
