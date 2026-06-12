@@ -82,7 +82,9 @@ extension EmulatorRuntimeModel {
   }
 
   public func installBundledAssets() {
-    installBundledAsset(.assets)
+    for archive in FrontendAssetArchive.allCases {
+      installBundledAsset(archive)
+    }
   }
 
   public func installBundledAsset(_ archive: FrontendAssetArchive) {
@@ -91,7 +93,9 @@ extension EmulatorRuntimeModel {
   }
 
   func installBundledAssets(_ frontend: Retrofront, updateStatus: Bool) {
-    installBundledAsset(.assets, frontend: frontend, updateStatus: updateStatus)
+    for archive in FrontendAssetArchive.allCases {
+      installBundledAsset(archive, frontend: frontend, updateStatus: updateStatus)
+    }
   }
 
   func installBundledAsset(_ archive: FrontendAssetArchive, frontend: Retrofront, updateStatus: Bool) {
@@ -131,7 +135,7 @@ extension EmulatorRuntimeModel {
       loadConfiguredOverlay(frontend)
       refresh()
       if updateStatus {
-        statusMessage = "Installed \(sourceLabel) \(archive.fileName): \(report.filesWritten) files"
+        statusMessage = "Installed \(sourceLabel) \(archive.fileName): \(report.filesWritten) files into \(installRoot.lastPathComponent)"
       }
     } catch {
       if updateStatus { statusMessage = "Install failed for \(archive.fileName): \(error)" }

@@ -27,6 +27,10 @@ pub fn install_assets_zip(
         let Some(safe_name) = safe_zip_path(entry.name()) else {
             continue;
         };
+        let safe_name = strip_matching_destination_root(&safe_name, destination_dir);
+        if safe_name.as_os_str().is_empty() {
+            continue;
+        }
         if is_macos_metadata_path(&safe_name) {
             continue;
         }
@@ -50,6 +54,21 @@ pub fn install_assets_zip(
         report.files_written += 1;
     }
     Ok(report)
+}
+
+fn strip_matching_destination_root(path: &Path, destination_dir: &Path) -> PathBuf {
+    let Some(destination_name) = destination_dir.file_name() else {
+        return path.to_path_buf();
+    };
+    let mut components = path.components();
+    let Some(Component::Normal(first)) = components.next() else {
+        return path.to_path_buf();
+    };
+    if first == destination_name {
+        components.as_path().to_path_buf()
+    } else {
+        path.to_path_buf()
+    }
 }
 
 fn is_macos_metadata_path(path: &Path) -> bool {
@@ -87,6 +106,31 @@ mod tests {
         assert_eq!(
             safe_zip_path("oneui/dark/font.ttf"),
             Some(PathBuf::from("oneui/dark/font.ttf"))
+        );
+    }
+
+    #[test]
+    fn strips_redundant_archive_root_matching_destination() {
+        assert_eq!(
+            strip_matching_destination_root(
+                Path::new("assets/ozone/png/retroarch.png"),
+                Path::new("/tmp/RetroArch/assets")
+            ),
+            PathBuf::from("ozone/png/retroarch.png")
+        );
+        assert_eq!(
+            strip_matching_destination_root(
+                Path::new("overlays/gamepads/retropad.cfg"),
+                Path::new("/tmp/RetroArch/overlays")
+            ),
+            PathBuf::from("gamepads/retropad.cfg")
+        );
+        assert_eq!(
+            strip_matching_destination_root(
+                Path::new("glui/add.png"),
+                Path::new("/tmp/RetroArch/assets")
+            ),
+            PathBuf::from("glui/add.png")
         );
     }
 

@@ -65,39 +65,85 @@ struct AppScreen<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
+        let skin = RetroArchMenuSkin.current(runtime: runtime)
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(title)
-                            .font(.system(size: 34, weight: .bold, design: .default))
-                            .foregroundColor(palette.ink)
-                        Text(subtitle)
-                            .font(.subheadline.weight(.medium))
-                            .foregroundColor(palette.secondary)
-                    }
-                    .padding(.top, 16)
+            ZStack(alignment: .topLeading) {
+                RetroArchMenuBackground(skin: skin).ignoresSafeArea()
+                if skin.showsSidebarRail { ozoneRail(skin) }
+                if skin.showsXmbRibbon { xmbRibbon(skin) }
 
-                    content
+                ScrollView {
+                    VStack(alignment: .leading, spacing: skin.layout == .rgui ? 8 : 18) {
+                        header(skin)
+                        content
+                    }
+                    .padding(.horizontal, max(18, skin.horizontalPadding))
+                    .padding(.leading, skin.showsSidebarRail ? 82 : 0)
+                    .padding(.top, skin.showsMaterialBar ? 56 : 16)
+                    .padding(.bottom, 28)
                 }
-                .padding(.horizontal, 18)
-                .padding(.bottom, 28)
+
+                if skin.showsMaterialBar { materialBar(skin) }
             }
-            .background(menuBackground.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
         }
     }
 
-    private var palette: RetroArchMenuPalette {
-        RetroArchMenuPalette.driver(runtime.settingValue("menu_driver").isEmpty ? "materialui" : runtime.settingValue("menu_driver"))
+    private func header(_ skin: RetroArchMenuSkin) -> some View {
+        VStack(alignment: .leading, spacing: skin.layout == .material ? 2 : 4) {
+            Text(title)
+                .font(skin.titleFont)
+                .foregroundColor(skin.palette.ink)
+                .textCase(skin.layout == .rgui ? .uppercase : nil)
+            Text(subtitle)
+                .font(skin.subtitleFont.weight(.medium))
+                .foregroundColor(skin.palette.secondary)
+            if !skin.assets.hasDriverAssets {
+                Text("\(skin.displayName) assets not installed — fallback drawing is active")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundColor(skin.palette.accent)
+            }
+        }
+        .padding(.top, skin.layout == .material ? 10 : 0)
+        .padding(.bottom, skin.layout == .material ? 10 : 0)
     }
 
-    private var menuBackground: some View {
-        ZStack {
-            palette.background
-            LinearGradient(colors: [palette.accent.opacity(0.22), .clear], startPoint: .topLeading, endPoint: .center)
-            RadialGradient(colors: [palette.elevated.opacity(0.75), .clear], center: .bottomTrailing, startRadius: 20, endRadius: 440)
+    private func materialBar(_ skin: RetroArchMenuSkin) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "line.3.horizontal")
+            Text(title).font(.headline)
+            Spacer()
+            Text(skin.displayName).font(.caption.weight(.semibold))
         }
+        .foregroundColor(skin.palette.ink)
+        .padding(.horizontal, 16)
+        .frame(height: 56)
+        .background(skin.palette.surface.opacity(0.98))
+    }
+
+    private func ozoneRail(_ skin: RetroArchMenuSkin) -> some View {
+        VStack(spacing: 22) {
+            Image(systemName: "house.fill")
+            Image(systemName: "rectangle.stack.fill")
+            Image(systemName: "cpu.fill")
+            Image(systemName: "gearshape.fill")
+            Spacer()
+        }
+        .font(.title3)
+        .foregroundColor(skin.palette.secondary)
+        .frame(width: 88)
+        .padding(.top, 42)
+    }
+
+    private func xmbRibbon(_ skin: RetroArchMenuSkin) -> some View {
+        HStack(spacing: 30) {
+            ForEach(["house.fill", "rectangle.stack.fill", "cpu.fill", "gearshape.fill"], id: \.self) { icon in
+                Image(systemName: icon)
+                    .font(.system(size: 28, weight: .light))
+                    .foregroundColor(skin.palette.ink.opacity(0.82))
+            }
+        }
+        .padding(.top, 72)
+        .padding(.leading, 26)
     }
 }
-

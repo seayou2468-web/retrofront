@@ -7,9 +7,10 @@ struct RuntimeMenuScreen: View {
     let dismissPlayer: () -> Void
 
     var body: some View {
+        let skin = RetroArchMenuSkin.current(runtime: runtime)
         ZStack {
             Color.black.opacity(0.72).ignoresSafeArea()
-            OneUI.ashChromeBackground.ignoresSafeArea()
+            RetroArchMenuBackground(skin: skin).ignoresSafeArea()
 
             VStack(spacing: 0) {
                 QuickMenuHeader(title: runtime.currentMenu?.title ?? "Quick Menu", subtitle: runtime.loadedGameURL?.lastPathComponent ?? "No game loaded", onBack: runtime.menuPop) {

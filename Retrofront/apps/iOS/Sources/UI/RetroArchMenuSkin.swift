@@ -1,0 +1,200 @@
+import Foundation
+import SwiftUI
+
+struct RetroArchMenuAssets {
+    let root: URL
+    let driverRoot: URL
+    let iconDirectory: URL?
+    let fontCandidates: [URL]
+    let backgroundCandidates: [URL]
+
+    static func resolve(driver: String, assetsRootPath: String) -> RetroArchMenuAssets {
+        let root = URL(fileURLWithPath: assetsRootPath.isEmpty ? "assets" : assetsRootPath, isDirectory: true)
+        let normalized = driver.lowercased()
+        let directoryName = normalized == "materialui" ? "glui" : normalized
+        let driverRoot = root.appendingPathComponent(directoryName, isDirectory: true)
+        let iconDirectory: URL?
+        switch normalized {
+        case "ozone": iconDirectory = driverRoot.appendingPathComponent("png", isDirectory: true)
+        case "xmb": iconDirectory = driverRoot.appendingPathComponent("monochrome/png", isDirectory: true)
+        case "rgui": iconDirectory = driverRoot.appendingPathComponent("png", isDirectory: true)
+        case "materialui": iconDirectory = driverRoot
+        default: iconDirectory = nil
+        }
+        let fontCandidates = [
+            driverRoot.appendingPathComponent("font.ttf"),
+            driverRoot.appendingPathComponent("regular.ttf"),
+            driverRoot.appendingPathComponent("bold.ttf"),
+            root.appendingPathComponent("pkg/apple/RetroArch_Metal.xcassets")
+        ]
+        let backgroundCandidates = [
+            driverRoot.appendingPathComponent("bg.png"),
+            driverRoot.appendingPathComponent("wallpaper.png"),
+            driverRoot.appendingPathComponent("png/retroarch.png"),
+            driverRoot.appendingPathComponent("monochrome/png/retroarch.png")
+        ]
+        return RetroArchMenuAssets(root: root, driverRoot: driverRoot, iconDirectory: iconDirectory, fontCandidates: fontCandidates, backgroundCandidates: backgroundCandidates)
+    }
+
+    var hasDriverAssets: Bool {
+        FileManager.default.fileExists(atPath: driverRoot.path)
+    }
+
+    func firstExisting(_ urls: [URL]) -> URL? {
+        urls.first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+}
+
+struct RetroArchMenuSkin {
+    enum Layout {
+        case material
+        case ozone
+        case xmb
+        case rgui
+        case fallback
+    }
+
+    let driver: String
+    let displayName: String
+    let layout: Layout
+    let palette: RetroArchMenuPalette
+    let assets: RetroArchMenuAssets
+    let rowCornerRadius: CGFloat
+    let rowSpacing: CGFloat
+    let horizontalPadding: CGFloat
+    let titleFont: Font
+    let rowFont: Font
+    let subtitleFont: Font
+    let usesMonospacedRows: Bool
+    let showsSidebarRail: Bool
+    let showsXmbRibbon: Bool
+    let showsMaterialBar: Bool
+
+    static func current(runtime: EmulatorRuntimeModel) -> RetroArchMenuSkin {
+        let rawDriver = runtime.settingValue("menu_driver")
+        let driver = rawDriver.isEmpty ? "materialui" : rawDriver.lowercased()
+        let assetsRoot = runtime.settingValue("menu_assets_directory").isEmpty ? runtime.settingValue("assets_directory") : runtime.settingValue("menu_assets_directory")
+        return RetroArchMenuSkin(driver: driver, assetsRootPath: assetsRoot)
+    }
+
+    init(driver: String, assetsRootPath: String) {
+        let normalized = driver.lowercased()
+        self.driver = normalized
+        self.palette = RetroArchMenuPalette.driver(normalized)
+        self.assets = .resolve(driver: normalized, assetsRootPath: assetsRootPath)
+        switch normalized {
+        case "ozone":
+            displayName = "Ozone"
+            layout = .ozone
+            rowCornerRadius = 6
+            rowSpacing = 6
+            horizontalPadding = 22
+            titleFont = .system(size: 28, weight: .semibold)
+            rowFont = .system(size: 16, weight: .medium)
+            subtitleFont = .caption
+            usesMonospacedRows = false
+            showsSidebarRail = true
+            showsXmbRibbon = false
+            showsMaterialBar = false
+        case "xmb":
+            displayName = "XMB"
+            layout = .xmb
+            rowCornerRadius = 2
+            rowSpacing = 14
+            horizontalPadding = 26
+            titleFont = .system(size: 26, weight: .light)
+            rowFont = .system(size: 18, weight: .regular)
+            subtitleFont = .caption
+            usesMonospacedRows = false
+            showsSidebarRail = false
+            showsXmbRibbon = true
+            showsMaterialBar = false
+        case "rgui":
+            displayName = "RGUI"
+            layout = .rgui
+            rowCornerRadius = 0
+            rowSpacing = 0
+            horizontalPadding = 12
+            titleFont = .system(size: 20, weight: .bold, design: .monospaced)
+            rowFont = .system(size: 15, weight: .regular, design: .monospaced)
+            subtitleFont = .system(size: 11, weight: .regular, design: .monospaced)
+            usesMonospacedRows = true
+            showsSidebarRail = false
+            showsXmbRibbon = false
+            showsMaterialBar = false
+        case "oneui":
+            displayName = "One UI"
+            layout = .fallback
+            rowCornerRadius = OneUI.compactRadius
+            rowSpacing = 10
+            horizontalPadding = 18
+            titleFont = .system(size: 34, weight: .bold)
+            rowFont = .headline
+            subtitleFont = .caption
+            usesMonospacedRows = false
+            showsSidebarRail = false
+            showsXmbRibbon = false
+            showsMaterialBar = false
+        default:
+            displayName = "Material UI"
+            layout = .material
+            rowCornerRadius = 2
+            rowSpacing = 1
+            horizontalPadding = 0
+            titleFont = .system(size: 22, weight: .medium)
+            rowFont = .system(size: 16, weight: .regular)
+            subtitleFont = .caption
+            usesMonospacedRows = false
+            showsSidebarRail = false
+            showsXmbRibbon = false
+            showsMaterialBar = true
+        }
+    }
+
+    func iconName(for actionId: UInt32) -> String {
+        switch actionId {
+        case 1, 20, 21, 222: return "cpu.fill"
+        case 2, 36, 37: return "rectangle.stack.fill"
+        case 3: return "icloud.and.arrow.down.fill"
+        case 4, 210...221, 260...274: return "gearshape.fill"
+        case 8: return "line.3.horizontal.circle.fill"
+        case 9: return "restart.circle.fill"
+        case 10: return "play.fill"
+        case 12, 26: return "xmark.circle.fill"
+        case 13: return "sparkles"
+        case 14, 27, 28, 29, 30, 38, 39: return "sdcard.fill"
+        case 15: return "camera.fill"
+        case 16: return "heart.fill"
+        case 17: return "wand.and.stars"
+        case 19, 25, 213: return "gamecontroller.fill"
+        case 22, 211: return "display"
+        case 23, 212: return "speaker.wave.2.fill"
+        default: return "circle.grid.2x2.fill"
+        }
+    }
+}
+
+struct RetroArchMenuBackground: View {
+    let skin: RetroArchMenuSkin
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            skin.palette.background
+            switch skin.layout {
+            case .material:
+                LinearGradient(colors: [skin.palette.surface, skin.palette.background], startPoint: .top, endPoint: .bottom)
+            case .ozone:
+                LinearGradient(colors: [skin.palette.background, skin.palette.surface.opacity(0.95)], startPoint: .leading, endPoint: .trailing)
+                Rectangle().fill(skin.palette.elevated.opacity(0.88)).frame(width: 88)
+            case .xmb:
+                RadialGradient(colors: [skin.palette.accent.opacity(0.45), .clear], center: .topLeading, startRadius: 10, endRadius: 520)
+                LinearGradient(colors: [.white.opacity(0.10), .clear, .black.opacity(0.35)], startPoint: .top, endPoint: .bottom)
+            case .rgui:
+                skin.palette.background
+                Rectangle().strokeBorder(skin.palette.accent.opacity(0.7), lineWidth: 2).padding(6)
+            case .fallback:
+                OneUI.auroraBackground
+            }
+        }
+    }
+}

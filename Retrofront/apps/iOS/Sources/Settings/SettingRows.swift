@@ -1,23 +1,27 @@
 import SwiftUI
+import RetrofrontSwift
 
 struct SettingsGroup<Content: View>: View {
+    @EnvironmentObject private var runtime: EmulatorRuntimeModel
     let title: String
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let skin = RetroArchMenuSkin.current(runtime: runtime)
+        VStack(alignment: .leading, spacing: skin.rowSpacing) {
             Text(title)
-                .font(.title3.bold())
-                .foregroundColor(OneUI.ink)
+                .font(skin.titleFont.weight(.bold))
+                .foregroundColor(skin.palette.ink)
             VStack(spacing: 1) { content }
                 .padding(6)
-                .background(OneUI.surface)
-                .clipShape(RoundedRectangle(cornerRadius: OneUI.radius, style: .continuous))
+                .background(skin.palette.surface)
+                .clipShape(RoundedRectangle(cornerRadius: skin.rowCornerRadius == 0 ? 0 : OneUI.radius, style: .continuous))
         }
     }
 }
 
 struct SettingPickerRow: View {
+    @EnvironmentObject private var runtime: EmulatorRuntimeModel
     let title: String
     let subtitle: String
     let value: String
@@ -25,6 +29,7 @@ struct SettingPickerRow: View {
     let onSelect: ((label: String, value: String)) -> Void
 
     var body: some View {
+        let skin = RetroArchMenuSkin.current(runtime: runtime)
         Menu {
             if choices.isEmpty {
                 Text("No choices available")
@@ -43,23 +48,23 @@ struct SettingPickerRow: View {
         } label: {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.subheadline.bold()).foregroundColor(OneUI.ink)
-                    Text(subtitle).font(.caption).foregroundColor(OneUI.secondary)
+                    Text(title).font(skin.rowFont.weight(.semibold)).foregroundColor(skin.palette.ink)
+                    Text(subtitle).font(skin.subtitleFont).foregroundColor(skin.palette.secondary)
                 }
                 Spacer()
                 Text(value)
                     .font(.caption.bold())
-                    .foregroundColor(OneUI.accent)
+                    .foregroundColor(skin.palette.accent)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(Capsule().fill(OneUI.accent.opacity(0.10)))
+                    .background(Capsule().fill(skin.palette.accent.opacity(0.10)))
                 Image(systemName: "chevron.down")
                     .font(.caption.bold())
-                    .foregroundColor(OneUI.secondary)
+                    .foregroundColor(skin.palette.secondary)
             }
             .padding(12)
-            .background(OneUI.elevated)
-            .clipShape(RoundedRectangle(cornerRadius: OneUI.compactRadius, style: .continuous))
+            .background(skin.palette.elevated)
+            .clipShape(RoundedRectangle(cornerRadius: skin.rowCornerRadius, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -67,16 +72,18 @@ struct SettingPickerRow: View {
 
 
 struct SettingToggleRow: View {
+    @EnvironmentObject private var runtime: EmulatorRuntimeModel
     let title: String
     let subtitle: String
     let isOn: Bool
     let onChange: (Bool) -> Void
 
     var body: some View {
+        let skin = RetroArchMenuSkin.current(runtime: runtime)
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.subheadline.bold()).foregroundColor(OneUI.ink)
-                Text(subtitle).font(.caption).foregroundColor(OneUI.secondary)
+                Text(title).font(skin.rowFont.weight(.semibold)).foregroundColor(skin.palette.ink)
+                Text(subtitle).font(skin.subtitleFont).foregroundColor(skin.palette.secondary)
             }
             Spacer()
             Toggle("", isOn: Binding(
@@ -86,30 +93,32 @@ struct SettingToggleRow: View {
     }
 ))
                 .labelsHidden()
-                .toggleStyle(SwitchToggleStyle(tint: OneUI.accent))
+                .toggleStyle(SwitchToggleStyle(tint: skin.palette.accent))
         }
         .padding(12)
-        .background(OneUI.elevated)
-        .clipShape(RoundedRectangle(cornerRadius: OneUI.compactRadius, style: .continuous))
+        .background(skin.palette.elevated)
+        .clipShape(RoundedRectangle(cornerRadius: skin.rowCornerRadius, style: .continuous))
     }
 }
 
 struct SettingInfoRow: View {
+    @EnvironmentObject private var runtime: EmulatorRuntimeModel
     let title: String
     let value: String
 
     var body: some View {
+        let skin = RetroArchMenuSkin.current(runtime: runtime)
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.subheadline.bold()).foregroundColor(OneUI.ink)
+            Text(title).font(skin.rowFont.weight(.semibold)).foregroundColor(skin.palette.ink)
             Text(value.isEmpty ? "Not set" : value)
                 .font(.caption)
-                .foregroundColor(OneUI.secondary)
+                .foregroundColor(skin.palette.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(OneUI.elevated)
-        .clipShape(RoundedRectangle(cornerRadius: OneUI.compactRadius, style: .continuous))
+        .background(skin.palette.elevated)
+        .clipShape(RoundedRectangle(cornerRadius: skin.rowCornerRadius, style: .continuous))
     }
 }
