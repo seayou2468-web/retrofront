@@ -29,11 +29,11 @@ struct DashboardView: View {
                 .tabItem { Label("設定", systemImage: "gearshape.fill") }
                 .tag(3)
         }
-        .accentColor(OneUI.accent)
+        .accentColor(RetroArchMenuPalette.driver(runtime.settingValue("menu_driver").isEmpty ? "materialui" : runtime.settingValue("menu_driver")).accent)
         .preferredColorScheme(.dark)
-        .toolbarBackground(OneUI.surface, for: .tabBar)
+        .toolbarBackground(RetroArchMenuPalette.driver(runtime.settingValue("menu_driver").isEmpty ? "materialui" : runtime.settingValue("menu_driver")).surface, for: .tabBar)
         .toolbarBackground(.visible, for: .tabBar)
-        .background(OneUI.background.ignoresSafeArea())
+        .background(RetroArchMenuPalette.driver(runtime.settingValue("menu_driver").isEmpty ? "materialui" : runtime.settingValue("menu_driver")).background.ignoresSafeArea())
         .fullScreenCover(isPresented: $isPlayViewActive) { PlayView() }
         .fileImporter(isPresented: $isImporterPresented, allowedContentTypes: [.data]) { result in
             switch result {

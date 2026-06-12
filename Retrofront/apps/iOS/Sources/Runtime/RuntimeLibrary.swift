@@ -139,8 +139,12 @@ extension EmulatorRuntimeModel {
   }
 
   func installDestination(for archive: FrontendAssetArchive) -> URL {
+    // Libretro buildbot frontend zips contain the contents of each RetroArch
+    // directory. Extract each archive directly into the matching configured
+    // directory so ozone/materialui/xmb/rgui assets and overlays resolve from
+    // the same paths RetroArch writes to retroarch.cfg.
     switch archive {
-    case .assets: return storageLayout.root
+    case .assets: return storageLayout.assetsDirectory
     case .info: return storageLayout.infoDirectory
     case .overlays: return storageLayout.overlaysDirectory
     }

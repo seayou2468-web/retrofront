@@ -187,14 +187,7 @@ impl Settings {
     fn apply_retroarch_defaults(&mut self, base_dir: &Path) {
         let defaults = [
             ("libretro_directory", base_dir.join("cores")),
-            (
-                "libretro_info_path",
-                if cfg!(target_os = "linux") {
-                    base_dir.join("cores")
-                } else {
-                    base_dir.join("info")
-                },
-            ),
+            ("libretro_info_path", base_dir.join("info")),
             (
                 "core_options_path",
                 base_dir.join("retroarch-core-options.cfg"),
@@ -246,7 +239,7 @@ impl Settings {
             ("osk_overlay_directory", base_dir.join("overlays/keyboards")),
             (
                 "input_overlay",
-                base_dir.join("overlays/gamepads/flat/retropad.cfg"),
+                base_dir.join("overlays/gamepads/Named_Overlays/retropad.cfg"),
             ),
             ("joypad_autoconfig_dir", base_dir.join("autoconfig")),
             ("video_shader_dir", base_dir.join("shaders")),
@@ -263,7 +256,7 @@ impl Settings {
             ("video_wgpu_renderer", PathBuf::from("metal")),
             ("audio_driver", PathBuf::from("swift")),
             ("input_driver", PathBuf::from("swift")),
-            ("menu_driver", PathBuf::from("oneui")),
+            ("menu_driver", PathBuf::from("materialui")),
             ("menu_theme", PathBuf::from("dark")),
             ("menu_color_scheme", PathBuf::from("dark")),
             ("menu_layout_density", PathBuf::from("standard")),
@@ -501,11 +494,8 @@ mod tests {
         );
         assert_eq!(
             settings.libretro_info_path(),
-            if cfg!(target_os = "linux") {
-                PathBuf::from("/tmp/Retrofront/cores")
-            } else {
-                PathBuf::from("/tmp/Retrofront/info")
-            }
+            PathBuf::from("/tmp/Retrofront/info")
         );
+        assert_eq!(settings.get("menu_driver"), Some(&"materialui".to_string()));
     }
 }

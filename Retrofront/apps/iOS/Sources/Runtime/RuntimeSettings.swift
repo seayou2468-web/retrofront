@@ -92,11 +92,11 @@ extension EmulatorRuntimeModel {
 
 
   public var menuDriverChoices: [(label: String, value: String)] {
-    [("One UI", "oneui"), ("Ozone", "ozone"), ("Material UI", "materialui"), ("RGUI", "rgui"), ("XMB", "xmb")]
+    [("Material UI", "materialui"), ("Ozone", "ozone"), ("XMB", "xmb"), ("RGUI", "rgui"), ("One UI (fallback)", "oneui")]
   }
 
   public var menuDriverLabel: String {
-    let current = settingValue("menu_driver").isEmpty ? "oneui" : settingValue("menu_driver")
+    let current = settingValue("menu_driver").isEmpty ? "materialui" : settingValue("menu_driver")
     return menuDriverChoices.first { $0.value == current }?.label ?? current
   }
 

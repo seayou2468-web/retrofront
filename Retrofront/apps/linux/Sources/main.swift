@@ -308,8 +308,12 @@ final class LinuxRetrofrontRuntime {
   }
 
   func installDestination(for archive: FrontendAssetArchive) -> URL {
+    // Libretro buildbot frontend zips contain the contents of each RetroArch
+    // directory. Extract each archive directly into the matching configured
+    // directory so ozone/materialui/xmb/rgui assets and overlays resolve from
+    // the same paths RetroArch writes to retroarch.cfg.
     switch archive {
-    case .assets: return layout.root
+    case .assets: return layout.assetsDirectory
     case .info: return layout.infoDirectory
     case .overlays: return layout.overlaysDirectory
     }
@@ -474,7 +478,7 @@ final class AdwaitaRetrofrontApp {
     addChoice(group, title: "Video Filter", key: "video_filter_mode", values: [("Nearest", "nearest"), ("Linear", "linear")])
     addChoice(group, title: "Audio Latency", key: "audio_latency_ms", values: [("32 ms", "32"), ("64 ms", "64"), ("96 ms", "96"), ("128 ms", "128")])
     addChoice(group, title: "Library Sort", key: "library_sort_mode", values: [("Name ↑", "name_ascending"), ("Name ↓", "name_descending"), ("Extension", "extension")])
-    addChoice(group, title: "Menu Driver", key: "menu_driver", values: [("One UI", "oneui"), ("Ozone", "ozone"), ("Material UI", "materialui"), ("RGUI", "rgui"), ("XMB", "xmb")])
+    addChoice(group, title: "Menu Driver", key: "menu_driver", values: [("Material UI", "materialui"), ("Ozone", "ozone"), ("XMB", "xmb"), ("RGUI", "rgui"), ("One UI (fallback)", "oneui")])
 
     let assetsRow = ActionRow(title: "Frontend Assets", subtitle: "Install/download assets.zip, info.zip, and overlays.zip individually")
     for archive in FrontendAssetArchive.allCases {
