@@ -16,29 +16,12 @@ settings:
 
 targets:
 
-  CRetrofrontCore:
-    type: library.static
-    platform: iOS
-
-    sources:
-      - path: frontend/CRetrofrontCore
-
-    settings:
-      base:
-        PRODUCT_NAME: CRetrofrontCore
-        DEFINES_MODULE: YES
-        CLANG_ENABLE_MODULES: YES
-        PUBLIC_HEADERS_FOLDER_PATH: include
-
   RetrofrontSwift:
-    type: framework   # ★ここが重要（static → framework）
+    type: framework
     platform: iOS
 
     sources:
       - path: frontend/Sources/RetrofrontSwift
-
-    dependencies:
-      - target: CRetrofrontCore
 
     settings:
       base:
@@ -46,9 +29,13 @@ targets:
         PRODUCT_NAME: RetrofrontSwift
         DEFINES_MODULE: YES
         MACH_O_TYPE: mh_dylib
-
-        # Swift runtimeの扱いを安定化
         BUILD_LIBRARY_FOR_DISTRIBUTION: YES
+
+        # Rust/Cヘッダ参照
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
+        LIBRARY_SEARCH_PATHS: "$(SRCROOT)/target/aarch64-apple-ios/release"
+        OTHER_LDFLAGS: "$(inherited) -lretrofront_core"
 
   RetrofrontiOS:
     type: application
@@ -107,3 +94,10 @@ targets:
         FRAMEWORK_SEARCH_PATHS: "$(inherited) $(SRCROOT)/cores $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Frameworks"
 
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"
+
+schemes:
+  RetrofrontiOS:
+    build:
+      targets:
+        RetrofrontiOS: all
+        RetrofrontSwift: all
