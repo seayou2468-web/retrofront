@@ -3228,7 +3228,7 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
                     (_, 271) => ("menu_card_style", &["modern", "flat", "outlined"]),
                     (_, 272) => (
                         "quick_menu_style",
-                        &["oneui_fullscreen", "bottom_sheet", "compact"],
+                        &["retroarch_fullscreen", "bottom_sheet", "compact"],
                     ),
                     _ => ("", &[]),
                 };

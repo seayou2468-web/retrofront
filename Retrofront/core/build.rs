@@ -34,4 +34,14 @@ fn main() {
     bindings
         .write_to_file(out_path.join("libretro_bindings.rs"))
         .expect("failed to write libretro bindings");
+
+    let menu_header = manifest_dir.join("../menu/retrofront_menu.h");
+    let menu_source = manifest_dir.join("../menu/retrofront_menu.c");
+    println!("cargo:rerun-if-changed={}", menu_header.display());
+    println!("cargo:rerun-if-changed={}", menu_source.display());
+    cc::Build::new()
+        .file(menu_source)
+        .include(manifest_dir.join("../menu"))
+        .warnings(true)
+        .compile("retrofront_menu");
 }

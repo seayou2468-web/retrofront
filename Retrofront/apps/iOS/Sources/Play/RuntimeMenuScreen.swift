@@ -37,8 +37,6 @@ struct RetroArchDriverMenuChrome: View {
             xmbUI
         case .rgui:
             rguiUI
-        case .fallback:
-            fallbackUI
         }
     }
 
@@ -200,20 +198,6 @@ struct RetroArchDriverMenuChrome: View {
         .background(Color.black.opacity(0.82))
         .overlay(Rectangle().stroke(skin.palette.accent, lineWidth: 2))
         .padding(14)
-    }
-
-    private var fallbackUI: some View {
-        VStack(spacing: 0) {
-            QuickMenuHeader(title: title, subtitle: subtitle, onBack: runtime.menuPop) { isPresented = false }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    quickSections
-                    RuntimeMenuEntries(isPresented: $isPresented, dismissPlayer: dismissPlayer)
-                }
-                .padding(.horizontal, 18)
-                .padding(.bottom, 32)
-            }
-        }
     }
 
     @ViewBuilder

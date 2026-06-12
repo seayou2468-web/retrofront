@@ -74,12 +74,35 @@ extension EmulatorRuntimeModel {
   }
 
   func installBundledAssetsIfNeeded(_ frontend: Retrofront) {
-    let infoProbe = storageLayout.infoDirectory.appendingPathComponent("mgba_libretro.info")
-    guard !FileManager.default.fileExists(atPath: infoProbe.path) else {
-      applyBundleCoreDirectories(frontend)
-      return
+    var installedAnyArchive = false
+    for archive in FrontendAssetArchive.allCases where bundledArchiveNeedsInstall(archive) {
+      installBundledAsset(archive, frontend: frontend, updateStatus: false)
+      installedAnyArchive = true
     }
-    installBundledAssets(frontend, updateStatus: false)
+    if installedAnyArchive {
+      refreshOverlayChoices()
+    }
+    applyBundleCoreDirectories(frontend)
+  }
+
+  func bundledArchiveNeedsInstall(_ archive: FrontendAssetArchive) -> Bool {
+    let probes: [URL]
+    switch archive {
+    case .assets:
+      probes = [
+        storageLayout.assetsDirectory.appendingPathComponent("glui", isDirectory: true),
+        storageLayout.assetsDirectory.appendingPathComponent("ozone", isDirectory: true),
+        storageLayout.assetsDirectory.appendingPathComponent("xmb", isDirectory: true),
+        storageLayout.assetsDirectory.appendingPathComponent("rgui", isDirectory: true)
+      ]
+    case .gluiMinimalAssets:
+      probes = [storageLayout.assetsDirectory.appendingPathComponent("glui", isDirectory: true)]
+    case .info:
+      probes = [storageLayout.infoDirectory.appendingPathComponent("mgba_libretro.info")]
+    case .overlays:
+      probes = [storageLayout.overlaysDirectory.appendingPathComponent("gamepads", isDirectory: true)]
+    }
+    return probes.contains { !FileManager.default.fileExists(atPath: $0.path) }
   }
 
   public func installBundledAssets() {

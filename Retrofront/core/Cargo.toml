@@ -18,6 +18,7 @@ default = []
 
 [build-dependencies]
 bindgen = "0.69"
+cc = "1.0"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

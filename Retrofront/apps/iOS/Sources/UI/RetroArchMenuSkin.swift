@@ -95,7 +95,6 @@ struct RetroArchMenuSkin {
         case ozone
         case xmb
         case rgui
-        case fallback
     }
 
     let driver: String
@@ -164,19 +163,6 @@ struct RetroArchMenuSkin {
             rowFont = .system(size: 15, weight: .regular, design: .monospaced)
             subtitleFont = .system(size: 11, weight: .regular, design: .monospaced)
             usesMonospacedRows = true
-            showsSidebarRail = false
-            showsXmbRibbon = false
-            showsMaterialBar = false
-        case "oneui":
-            displayName = "One UI"
-            layout = .fallback
-            rowCornerRadius = OneUI.compactRadius
-            rowSpacing = 10
-            horizontalPadding = 18
-            titleFont = .system(size: 34, weight: .bold)
-            rowFont = .headline
-            subtitleFont = .caption
-            usesMonospacedRows = false
             showsSidebarRail = false
             showsXmbRibbon = false
             showsMaterialBar = false
@@ -271,8 +257,6 @@ struct RetroArchMenuBackground: View {
             case .rgui:
                 skin.palette.background
                 Rectangle().strokeBorder(skin.palette.accent.opacity(0.7), lineWidth: 2).padding(6)
-            case .fallback:
-                OneUI.auroraBackground
             }
         }
     }

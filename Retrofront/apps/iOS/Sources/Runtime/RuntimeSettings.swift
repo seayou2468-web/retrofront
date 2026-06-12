@@ -92,7 +92,7 @@ extension EmulatorRuntimeModel {
 
 
   public var menuDriverChoices: [(label: String, value: String)] {
-    [("Material UI", "materialui"), ("Ozone", "ozone"), ("XMB", "xmb"), ("RGUI", "rgui"), ("One UI (fallback)", "oneui")]
+    [("Material UI", "materialui"), ("Ozone", "ozone"), ("XMB", "xmb"), ("RGUI", "rgui")]
   }
 
   public var menuDriverLabel: String {

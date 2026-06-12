@@ -33,7 +33,7 @@ struct SettingsView: View {
             }
 
             SettingsGroup(title: "Menu") {
-                SettingPickerRow(title: "Menu Driver", subtitle: "Ozone / XMB / RGUI / Material UI / One UI", value: runtime.menuDriverLabel, choices: runtime.menuDriverChoices) { choice in
+                SettingPickerRow(title: "Menu Driver", subtitle: "Ozone / XMB / RGUI / Material UI", value: runtime.menuDriverLabel, choices: runtime.menuDriverChoices) { choice in
                     runtime.setMenuDriver(choice.value)
                 }
             }

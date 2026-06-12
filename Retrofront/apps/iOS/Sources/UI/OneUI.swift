@@ -50,8 +50,6 @@ struct RetroArchMenuPalette {
             return .init(background: Color(red: 0.02, green: 0.06, blue: 0.16), surface: Color(red: 0.05, green: 0.11, blue: 0.24), elevated: Color(red: 0.09, green: 0.18, blue: 0.36), ink: .white, secondary: Color(red: 0.72, green: 0.82, blue: 0.96), accent: Color(red: 0.58, green: 0.78, blue: 1.00))
         case "rgui":
             return .init(background: .black, surface: Color(red: 0.02, green: 0.08, blue: 0.08), elevated: Color(red: 0.00, green: 0.18, blue: 0.16), ink: Color(red: 0.72, green: 1.0, blue: 0.82), secondary: Color(red: 0.42, green: 0.82, blue: 0.62), accent: Color(red: 0.95, green: 0.90, blue: 0.45))
-        case "oneui":
-            return .init(background: OneUI.background, surface: OneUI.surface, elevated: OneUI.elevated, ink: OneUI.ink, secondary: OneUI.secondary, accent: OneUI.accent)
         default:
             return .init(background: Color(red: 0.05, green: 0.05, blue: 0.06), surface: Color(red: 0.10, green: 0.10, blue: 0.12), elevated: Color(red: 0.16, green: 0.16, blue: 0.18), ink: .white, secondary: Color(red: 0.74, green: 0.74, blue: 0.78), accent: Color(red: 0.00, green: 0.74, blue: 0.83))
         }
@@ -98,11 +96,6 @@ struct AppScreen<Content: View>: View {
             Text(subtitle)
                 .font(skin.subtitleFont.weight(.medium))
                 .foregroundColor(skin.palette.secondary)
-            if !skin.assets.hasDriverAssets {
-                Text("\(skin.displayName) assets not installed — fallback drawing is active")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundColor(skin.palette.accent)
-            }
         }
         .padding(.top, skin.layout == .material ? 10 : 0)
         .padding(.bottom, skin.layout == .material ? 10 : 0)

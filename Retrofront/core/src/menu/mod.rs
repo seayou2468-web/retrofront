@@ -3,6 +3,51 @@ use crate::gfx::{GfxBackendKind, GfxStatus};
 use crate::scanner::GameEntry;
 use crate::settings::Settings;
 use crate::{GameInfo, SystemInfo};
+use std::ffi::CStr;
+use std::os::raw::{c_char, c_uint};
+
+#[repr(C)]
+struct NativeMenuDriverSpec {
+    ident: *const c_char,
+    display_name: *const c_char,
+    layout_model: *const c_char,
+    input_model: *const c_char,
+    thumbnail_model: *const c_char,
+    animation_model: *const c_char,
+}
+
+extern "C" {
+    fn rf_menu_driver_at(index: c_uint) -> *const NativeMenuDriverSpec;
+    fn rf_menu_driver_default() -> *const NativeMenuDriverSpec;
+    fn rf_menu_driver_next_ident(ident: *const c_char) -> *const c_char;
+}
+
+fn native_str(ptr: *const c_char, fallback: &'static str) -> &'static str {
+    if ptr.is_null() {
+        return fallback;
+    }
+    unsafe { CStr::from_ptr(ptr) }.to_str().unwrap_or(fallback)
+}
+
+fn native_spec(ptr: *const NativeMenuDriverSpec) -> MenuDriverSpec {
+    let ptr = if ptr.is_null() {
+        unsafe { rf_menu_driver_default() }
+    } else {
+        ptr
+    };
+    if ptr.is_null() {
+        return MenuDriverSpec::materialui();
+    }
+    let spec = unsafe { &*ptr };
+    MenuDriverSpec {
+        ident: native_str(spec.ident, "materialui"),
+        display_name: native_str(spec.display_name, "Material UI"),
+        layout_model: native_str(spec.layout_model, "mobile_appbar_navigation"),
+        input_model: native_str(spec.input_model, "touch_navigation_retropad"),
+        thumbnail_model: native_str(spec.thumbnail_model, "responsive_dual_thumbnail_list"),
+        animation_model: native_str(spec.animation_model, "material_elevation_ripple"),
+    }
+}
 
 pub const ACTION_LOAD_CORE: u32 = 1;
 pub const ACTION_LOAD_CONTENT: u32 = 2;
@@ -60,7 +105,6 @@ pub const ACTION_SKIN_SETTINGS: u32 = 260;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuDriver {
-    OneUi,
     Ozone,
     MaterialUi,
     Rgui,
@@ -77,78 +121,50 @@ pub struct MenuDriverSpec {
     pub animation_model: &'static str,
 }
 
+impl MenuDriverSpec {
+    const fn materialui() -> Self {
+        Self {
+            ident: "materialui",
+            display_name: "Material UI",
+            layout_model: "mobile_appbar_navigation",
+            input_model: "touch_navigation_retropad",
+            thumbnail_model: "responsive_dual_thumbnail_list",
+            animation_model: "material_elevation_ripple",
+        }
+    }
+}
+
 impl MenuDriver {
-    pub const ALL: [MenuDriver; 5] = [
+    pub const ALL: [MenuDriver; 4] = [
         MenuDriver::MaterialUi,
         MenuDriver::Ozone,
         MenuDriver::Xmb,
         MenuDriver::Rgui,
-        MenuDriver::OneUi,
     ];
 
     pub fn from_ident(value: &str) -> Self {
         match value.to_ascii_lowercase().as_str() {
             "ozone" => MenuDriver::Ozone,
-            "glui" | "materialui" => MenuDriver::MaterialUi,
             "rgui" => MenuDriver::Rgui,
             "xmb" => MenuDriver::Xmb,
-            "oneui" => MenuDriver::OneUi,
             _ => MenuDriver::MaterialUi,
         }
     }
 
     pub fn spec(self) -> MenuDriverSpec {
-        match self {
-            MenuDriver::OneUi => MenuDriverSpec {
-                ident: "oneui",
-                display_name: "One UI",
-                layout_model: "card_stack",
-                input_model: "touch_first_retropad",
-                thumbnail_model: "list_card_badges",
-                animation_model: "spring_cards",
-            },
-            MenuDriver::Ozone => MenuDriverSpec {
-                ident: "ozone",
-                display_name: "Ozone",
-                layout_model: "desktop_sidebar_detail",
-                input_model: "pointer_keyboard_retropad",
-                thumbnail_model: "right_panel_dual_thumbnail",
-                animation_model: "fade_slide_sidebar",
-            },
-            MenuDriver::MaterialUi => MenuDriverSpec {
-                ident: "materialui",
-                display_name: "Material UI",
-                layout_model: "mobile_appbar_navigation",
-                input_model: "touch_navigation_retropad",
-                thumbnail_model: "responsive_dual_thumbnail_list",
-                animation_model: "material_elevation_ripple",
-            },
-            MenuDriver::Rgui => MenuDriverSpec {
-                ident: "rgui",
-                display_name: "RGUI",
-                layout_model: "fixed_grid_terminal",
-                input_model: "retropad_keyboard",
-                thumbnail_model: "inline_or_side_thumbnail",
-                animation_model: "instant_low_memory",
-            },
-            MenuDriver::Xmb => MenuDriverSpec {
-                ident: "xmb",
-                display_name: "XMB",
-                layout_model: "horizontal_categories_vertical_items",
-                input_model: "retropad_keyboard",
-                thumbnail_model: "background_thumbnail_wallpaper",
-                animation_model: "carousel_easing",
-            },
-        }
+        let index = Self::ALL
+            .iter()
+            .position(|driver| *driver == self)
+            .unwrap_or(0);
+        native_spec(unsafe { rf_menu_driver_at(index as c_uint) })
     }
 
     pub fn next_ident(current: &str) -> &'static str {
-        let current = MenuDriver::from_ident(current);
-        let index = Self::ALL
-            .iter()
-            .position(|driver| *driver == current)
-            .unwrap_or(0);
-        Self::ALL[(index + 1) % Self::ALL.len()].spec().ident
+        let c_current = std::ffi::CString::new(current).unwrap_or_default();
+        native_str(
+            unsafe { rf_menu_driver_next_ident(c_current.as_ptr()) },
+            "materialui",
+        )
     }
 }
 
@@ -223,7 +239,7 @@ impl MenuEngine {
                 ),
                 Self::submenu(
                     "Settings",
-                    "One UI, play screen, library, drivers and paths",
+                    "RetroArch menu, play screen, library, drivers and paths",
                     ACTION_SETTINGS,
                 ),
                 Self::submenu(
@@ -673,7 +689,7 @@ impl MenuEngine {
         let mut entries = vec![
             Self::setting(
                 "Menu Engine",
-                "Shared iOS/Linux engine: oneui, ozone, materialui, rgui, xmb",
+                "Detached RetroArch menu drivers: materialui, ozone, xmb, rgui",
                 format!("{} ({})", spec.display_name, spec.ident),
                 ACTION_SKIN_SETTINGS,
             ),
@@ -889,32 +905,7 @@ impl MenuEngine {
                     274,
                 ),
             ],
-            _ => vec![
-                Self::setting(
-                    "Density",
-                    "One UI spacing preset",
-                    settings
-                        .get("menu_layout_density")
-                        .map_or("standard", String::as_str),
-                    270,
-                ),
-                Self::setting(
-                    "Cards",
-                    "One UI card surface treatment",
-                    settings
-                        .get("menu_card_style")
-                        .map_or("modern", String::as_str),
-                    271,
-                ),
-                Self::setting(
-                    "Quick Menu",
-                    "Quick menu presentation style",
-                    settings
-                        .get("quick_menu_style")
-                        .map_or("oneui_fullscreen", String::as_str),
-                    272,
-                ),
-            ],
+            _ => vec![],
         }
     }
 
@@ -944,7 +935,7 @@ impl MenuEngine {
                 ),
                 Self::submenu(
                     "Menu UI & Skin",
-                    "One UI, Ozone, Material UI, RGUI, XMB, themes and assets",
+                    "Ozone, Material UI, RGUI, XMB, themes and assets",
                     ACTION_SETTINGS_USER_INTERFACE,
                 ),
                 Self::submenu(
@@ -1272,10 +1263,10 @@ impl MenuEngine {
                 ),
                 Self::setting(
                     "Quick Menu",
-                    "Full-screen translucent One UI overlay",
+                    "Full-screen RetroArch menu overlay",
                     settings
                         .get("quick_menu_style")
-                        .map_or("oneui_fullscreen", String::as_str),
+                        .map_or("retroarch_fullscreen", String::as_str),
                     693,
                 ),
                 Self::setting(
@@ -1768,7 +1759,6 @@ mod tests {
             ("materialui", "Material Icons"),
             ("rgui", "RGUI Theme"),
             ("xmb", "XMB Icons"),
-            ("oneui", "Density"),
         ] {
             settings.set("menu_driver", driver);
             engine.push_skin_settings(&settings);
