@@ -12,7 +12,7 @@ struct RetroArchMenuAssets {
     static func resolve(driver: String, assetsRootPath: String) -> RetroArchMenuAssets {
         let root = URL(fileURLWithPath: assetsRootPath.isEmpty ? "assets" : assetsRootPath, isDirectory: true)
         let normalized = driver.lowercased()
-        let directoryName = normalized == "materialui" ? "glui" : normalized
+        let directoryName = normalized
         let driverRoot = root.appendingPathComponent(directoryName, isDirectory: true)
         let iconDirectory: URL?
         switch normalized {
@@ -27,8 +27,7 @@ struct RetroArchMenuAssets {
             driverRoot.appendingPathComponent("regular.ttf"),
             driverRoot.appendingPathComponent("bold.ttf"),
             root.appendingPathComponent("xmb/monochrome/font.ttf"),
-            root.appendingPathComponent("ozone/regular.ttf"),
-            root.appendingPathComponent("glui/font.ttf")
+            root.appendingPathComponent("ozone/regular.ttf")
         ]
         let backgroundCandidates = [
             driverRoot.appendingPathComponent("bg.png"),
@@ -82,7 +81,7 @@ struct RetroArchMenuAssetImage: View {
                let image = UIImage(contentsOfFile: url.path) {
                 Image(uiImage: image).renderingMode(renderingMode).resizable().scaledToFit()
             } else {
-                Image(systemName: systemName).resizable().scaledToFit()
+                Color.clear
             }
         }
         .accessibilityHidden(true)

@@ -78,9 +78,6 @@ const rf_menu_driver_spec *rf_menu_driver_find(const char *ident)
     if (!ident || !*ident)
         return rf_menu_driver_default();
 
-    if (rf_ascii_casecmp(ident, "glui") == 0)
-        ident = "materialui";
-
     for (i = 0; i < rf_menu_driver_count(); i++)
     {
         if (rf_ascii_casecmp(ident, RF_MENU_DRIVERS[i].ident) == 0)
@@ -115,9 +112,6 @@ uint32_t rf_menu_driver_is_supported(const char *ident)
 
     if (!ident || !*ident)
         return 0;
-
-    if (rf_ascii_casecmp(ident, "glui") == 0)
-        ident = "materialui";
 
     for (i = 0; i < rf_menu_driver_count(); i++)
     {

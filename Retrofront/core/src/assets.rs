@@ -28,6 +28,7 @@ pub fn install_assets_zip(
             continue;
         };
         let safe_name = strip_matching_destination_root(&safe_name, destination_dir);
+        let safe_name = normalize_retroarch_asset_path(&safe_name, destination_dir);
         if safe_name.as_os_str().is_empty() {
             continue;
         }
@@ -54,6 +55,19 @@ pub fn install_assets_zip(
         report.files_written += 1;
     }
     Ok(report)
+}
+
+fn normalize_retroarch_asset_path(path: &Path, destination_dir: &Path) -> PathBuf {
+    if destination_dir
+        .file_name()
+        .is_some_and(|name| name == "assets")
+    {
+        let mut components = path.components();
+        if matches!(components.next(), Some(Component::Normal(first)) if first == "glui") {
+            return Path::new("materialui").join(components.as_path());
+        }
+    }
+    path.to_path_buf()
 }
 
 fn strip_matching_destination_root(path: &Path, destination_dir: &Path) -> PathBuf {
@@ -111,8 +125,8 @@ mod tests {
         assert_eq!(safe_zip_path("/absolute"), None);
         assert_eq!(safe_zip_path("x/../../escape"), None);
         assert_eq!(
-            safe_zip_path("oneui/dark/font.ttf"),
-            Some(PathBuf::from("oneui/dark/font.ttf"))
+            safe_zip_path("materialui/dark/font.ttf"),
+            Some(PathBuf::from("materialui/dark/font.ttf"))
         );
     }
 
@@ -134,17 +148,43 @@ mod tests {
         );
         assert_eq!(
             strip_matching_destination_root(
-                Path::new("glui/add.png"),
+                Path::new("materialui/add.png"),
                 Path::new("/tmp/RetroArch/assets")
             ),
-            PathBuf::from("glui/add.png")
+            PathBuf::from("materialui/add.png")
         );
         assert_eq!(
             strip_matching_destination_root(
-                Path::new("frontend/assets/glui/add.png"),
+                Path::new("frontend/assets/materialui/add.png"),
                 Path::new("/tmp/RetroArch/assets")
             ),
-            PathBuf::from("glui/add.png")
+            PathBuf::from("materialui/add.png")
+        );
+    }
+
+    #[test]
+    fn maps_retroarch_glui_assets_to_materialui_driver_directory() {
+        assert_eq!(
+            normalize_retroarch_asset_path(
+                Path::new("glui/add.png"),
+                Path::new("/tmp/RetroArch/assets")
+            ),
+            PathBuf::from("materialui/add.png")
+        );
+        assert_eq!(
+            normalize_retroarch_asset_path(
+                Path::new("ozone/png/retroarch.png"),
+                Path::new("/tmp/RetroArch/assets")
+            ),
+            PathBuf::from("ozone/png/retroarch.png")
+        );
+        let stripped = strip_matching_destination_root(
+            Path::new("frontend/assets/glui/add.png"),
+            Path::new("/tmp/RetroArch/assets"),
+        );
+        assert_eq!(
+            normalize_retroarch_asset_path(&stripped, Path::new("/tmp/RetroArch/assets")),
+            PathBuf::from("materialui/add.png")
         );
     }
 
