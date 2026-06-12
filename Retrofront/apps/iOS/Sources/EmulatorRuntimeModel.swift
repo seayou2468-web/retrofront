@@ -202,15 +202,21 @@ public final class EmulatorRuntimeModel: ObservableObject {
       return
     }
     switch plan.decision {
-    case .selected:
-      doLaunch(url, preferredCore: plan.selectedCorePath)
-    case .needsCoreChoice:
-      pendingContentURL = url
-      pendingCoreChoices = frontend.launchCandidates()
-      statusMessage = "Select a core for .\(plan.contentExtension)"
-    case .noCore:
-      statusMessage = "No compatible core found for .\(plan.contentExtension). Load a matching bundled core first."
-    }
+case .selected:
+  doLaunch(url, preferredCore: plan.selectedCorePath)
+
+case .needsCoreChoice:
+  pendingContentURL = url
+  pendingCoreChoices = frontend.launchCandidates()
+  statusMessage = "Select a core for .\(plan.contentExtension)"
+
+case .noCore:
+  statusMessage = "No compatible core found for .\(plan.contentExtension). Load a matching bundled core first."
+
+@unknown default:
+  statusMessage = "Unknown launch decision"
+  assertionFailure("Unhandled LaunchDecision case")
+}
   }
 
   public func launchPendingContent(with core: CoreInfo) {
