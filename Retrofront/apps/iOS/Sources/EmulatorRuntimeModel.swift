@@ -4,6 +4,12 @@ import UIKit
 import Combine
 import UniformTypeIdentifiers
 
+private enum LaunchDecision: UInt32 {
+    case selected = 0
+    case needsCoreChoice = 1
+    case noCore = 2
+}
+
 public struct OverlayChoice: Identifiable, Equatable, Sendable {
   public let id: String
   public let path: String
