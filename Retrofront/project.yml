@@ -50,6 +50,7 @@ targets:
         BUILD_LIBRARY_FOR_DISTRIBUTION: NO
         SKIP_INSTALL: YES
         ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: NO
+        EMBEDDED_CONTENT_CONTAINS_SWIFT: NO
         LIBRARY_SEARCH_PATHS: "$(SRCROOT)/target/aarch64-apple-ios/release"
         OTHER_LDFLAGS: "$(inherited) -lretrofront_core"
 
@@ -110,6 +111,7 @@ targets:
         OTHER_LDFLAGS: "$(inherited) -lretrofront_core"
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"
         ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: NO
+        EMBEDDED_CONTENT_CONTAINS_SWIFT: NO
 
 schemes:
   RetrofrontiOS:

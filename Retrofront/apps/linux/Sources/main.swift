@@ -1,6 +1,21 @@
 import Adwaita
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+#if os(Linux)
+import Glibc
+#endif
 import RetrofrontSwift
+
+enum FrontendAssetArchive: String, CaseIterable {
+  case assets
+  case info
+  case overlays
+
+  var fileName: String { "\(rawValue).zip" }
+  var downloadURL: URL { URL(string: "https://buildbot.libretro.com/assets/frontend/\(fileName)")! }
+}
 
 struct LinuxOverlayChoice: Equatable {
   let path: String
@@ -263,6 +278,43 @@ final class LinuxRetrofrontRuntime {
     return choices.sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
   }
 
+  @discardableResult
+  func installBundledAsset(_ archive: FrontendAssetArchive) throws -> AssetInstallReport {
+    guard let zipURL = Bundle.main.url(forResource: archive.rawValue, withExtension: "zip") else {
+      throw RuntimeError.message("\(archive.fileName) was not found in the bundled resources")
+    }
+    return try installArchive(archive, zipURL: zipURL, sourceLabel: "bundled")
+  }
+
+  @discardableResult
+  func downloadAndInstallAsset(_ archive: FrontendAssetArchive) throws -> AssetInstallReport {
+    let data = try Data(contentsOf: archive.downloadURL)
+    let cacheURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "-" + archive.fileName)
+    try data.write(to: cacheURL, options: .atomic)
+    defer { try? FileManager.default.removeItem(at: cacheURL) }
+    return try installArchive(archive, zipURL: cacheURL, sourceLabel: "downloaded")
+  }
+
+  @discardableResult
+  func installArchive(_ archive: FrontendAssetArchive, zipURL: URL, sourceLabel: String) throws -> AssetInstallReport {
+    let installRoot = installDestination(for: archive)
+    try FileManager.default.createDirectory(at: installRoot, withIntermediateDirectories: true)
+    let report = try frontend.installAssetsZip(from: zipURL.path, to: installRoot.path)
+    applyRetroArchLayout()
+    refreshLibrary()
+    if let selected = overlays.first { try? selectOverlay(selected) }
+    statusMessage = "Installed \(sourceLabel) \(archive.fileName): \(report.filesWritten) files"
+    return report
+  }
+
+  func installDestination(for archive: FrontendAssetArchive) -> URL {
+    switch archive {
+    case .assets: return layout.root
+    case .info: return layout.infoDirectory
+    case .overlays: return layout.overlaysDirectory
+    }
+  }
+
   func selectOverlay(_ overlay: LinuxOverlayChoice) throws {
     try frontend.setSetting(key: "input_overlay", value: overlay.path)
     try frontend.loadOverlay(at: overlay.path)
@@ -422,6 +474,18 @@ final class AdwaitaRetrofrontApp {
     addChoice(group, title: "Video Filter", key: "video_filter_mode", values: [("Nearest", "nearest"), ("Linear", "linear")])
     addChoice(group, title: "Audio Latency", key: "audio_latency_ms", values: [("32 ms", "32"), ("64 ms", "64"), ("96 ms", "96"), ("128 ms", "128")])
     addChoice(group, title: "Library Sort", key: "library_sort_mode", values: [("Name ↑", "name_ascending"), ("Name ↓", "name_descending"), ("Extension", "extension")])
+    addChoice(group, title: "Menu Driver", key: "menu_driver", values: [("One UI", "oneui"), ("Ozone", "ozone"), ("Material UI", "materialui"), ("RGUI", "rgui"), ("XMB", "xmb")])
+
+    let assetsRow = ActionRow(title: "Frontend Assets", subtitle: "Install/download assets.zip, info.zip, and overlays.zip individually")
+    for archive in FrontendAssetArchive.allCases {
+      assetsRow.addSuffix(Button(label: "Fetch \(archive.rawValue)") { [weak self] in
+        self?.perform { runtime in _ = try runtime.downloadAndInstallAsset(archive) }
+      })
+      assetsRow.addSuffix(Button(label: "Bundled \(archive.rawValue)") { [weak self] in
+        self?.perform { runtime in _ = try runtime.installBundledAsset(archive) }
+      })
+    }
+    group.add(assetsRow)
     return group
   }
 
@@ -528,11 +592,13 @@ func printUsage() {
     retrofront-linux load-core --core <core-path>
     retrofront-linux settings
     retrofront-linux set --key <setting> --value <value>
+    retrofront-linux fetch-assets <assets|info|overlays|all>
 
   Examples:
     retrofront-linux import ~/ROMs/game.gba
     retrofront-linux launch --rom ~/ROMs/game.gba --frames 600
     retrofront-linux set --key video_filter_mode --value nearest
+    retrofront-linux fetch-assets overlays
   """)
 }
 
@@ -577,6 +643,20 @@ func runCommand(_ options: CommandLineOptions, runtime: LinuxRetrofrontRuntime) 
     guard let value else { throw RuntimeError.message("set requires --value <value>") }
     try runtime.setSetting(key: key, value: value)
     print(runtime.statusMessage)
+  case "fetch-assets":
+    let requested = (options.positional.first ?? "all").lowercased()
+    let archives: [FrontendAssetArchive]
+    if requested == "all" {
+      archives = FrontendAssetArchive.allCases
+    } else if let archive = FrontendAssetArchive(rawValue: requested) {
+      archives = [archive]
+    } else {
+      throw RuntimeError.message("fetch-assets requires assets, info, overlays, or all")
+    }
+    for archive in archives {
+      let report = try runtime.downloadAndInstallAsset(archive)
+      print("Installed \(archive.fileName): \(report.filesWritten) files")
+    }
   default:
     throw RuntimeError.message("Unknown command: \(options.command ?? "")")
   }
@@ -592,7 +672,14 @@ func main() {
 
   do {
     let runtime = try LinuxRetrofrontRuntime()
-    if options.gui || options.command == nil {
+    if options.gui {
+      #if os(Linux)
+      setenv("GSK_RENDERER", ProcessInfo.processInfo.environment["GSK_RENDERER"] ?? "cairo", 0)
+      if (ProcessInfo.processInfo.environment["WAYLAND_DISPLAY"] ?? "").isEmpty
+        && (ProcessInfo.processInfo.environment["DISPLAY"] ?? "").isEmpty {
+        throw RuntimeError.message("--gui requires WAYLAND_DISPLAY or DISPLAY; refusing to initialize GTK without a display")
+      }
+      #endif
       let gui = AdwaitaRetrofrontApp(runtime: runtime)
       gui.run()
     } else {

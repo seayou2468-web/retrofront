@@ -164,9 +164,9 @@ struct RuntimeMenuEntries: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("RetroArch Menu")
-                .font(.title3.bold())
-                .foregroundColor(OneUI.ink)
+            Text("RetroArch Menu • \(runtime.menuDriverLabel)")
+                .font(driverFont)
+                .foregroundColor(driverAccent)
             VStack(spacing: 8) {
                 ForEach(runtime.currentMenu?.entries ?? [], id: \.actionId) { entry in
                     Button {
@@ -187,12 +187,52 @@ struct RuntimeMenuEntries: View {
                             if entry.kind == .submenu { Image(systemName: "chevron.right").font(.caption.bold()).foregroundColor(OneUI.muted) }
                         }
                         .padding(12)
-                        .background(OneUI.surface.opacity(0.9))
-                        .clipShape(RoundedRectangle(cornerRadius: OneUI.compactRadius, style: .continuous))
+                        .background(rowBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: rowRadius, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }
             }
+        }
+    }
+
+    private var driver: String {
+        runtime.settingValue("menu_driver").isEmpty ? "oneui" : runtime.settingValue("menu_driver")
+    }
+
+    private var driverFont: Font {
+        switch driver {
+        case "rgui": return .system(.title3, design: .monospaced).bold()
+        case "xmb": return .title2.bold()
+        default: return .title3.bold()
+        }
+    }
+
+    private var driverAccent: Color {
+        switch driver {
+        case "ozone": return .cyan
+        case "materialui": return .purple
+        case "rgui": return .green
+        case "xmb": return .blue
+        default: return OneUI.ink
+        }
+    }
+
+    private var rowBackground: Color {
+        switch driver {
+        case "ozone": return Color.black.opacity(0.42)
+        case "materialui": return OneUI.elevated.opacity(0.96)
+        case "rgui": return Color.black.opacity(0.82)
+        case "xmb": return Color.blue.opacity(0.16)
+        default: return OneUI.surface.opacity(0.9)
+        }
+    }
+
+    private var rowRadius: CGFloat {
+        switch driver {
+        case "rgui": return 2
+        case "materialui": return 20
+        default: return OneUI.compactRadius
         }
     }
 

@@ -2,6 +2,19 @@ import Foundation
 import RetrofrontSwift
 import UIKit
 
+public enum FrontendAssetArchive: String, CaseIterable, Identifiable, Sendable {
+  case assets
+  case info
+  case overlays
+
+  public var id: String { rawValue }
+  public var fileName: String { "\(rawValue).zip" }
+  public var displayName: String { fileName }
+  public var downloadURL: URL {
+    URL(string: "https://buildbot.libretro.com/assets/frontend/\(fileName)")!
+  }
+}
+
 extension EmulatorRuntimeModel {
   public func refreshAvailableCores() {
     guard let frontend else { return }
@@ -69,25 +82,67 @@ extension EmulatorRuntimeModel {
   }
 
   public func installBundledAssets() {
+    installBundledAsset(.assets)
+  }
+
+  public func installBundledAsset(_ archive: FrontendAssetArchive) {
     guard let frontend else { return }
-    installBundledAssets(frontend, updateStatus: true)
+    installBundledAsset(archive, frontend: frontend, updateStatus: true)
   }
 
   func installBundledAssets(_ frontend: Retrofront, updateStatus: Bool) {
-    guard let zipURL = Bundle.main.url(forResource: "assets", withExtension: "zip") else {
-      if updateStatus { statusMessage = "assets.zip was not found in the app bundle" }
+    installBundledAsset(.assets, frontend: frontend, updateStatus: updateStatus)
+  }
+
+  func installBundledAsset(_ archive: FrontendAssetArchive, frontend: Retrofront, updateStatus: Bool) {
+    guard let zipURL = Bundle.main.url(forResource: archive.rawValue, withExtension: "zip") else {
+      if updateStatus { statusMessage = "\(archive.fileName) was not found in the app bundle" }
       return
     }
-    let installRoot = storageLayout.root
+    installArchive(frontend, archive: archive, zipURL: zipURL, sourceLabel: "bundled", updateStatus: updateStatus)
+  }
+
+  public func downloadAndInstallAsset(_ archive: FrontendAssetArchive) {
+    guard let frontend else { return }
+    statusMessage = "Downloading \(archive.fileName)…"
+    Task { [weak self, archive, frontend] in
+      do {
+        let (temporaryURL, _) = try await URLSession.shared.download(from: archive.downloadURL)
+        let cacheURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "-" + archive.fileName)
+        if FileManager.default.fileExists(atPath: cacheURL.path) { try FileManager.default.removeItem(at: cacheURL) }
+        try FileManager.default.moveItem(at: temporaryURL, to: cacheURL)
+        await MainActor.run {
+          self?.installArchive(frontend, archive: archive, zipURL: cacheURL, sourceLabel: "downloaded", updateStatus: true)
+          try? FileManager.default.removeItem(at: cacheURL)
+        }
+      } catch {
+        await MainActor.run { self?.statusMessage = "Download failed for \(archive.fileName): \(error)" }
+      }
+    }
+  }
+
+  func installArchive(_ frontend: Retrofront, archive: FrontendAssetArchive, zipURL: URL, sourceLabel: String, updateStatus: Bool) {
+    let installRoot = installDestination(for: archive)
     do {
+      try FileManager.default.createDirectory(at: installRoot, withIntermediateDirectories: true)
       let report = try frontend.installAssetsZip(from: zipURL.path, to: installRoot.path)
       applyBundleCoreDirectories(frontend)
       refreshOverlayChoices()
       loadConfiguredOverlay(frontend)
       refresh()
-      if updateStatus { statusMessage = "Installed assets: \(report.filesWritten) files" }
+      if updateStatus {
+        statusMessage = "Installed \(sourceLabel) \(archive.fileName): \(report.filesWritten) files"
+      }
     } catch {
-      if updateStatus { statusMessage = "Assets install failed: \(error)" }
+      if updateStatus { statusMessage = "Install failed for \(archive.fileName): \(error)" }
+    }
+  }
+
+  func installDestination(for archive: FrontendAssetArchive) -> URL {
+    switch archive {
+    case .assets: return storageLayout.root
+    case .info: return storageLayout.infoDirectory
+    case .overlays: return storageLayout.overlaysDirectory
     }
   }
 

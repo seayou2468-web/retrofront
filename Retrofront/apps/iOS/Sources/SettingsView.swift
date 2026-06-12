@@ -32,6 +32,12 @@ struct SettingsView: View {
                 }
             }
 
+            SettingsGroup(title: "Menu") {
+                SettingPickerRow(title: "Menu Driver", subtitle: "Ozone / XMB / RGUI / Material UI / One UI", value: runtime.menuDriverLabel, choices: runtime.menuDriverChoices) { choice in
+                    runtime.setMenuDriver(choice.value)
+                }
+            }
+
             SettingsGroup(title: "Controller") {
                 SettingToggleRow(title: "Touch Overlay", subtitle: "画面上コントローラー", isOn: runtime.overlayEnabledSetting) {
                     runtime.setOverlayEnabledSetting($0)
@@ -95,18 +101,34 @@ struct SettingsView: View {
                 SettingInfoRow(title: "States", value: runtime.settingValue("savestate_directory"))
                 SettingInfoRow(title: "System/BIOS", value: runtime.settingValue("system_directory"))
                 SettingInfoRow(title: "Screenshots", value: runtime.settingValue("screenshot_directory"))
-                Button {
-                    runtime.installBundledAssets()
-                } label: {
-                    Label("Install bundled assets", systemImage: "arrow.down.doc.fill")
-                        .font(.subheadline.bold())
-                        .foregroundColor(OneUI.accent)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
-                        .background(OneUI.elevated)
-                        .clipShape(RoundedRectangle(cornerRadius: OneUI.compactRadius, style: .continuous))
+                ForEach(FrontendAssetArchive.allCases) { archive in
+                    HStack(spacing: 10) {
+                        Button {
+                            runtime.installBundledAsset(archive)
+                        } label: {
+                            Label("Install bundled \(archive.displayName)", systemImage: "archivebox.fill")
+                                .font(.subheadline.bold())
+                                .foregroundColor(OneUI.accent)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(12)
+                                .background(OneUI.elevated)
+                                .clipShape(RoundedRectangle(cornerRadius: OneUI.compactRadius, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            runtime.downloadAndInstallAsset(archive)
+                        } label: {
+                            Label("Fetch", systemImage: "icloud.and.arrow.down.fill")
+                                .font(.subheadline.bold())
+                                .foregroundColor(OneUI.teal)
+                                .padding(12)
+                                .background(OneUI.elevated)
+                                .clipShape(RoundedRectangle(cornerRadius: OneUI.compactRadius, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .buttonStyle(.plain)
             }
         }
     }

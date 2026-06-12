@@ -45,11 +45,11 @@ if includeLinuxGUI {
 
 let products: [Product] = includeLinuxGUI
   ? [
-      .library(name: "RetrofrontSwift", targets: ["RetrofrontSwift"]),
+      .library(name: "RetrofrontSwift", type: .static, targets: ["RetrofrontSwift"]),
       .executable(name: "retrofront-linux", targets: ["RetrofrontLinux"]),
     ]
   : [
-      .library(name: "RetrofrontSwift", targets: ["RetrofrontSwift"]),
+      .library(name: "RetrofrontSwift", type: .static, targets: ["RetrofrontSwift"]),
     ]
 
 let package = Package(

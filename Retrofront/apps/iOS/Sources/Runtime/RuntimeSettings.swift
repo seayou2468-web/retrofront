@@ -90,6 +90,23 @@ extension EmulatorRuntimeModel {
     frontend?.setting(key) ?? settings.first(where: { $0.key == key })?.value ?? ""
   }
 
+
+  public var menuDriverChoices: [(label: String, value: String)] {
+    [("One UI", "oneui"), ("Ozone", "ozone"), ("Material UI", "materialui"), ("RGUI", "rgui"), ("XMB", "xmb")]
+  }
+
+  public var menuDriverLabel: String {
+    let current = settingValue("menu_driver").isEmpty ? "oneui" : settingValue("menu_driver")
+    return menuDriverChoices.first { $0.value == current }?.label ?? current
+  }
+
+  public func setMenuDriver(_ value: String) {
+    setSetting(key: "menu_driver", value: value)
+    frontend?.pushSkinSettingsMenu()
+    refreshMenu()
+    statusMessage = "Menu driver: \(menuDriverLabel)"
+  }
+
   public var overlayEnabledSetting: Bool {
     settingValue("input_overlay_enable") != "false"
   }
