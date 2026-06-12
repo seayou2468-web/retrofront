@@ -30,7 +30,7 @@ targets:
         PUBLIC_HEADERS_FOLDER_PATH: include
 
   RetrofrontSwift:
-    type: framework
+    type: staticFramework
     platform: iOS
 
     sources:
