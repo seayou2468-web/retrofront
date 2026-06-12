@@ -191,7 +191,12 @@ struct SettingToggleRow: View {
                 Text(subtitle).font(.caption).foregroundColor(OneUI.secondary)
             }
             Spacer()
-            Toggle("", isOn: Binding(get: { isOn }, set: onChange))
+            Toggle("", isOn: Binding(
+    get: { isOn },
+    set: { newValue in
+        onChange(newValue)
+    }
+))
                 .labelsHidden()
                 .toggleStyle(SwitchToggleStyle(tint: OneUI.accent))
         }
