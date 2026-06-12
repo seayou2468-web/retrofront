@@ -372,6 +372,8 @@ extension EmulatorRuntimeModel {
       return "\(plan.candidateCount) compatible cores"
     case .noCore:
       return "No compatible core for .\(plan.contentExtension)"
+    @unknown default:
+      return "Compatibility unknown for .\(plan.contentExtension)"
     }
   }
 

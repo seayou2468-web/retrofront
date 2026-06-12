@@ -125,6 +125,8 @@ extension EmulatorRuntimeModel {
       statusMessage = "Select a core for .\(plan.contentExtension)"
     case .noCore:
       statusMessage = "No compatible core found for .\(plan.contentExtension). Load a matching bundled core first."
+    @unknown default:
+      statusMessage = "Unsupported launch plan for .\(plan.contentExtension)."
     }
   }
 

@@ -12,24 +12,24 @@ public struct OverlayChoice: Identifiable, Equatable, Sendable {
 
 @MainActor
 public final class EmulatorRuntimeModel: ObservableObject {
-  @Published private(set) var frontendState: FrontendState = .empty
-  @Published private(set) var systemInfo: LibretroSystemInfo?
-  @Published private(set) var coreOptions: [CoreOption] = []
-  @Published private(set) var displayImage: UIImage?
-  @Published private(set) var aspectRatio: Double = 4.0/3.0
-  @Published private(set) var isRunning = false
-  @Published private(set) var availableCores: [CoreInfo] = []
-  @Published private(set) var availableGames: [GameEntrySwift] = []
-  @Published private(set) var corePath: String?
-  @Published private(set) var loadedGameURL: URL?
-  @Published private(set) var currentMenu: MenuList?
-  @Published private(set) var overlayInfo: OverlayInfo?
-  @Published private(set) var availableOverlays: [OverlayChoice] = []
-  @Published private(set) var settings: [RetrofrontSetting] = []
-  @Published private(set) var pendingCoreChoices: [CoreInfo] = []
-  @Published private(set) var pendingContentURL: URL?
-  @Published private(set) var launchToken: UInt = 0
-  @Published private(set) var menuToken: UInt = 0
+  @Published var frontendState: FrontendState = .empty
+  @Published var systemInfo: LibretroSystemInfo?
+  @Published var coreOptions: [CoreOption] = []
+  @Published var displayImage: UIImage?
+  @Published var aspectRatio: Double = 4.0/3.0
+  @Published var isRunning = false
+  @Published var availableCores: [CoreInfo] = []
+  @Published var availableGames: [GameEntrySwift] = []
+  @Published var corePath: String?
+  @Published var loadedGameURL: URL?
+  @Published var currentMenu: MenuList?
+  @Published var overlayInfo: OverlayInfo?
+  @Published var availableOverlays: [OverlayChoice] = []
+  @Published var settings: [RetrofrontSetting] = []
+  @Published var pendingCoreChoices: [CoreInfo] = []
+  @Published var pendingContentURL: URL?
+  @Published var launchToken: UInt = 0
+  @Published var menuToken: UInt = 0
   @Published var statusMessage = "Ready"
 
   var frontend: Retrofront?
