@@ -30,14 +30,13 @@ targets:
         DEFINES_MODULE: YES
         MACH_O_TYPE: mh_dylib
         BUILD_LIBRARY_FOR_DISTRIBUTION: YES
-        OTHER_SWIFT_FLAGS: "-I $(SRCROOT)/frontend/CRetrofrontCore"
-
+        CLANG_ENABLE_MODULES: YES
         # Rust/Cヘッダ参照
         SWIFT_INCLUDE_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
         HEADER_SEARCH_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
         LIBRARY_SEARCH_PATHS: "$(SRCROOT)/target/aarch64-apple-ios/release"
         OTHER_LDFLAGS: "$(inherited) -lretrofront_core"
-
+        OTHER_SWIFT_FLAGS: "-I $(SRCROOT)/frontend/CRetrofrontCore"
   RetrofrontiOS:
     type: application
     platform: iOS
