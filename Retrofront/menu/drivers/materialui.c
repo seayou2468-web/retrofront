@@ -1,3 +1,7 @@
+#ifdef RETROFRONT_MENU_SHIM_ONLY
+#include <retrofront_menu_shim.h>
+RF_MENU_SHIM_SOURCE("Retrofront/menu/drivers/materialui.c")
+#else
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2011-2017 - Daniel De Matteis
  *  Copyright (C) 2014-2017 - Jean-André Santoni
@@ -12449,3 +12453,5 @@ menu_ctx_driver_t menu_ctx_mui = {
    materialui_pointer_up,
    materialui_menu_entry_action
 };
+
+#endif /* RETROFRONT_MENU_SHIM_ONLY */

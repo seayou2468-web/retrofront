@@ -1,3 +1,7 @@
+#ifdef RETROFRONT_MENU_SHIM_ONLY
+#include <retrofront_menu_shim.h>
+RF_MENU_SHIM_SOURCE("Retrofront/menu/menu_explore.c")
+#else
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2011-2020 - Daniel De Matteis
  *  Copyright (C) 2020      - Psyraven
@@ -1928,3 +1932,5 @@ void menu_explore_set_state(explore_state_t *state)
 
    explore_state = state;
 }
+
+#endif /* RETROFRONT_MENU_SHIM_ONLY */

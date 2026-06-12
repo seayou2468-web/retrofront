@@ -1,3 +1,7 @@
+#ifdef RETROFRONT_MENU_SHIM_ONLY
+#include <retrofront_menu_shim.h>
+RF_MENU_SHIM_SOURCE("Retrofront/menu/drivers/rgui.c")
+#else
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
  *  Copyright (C) 2011-2017 - Daniel De Matteis
@@ -8543,3 +8547,5 @@ menu_ctx_driver_t menu_ctx_rgui = {
    rgui_pointer_up,
    rgui_menu_entry_action
 };
+
+#endif /* RETROFRONT_MENU_SHIM_ONLY */

@@ -1,3 +1,7 @@
+#ifdef RETROFRONT_MENU_SHIM_ONLY
+#include <retrofront_menu_shim.h>
+RF_MENU_SHIM_SOURCE("Retrofront/menu/menu_displaylist.c")
+#else
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2011-2017 - Daniel De Matteis
  *  Copyright (C) 2014-2017 - Jean-André Santoni
@@ -16950,3 +16954,5 @@ bool menu_displaylist_ctl(enum menu_displaylist_ctl_state type,
 
    return true;
 }
+
+#endif /* RETROFRONT_MENU_SHIM_ONLY */

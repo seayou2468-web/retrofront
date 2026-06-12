@@ -28,6 +28,31 @@ struct NativeMenuHostCallbacks {
 }
 
 #[repr(C)]
+struct NativeMenuSourceFile {
+    path: *const c_char,
+    compiled: c_uint,
+}
+
+#[repr(C)]
+struct NativeMenuLayoutMetrics {
+    viewport_width: c_uint,
+    viewport_height: c_uint,
+    content_x: c_uint,
+    content_y: c_uint,
+    content_width: c_uint,
+    content_height: c_uint,
+    sidebar_width: c_uint,
+    header_height: c_uint,
+    footer_height: c_uint,
+    row_height: c_uint,
+    icon_size: c_uint,
+    horizontal_padding: c_uint,
+    vertical_padding: c_uint,
+    background_mode: c_uint,
+    scale: f32,
+}
+
+#[repr(C)]
 struct NativeMenuRuntimeConfig {
     driver: *const NativeMenuDriverSpec,
     driver_ident: *const c_char,
@@ -37,6 +62,14 @@ struct NativeMenuRuntimeConfig {
 }
 
 extern "C" {
+    fn rf_menu_source_file_count() -> c_uint;
+    fn rf_menu_source_file_at(index: c_uint) -> *const NativeMenuSourceFile;
+    fn rf_menu_layout_for_viewport(
+        driver_ident: *const c_char,
+        viewport_width: c_uint,
+        viewport_height: c_uint,
+        out_metrics: *mut NativeMenuLayoutMetrics,
+    ) -> c_uint;
     fn rf_menu_driver_at(index: c_uint) -> *const NativeMenuDriverSpec;
     fn rf_menu_driver_default() -> *const NativeMenuDriverSpec;
     fn rf_menu_driver_next_ident(ident: *const c_char) -> *const c_char;
@@ -111,6 +144,75 @@ impl Default for NativeMenuRuntimeSnapshot {
             assets_ready: false,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MenuLayoutMetrics {
+    pub viewport_width: u32,
+    pub viewport_height: u32,
+    pub content_x: u32,
+    pub content_y: u32,
+    pub content_width: u32,
+    pub content_height: u32,
+    pub sidebar_width: u32,
+    pub header_height: u32,
+    pub footer_height: u32,
+    pub row_height: u32,
+    pub icon_size: u32,
+    pub horizontal_padding: u32,
+    pub vertical_padding: u32,
+    pub background_mode: u32,
+    pub scale: f32,
+}
+
+pub fn native_menu_source_files() -> Vec<(String, bool)> {
+    let count = unsafe { rf_menu_source_file_count() };
+    (0..count)
+        .filter_map(|index| {
+            let raw = unsafe { rf_menu_source_file_at(index) };
+            let raw = unsafe { raw.as_ref() }?;
+            Some((c_str_lossy(raw.path)?, raw.compiled != 0))
+        })
+        .collect()
+}
+
+pub fn native_menu_layout(driver: &str, width: u32, height: u32) -> Option<MenuLayoutMetrics> {
+    let driver = CString::new(driver).unwrap_or_default();
+    let mut raw = NativeMenuLayoutMetrics {
+        viewport_width: 0,
+        viewport_height: 0,
+        content_x: 0,
+        content_y: 0,
+        content_width: 0,
+        content_height: 0,
+        sidebar_width: 0,
+        header_height: 0,
+        footer_height: 0,
+        row_height: 0,
+        icon_size: 0,
+        horizontal_padding: 0,
+        vertical_padding: 0,
+        background_mode: 0,
+        scale: 1.0,
+    };
+    let ok = unsafe { rf_menu_layout_for_viewport(driver.as_ptr(), width, height, &mut raw) } != 0;
+    ok.then_some(MenuLayoutMetrics {
+        viewport_width: raw.viewport_width,
+        viewport_height: raw.viewport_height,
+        content_x: raw.content_x,
+        content_y: raw.content_y,
+        content_width: raw.content_width,
+        content_height: raw.content_height,
+        sidebar_width: raw.sidebar_width,
+        header_height: raw.header_height,
+        footer_height: raw.footer_height,
+        row_height: raw.row_height,
+        icon_size: raw.icon_size,
+        horizontal_padding: raw.horizontal_padding,
+        vertical_padding: raw.vertical_padding,
+        background_mode: raw.background_mode,
+        scale: raw.scale,
+    })
 }
 
 extern "C" fn native_bridge_get_setting(
@@ -1923,6 +2025,36 @@ mod tests {
         assert_eq!(snapshot.assets_directory, root.to_string_lossy());
         assert!(snapshot.assets_ready);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn native_menu_library_reports_all_detached_sources() {
+        let files = native_menu_source_files();
+        assert_eq!(files.len(), 34);
+        assert!(files.iter().all(|(_, compiled)| *compiled));
+        assert!(files
+            .iter()
+            .any(|(path, _)| path.ends_with("drivers/ozone.c")));
+        assert!(files
+            .iter()
+            .any(|(path, _)| path.ends_with("drivers/xmb.c")));
+        assert!(files
+            .iter()
+            .any(|(path, _)| path.ends_with("menu_driver.c")));
+    }
+
+    #[test]
+    fn native_menu_layouts_fit_common_viewports() {
+        for driver in ["materialui", "ozone", "xmb", "rgui"] {
+            let metrics = native_menu_layout(driver, 390, 844).expect("layout");
+            assert_eq!(metrics.viewport_width, 390);
+            assert_eq!(metrics.viewport_height, 844);
+            assert!(metrics.content_x < metrics.viewport_width, "{driver}");
+            assert!(metrics.content_y < metrics.viewport_height, "{driver}");
+            assert!(metrics.content_width > 0, "{driver}");
+            assert!(metrics.content_height > 0, "{driver}");
+            assert!(metrics.row_height >= 22, "{driver}");
+        }
     }
 
     #[test]

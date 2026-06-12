@@ -1,3 +1,7 @@
+#ifdef RETROFRONT_MENU_SHIM_ONLY
+#include <retrofront_menu_shim.h>
+RF_MENU_SHIM_SOURCE("Retrofront/menu/menu_screensaver.c")
+#else
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2011-2021 - Daniel De Matteis
  *  Copyright (C) 2019-2021 - James Leaver
@@ -824,3 +828,5 @@ void menu_screensaver_frame(menu_screensaver_t *screensaver,
       video_st->current_video->set_viewport(
             video_st->data, video_width, video_height, false, true);
 }
+
+#endif /* RETROFRONT_MENU_SHIM_ONLY */

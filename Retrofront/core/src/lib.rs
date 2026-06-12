@@ -1747,6 +1747,25 @@ pub struct RfMenuList {
 }
 
 #[repr(C)]
+pub struct RfMenuLayoutMetrics {
+    pub viewport_width: u32,
+    pub viewport_height: u32,
+    pub content_x: u32,
+    pub content_y: u32,
+    pub content_width: u32,
+    pub content_height: u32,
+    pub sidebar_width: u32,
+    pub header_height: u32,
+    pub footer_height: u32,
+    pub row_height: u32,
+    pub icon_size: u32,
+    pub horizontal_padding: u32,
+    pub vertical_padding: u32,
+    pub background_mode: u32,
+    pub scale: f32,
+}
+
+#[repr(C)]
 pub struct RfSettingEntry {
     pub key: *const c_char,
     pub value: *const c_char,
@@ -2761,6 +2780,50 @@ pub unsafe extern "C" fn rf_frontend_get_launch_candidate(
 }
 
 // Menu Engine API Impl
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_menu_source_file_count() -> usize {
+    menu::native_menu_source_files().len()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_menu_layout_metrics(
+    _frontend: *mut RfFrontend,
+    width: u32,
+    height: u32,
+    out_metrics: *mut RfMenuLayoutMetrics,
+) -> bool {
+    let Some(out_metrics) = (unsafe { out_metrics.as_mut() }) else {
+        return false;
+    };
+    with_active_frontend(|core| {
+        let driver = core
+            .settings
+            .get("menu_driver")
+            .map_or("materialui", String::as_str);
+        let Some(metrics) = menu::native_menu_layout(driver, width, height) else {
+            return false;
+        };
+        *out_metrics = RfMenuLayoutMetrics {
+            viewport_width: metrics.viewport_width,
+            viewport_height: metrics.viewport_height,
+            content_x: metrics.content_x,
+            content_y: metrics.content_y,
+            content_width: metrics.content_width,
+            content_height: metrics.content_height,
+            sidebar_width: metrics.sidebar_width,
+            header_height: metrics.header_height,
+            footer_height: metrics.footer_height,
+            row_height: metrics.row_height,
+            icon_size: metrics.icon_size,
+            horizontal_padding: metrics.horizontal_padding,
+            vertical_padding: metrics.vertical_padding,
+            background_mode: metrics.background_mode,
+            scale: metrics.scale,
+        };
+        true
+    })
+}
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_menu_current_list(
     frontend: *mut RfFrontend,

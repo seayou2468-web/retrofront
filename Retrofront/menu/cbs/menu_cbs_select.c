@@ -1,3 +1,7 @@
+#ifdef RETROFRONT_MENU_SHIM_ONLY
+#include <retrofront_menu_shim.h>
+RF_MENU_SHIM_SOURCE("Retrofront/menu/cbs/menu_cbs_select.c")
+#else
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2011-2017 - Daniel De Matteis
  *
@@ -160,3 +164,5 @@ int menu_cbs_init_bind_select(menu_file_list_cbs_t *cbs,
 
    return -1;
 }
+
+#endif /* RETROFRONT_MENU_SHIM_ONLY */

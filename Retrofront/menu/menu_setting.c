@@ -1,3 +1,7 @@
+#ifdef RETROFRONT_MENU_SHIM_ONLY
+#include <retrofront_menu_shim.h>
+RF_MENU_SHIM_SOURCE("Retrofront/menu/menu_setting.c")
+#else
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
  *  Copyright (C) 2011-2017 - Daniel De Matteis
@@ -26246,3 +26250,5 @@ void video_driver_menu_settings(void **list_data, void *list_info_data,
 #endif
 #endif
 }
+
+#endif /* RETROFRONT_MENU_SHIM_ONLY */

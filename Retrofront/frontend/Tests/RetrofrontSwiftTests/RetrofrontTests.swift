@@ -29,4 +29,16 @@ final class RetrofrontTests: XCTestCase {
     XCTAssertEqual(plan?.contentExtension, "gba")
   }
 
+  func testNativeRetroArchMenuBridgeReportsDetachedSourcesAndLayout() throws {
+    let frontend = try Retrofront()
+    XCTAssertEqual(frontend.nativeMenuSourceFileCount(), 34)
+    try frontend.setSetting(key: "menu_driver", value: "ozone")
+    let metrics = frontend.menuLayoutMetrics(width: 390, height: 844)
+    XCTAssertNotNil(metrics)
+    XCTAssertEqual(metrics?.viewportWidth, 390)
+    XCTAssertEqual(metrics?.viewportHeight, 844)
+    XCTAssertGreaterThan(metrics?.contentWidth ?? 0, 0)
+    XCTAssertGreaterThan(metrics?.contentHeight ?? 0, 0)
+  }
+
 }

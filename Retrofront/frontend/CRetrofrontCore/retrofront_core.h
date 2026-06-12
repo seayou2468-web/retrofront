@@ -135,6 +135,24 @@ typedef struct RfMenuList {
     uintptr_t entry_count;
 } RfMenuList;
 
+typedef struct RfMenuLayoutMetrics {
+    uint32_t viewport_width;
+    uint32_t viewport_height;
+    uint32_t content_x;
+    uint32_t content_y;
+    uint32_t content_width;
+    uint32_t content_height;
+    uint32_t sidebar_width;
+    uint32_t header_height;
+    uint32_t footer_height;
+    uint32_t row_height;
+    uint32_t icon_size;
+    uint32_t horizontal_padding;
+    uint32_t vertical_padding;
+    uint32_t background_mode;
+    float scale;
+} RfMenuLayoutMetrics;
+
 typedef struct RfSettingEntry {
     const char *key;
     const char *value;
@@ -224,6 +242,8 @@ void rf_frontend_menu_push_information(RfFrontend *frontend);
 void rf_frontend_menu_push_skin_settings(RfFrontend *frontend);
 bool rf_frontend_menu_activate(RfFrontend *frontend, uint32_t action_id);
 bool rf_frontend_menu_pop(RfFrontend *frontend);
+uintptr_t rf_frontend_menu_source_file_count(void);
+bool rf_frontend_menu_layout_metrics(RfFrontend *frontend, uint32_t width, uint32_t height, RfMenuLayoutMetrics *out_metrics);
 
 // RetroArch-style Settings API
 bool rf_frontend_load_settings(RfFrontend *frontend, const char *path);

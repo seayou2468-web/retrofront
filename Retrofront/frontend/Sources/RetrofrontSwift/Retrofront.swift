@@ -181,6 +181,24 @@ public struct MenuList: Sendable {
   public let entries: [MenuEntry]
 }
 
+public struct MenuLayoutMetrics: Equatable, Sendable {
+  public let viewportWidth: UInt32
+  public let viewportHeight: UInt32
+  public let contentX: UInt32
+  public let contentY: UInt32
+  public let contentWidth: UInt32
+  public let contentHeight: UInt32
+  public let sidebarWidth: UInt32
+  public let headerHeight: UInt32
+  public let footerHeight: UInt32
+  public let rowHeight: UInt32
+  public let iconSize: UInt32
+  public let horizontalPadding: UInt32
+  public let verticalPadding: UInt32
+  public let backgroundMode: UInt32
+  public let scale: Float
+}
+
 public struct RetrofrontSetting: Equatable, Sendable {
   public let key: String
   public let value: String
@@ -668,6 +686,32 @@ public final class Retrofront: @unchecked Sendable {
 
   public func menuPop() -> Bool {
     return rf_frontend_menu_pop(handle)
+  }
+
+  public func nativeMenuSourceFileCount() -> Int {
+    Int(rf_frontend_menu_source_file_count())
+  }
+
+  public func menuLayoutMetrics(width: UInt32, height: UInt32) -> MenuLayoutMetrics? {
+    var raw = RfMenuLayoutMetrics()
+    guard rf_frontend_menu_layout_metrics(handle, width, height, &raw) else { return nil }
+    return MenuLayoutMetrics(
+      viewportWidth: raw.viewport_width,
+      viewportHeight: raw.viewport_height,
+      contentX: raw.content_x,
+      contentY: raw.content_y,
+      contentWidth: raw.content_width,
+      contentHeight: raw.content_height,
+      sidebarWidth: raw.sidebar_width,
+      headerHeight: raw.header_height,
+      footerHeight: raw.footer_height,
+      rowHeight: raw.row_height,
+      iconSize: raw.icon_size,
+      horizontalPadding: raw.horizontal_padding,
+      verticalPadding: raw.vertical_padding,
+      backgroundMode: raw.background_mode,
+      scale: raw.scale
+    )
   }
 
   public func loadSettings(at path: String) throws {

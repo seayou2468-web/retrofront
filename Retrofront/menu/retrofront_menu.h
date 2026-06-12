@@ -29,6 +29,30 @@ typedef struct rf_menu_host_callbacks {
     void *userdata;
 } rf_menu_host_callbacks;
 
+
+typedef struct rf_menu_source_file {
+    const char *path;
+    uint32_t compiled;
+} rf_menu_source_file;
+
+typedef struct rf_menu_layout_metrics {
+    uint32_t viewport_width;
+    uint32_t viewport_height;
+    uint32_t content_x;
+    uint32_t content_y;
+    uint32_t content_width;
+    uint32_t content_height;
+    uint32_t sidebar_width;
+    uint32_t header_height;
+    uint32_t footer_height;
+    uint32_t row_height;
+    uint32_t icon_size;
+    uint32_t horizontal_padding;
+    uint32_t vertical_padding;
+    uint32_t background_mode;
+    float scale;
+} rf_menu_layout_metrics;
+
 typedef struct rf_menu_runtime_config {
     const rf_menu_driver_spec *driver;
     const char *driver_ident;
@@ -36,6 +60,12 @@ typedef struct rf_menu_runtime_config {
     const char *theme;
     uint32_t assets_ready;
 } rf_menu_runtime_config;
+
+
+uint32_t rf_menu_source_file_count(void);
+const rf_menu_source_file *rf_menu_source_file_at(uint32_t index);
+uint32_t rf_menu_layout_for_viewport(const char *driver_ident, uint32_t viewport_width, uint32_t viewport_height, rf_menu_layout_metrics *out_metrics);
+uint32_t rf_menu_asset_path(const char *driver_ident, const char *asset_name, char *out_path, uint32_t out_path_len);
 
 uint32_t rf_menu_driver_count(void);
 const rf_menu_driver_spec *rf_menu_driver_at(uint32_t index);

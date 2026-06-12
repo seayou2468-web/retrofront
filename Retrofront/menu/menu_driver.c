@@ -1,3 +1,7 @@
+#ifdef RETROFRONT_MENU_SHIM_ONLY
+#include <retrofront_menu_shim.h>
+RF_MENU_SHIM_SOURCE("Retrofront/menu/menu_driver.c")
+#else
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2011-2021 - Daniel De Matteis
  *  Copyright (C) 2014-2017 - Jean-André Santoni
@@ -8308,3 +8312,5 @@ void menu_dialog_confirm(struct menu_state *menu_st)
    menu_st->dialog_st.pending_cmd = menu_st->dialog_st.confirm_cmd;
    menu_dialog_confirm_reset(menu_st);
 }
+
+#endif /* RETROFRONT_MENU_SHIM_ONLY */

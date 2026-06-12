@@ -479,7 +479,7 @@ final class AdwaitaRetrofrontApp {
     addChoice(group, title: "Video Filter", key: "video_filter_mode", values: [("Nearest", "nearest"), ("Linear", "linear")])
     addChoice(group, title: "Audio Latency", key: "audio_latency_ms", values: [("32 ms", "32"), ("64 ms", "64"), ("96 ms", "96"), ("128 ms", "128")])
     addChoice(group, title: "Library Sort", key: "library_sort_mode", values: [("Name ↑", "name_ascending"), ("Name ↓", "name_descending"), ("Extension", "extension")])
-    addChoice(group, title: "Menu Driver", key: "menu_driver", values: [("Material UI", "materialui"), ("Ozone", "ozone"), ("XMB", "xmb"), ("RGUI", "rgui"), ("One UI (fallback)", "oneui")])
+    addChoice(group, title: "Menu Driver", key: "menu_driver", values: [("Material UI", "materialui"), ("Ozone", "ozone"), ("XMB", "xmb"), ("RGUI", "rgui")])
 
     let assetsRow = ActionRow(title: "Frontend Assets", subtitle: "Install/download assets.zip, info.zip, and overlays.zip individually")
     for archive in FrontendAssetArchive.allCases {

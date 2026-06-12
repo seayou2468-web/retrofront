@@ -1,3 +1,7 @@
+#ifdef RETROFRONT_MENU_SHIM_ONLY
+#include <retrofront_menu_shim.h>
+RF_MENU_SHIM_SOURCE("Retrofront/menu/menu_contentless_cores.c")
+#else
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2011-2022 - Daniel De Matteis
  *  Copyright (C) 2019-2022 - James Leaver
@@ -487,3 +491,5 @@ unsigned menu_displaylist_contentless_cores(file_list_t *list,
 
    return count;
 }
+
+#endif /* RETROFRONT_MENU_SHIM_ONLY */

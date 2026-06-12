@@ -8,10 +8,13 @@ struct RuntimeMenuScreen: View {
 
     var body: some View {
         let skin = RetroArchMenuSkin.current(runtime: runtime)
-        ZStack {
-            Color.black.opacity(0.72).ignoresSafeArea()
-            RetroArchMenuBackground(skin: skin).ignoresSafeArea()
-            RetroArchDriverMenuChrome(skin: skin, isPresented: $isPresented, dismissPlayer: dismissPlayer)
+        GeometryReader { proxy in
+            let metrics = runtime.frontend?.menuLayoutMetrics(width: UInt32(max(proxy.size.width, 1)), height: UInt32(max(proxy.size.height, 1)))
+            ZStack {
+                Color.black.opacity(0.72).ignoresSafeArea()
+                RetroArchMenuBackground(skin: skin).ignoresSafeArea()
+                RetroArchDriverMenuChrome(skin: skin, metrics: metrics, isPresented: $isPresented, dismissPlayer: dismissPlayer)
+            }
         }
         .preferredColorScheme(.dark)
     }
@@ -20,6 +23,7 @@ struct RuntimeMenuScreen: View {
 struct RetroArchDriverMenuChrome: View {
     @EnvironmentObject private var runtime: EmulatorRuntimeModel
     let skin: RetroArchMenuSkin
+    let metrics: MenuLayoutMetrics?
     @Binding var isPresented: Bool
     let dismissPlayer: () -> Void
 
@@ -53,7 +57,7 @@ struct RetroArchDriverMenuChrome: View {
                 closeButton
             }
             .padding(.horizontal, 16)
-            .frame(height: 64)
+            .frame(height: CGFloat(metrics?.headerHeight ?? 64))
             .background(skin.palette.surface.opacity(0.98))
 
             ScrollView {
@@ -73,7 +77,7 @@ struct RetroArchDriverMenuChrome: View {
                 materialTab("Quick Menu", asset: "menu", system: "line.3.horizontal.circle.fill")
                 materialTab("Settings", asset: "settings", system: "gearshape.fill")
             }
-            .frame(height: 58)
+            .frame(height: CGFloat(metrics?.footerHeight ?? 58))
             .background(skin.palette.surface.opacity(0.98))
         }
     }
@@ -90,7 +94,7 @@ struct RetroArchDriverMenuChrome: View {
             }
             .padding(.top, 38)
             .padding(.bottom, 20)
-            .frame(width: 92)
+            .frame(width: CGFloat(metrics?.sidebarWidth ?? 92))
             .background(skin.palette.surface.opacity(0.84))
 
             VStack(alignment: .leading, spacing: 0) {
@@ -102,8 +106,8 @@ struct RetroArchDriverMenuChrome: View {
                     Spacer()
                     Text(skin.displayName).font(.caption.bold()).foregroundColor(skin.palette.accent)
                 }
-                .padding(.horizontal, 28)
-                .padding(.top, 26)
+                .padding(.horizontal, CGFloat(metrics?.horizontalPadding ?? 28))
+                .padding(.top, CGFloat(metrics?.verticalPadding ?? 26))
                 .padding(.bottom, 18)
 
                 HStack(alignment: .top, spacing: 18) {
@@ -132,8 +136,8 @@ struct RetroArchDriverMenuChrome: View {
                     .background(skin.palette.surface.opacity(0.72))
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
-                .padding(.horizontal, 28)
-                .padding(.bottom, 24)
+                .padding(.horizontal, CGFloat(metrics?.horizontalPadding ?? 28))
+                .padding(.bottom, CGFloat(metrics?.verticalPadding ?? 24))
             }
         }
     }
@@ -166,8 +170,8 @@ struct RetroArchDriverMenuChrome: View {
                         }
                     }
                 }
-                .padding(.leading, 80)
-                .padding(.trailing, 32)
+                .padding(.leading, CGFloat(metrics?.horizontalPadding ?? 80))
+                .padding(.trailing, CGFloat(metrics?.horizontalPadding ?? 32))
                 .padding(.top, 20)
             }
         }

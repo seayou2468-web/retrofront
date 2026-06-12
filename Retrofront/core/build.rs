@@ -35,13 +35,48 @@ fn main() {
         .write_to_file(out_path.join("libretro_bindings.rs"))
         .expect("failed to write libretro bindings");
 
-    let menu_header = manifest_dir.join("../menu/retrofront_menu.h");
-    let menu_source = manifest_dir.join("../menu/retrofront_menu.c");
+    let menu_dir = manifest_dir.join("../menu");
+    let menu_header = menu_dir.join("retrofront_menu.h");
+    let menu_shim_header = menu_dir.join("retrofront_menu_shim.h");
     println!("cargo:rerun-if-changed={}", menu_header.display());
-    println!("cargo:rerun-if-changed={}", menu_source.display());
-    cc::Build::new()
-        .file(menu_source)
-        .include(manifest_dir.join("../menu"))
-        .warnings(true)
-        .compile("retrofront_menu");
+    println!("cargo:rerun-if-changed={}", menu_shim_header.display());
+
+    let menu_sources = [
+        "retrofront_menu.c",
+        "menu_driver.c",
+        "menu_displaylist.c",
+        "menu_setting.c",
+        "menu_screensaver.c",
+        "menu_contentless_cores.c",
+        "menu_explore.c",
+        "cbs/menu_cbs_cancel.c",
+        "cbs/menu_cbs_deferred_push.c",
+        "cbs/menu_cbs_get_value.c",
+        "cbs/menu_cbs_info.c",
+        "cbs/menu_cbs_label.c",
+        "cbs/menu_cbs_left.c",
+        "cbs/menu_cbs_ok.c",
+        "cbs/menu_cbs_right.c",
+        "cbs/menu_cbs_scan.c",
+        "cbs/menu_cbs_select.c",
+        "cbs/menu_cbs_start.c",
+        "cbs/menu_cbs_sublabel.c",
+        "cbs/menu_cbs_title.c",
+        "drivers/materialui.c",
+        "drivers/ozone.c",
+        "drivers/rgui.c",
+        "drivers/xmb.c",
+    ];
+
+    let mut menu_build = cc::Build::new();
+    menu_build
+        .include(&menu_dir)
+        .define("RETROFRONT_MENU_SHIM_ONLY", None)
+        .warnings(true);
+    for source in menu_sources {
+        let path = menu_dir.join(source);
+        println!("cargo:rerun-if-changed={}", path.display());
+        menu_build.file(path);
+    }
+    menu_build.compile("retrofront_menu");
 }
