@@ -107,7 +107,7 @@ targets:
         FRAMEWORK_SEARCH_PATHS: "$(inherited) $(SRCROOT)/cores $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Frameworks"
 
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"
-
+　　　　　ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: NO
 schemes:
   RetrofrontiOS:
     build:
