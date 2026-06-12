@@ -3158,7 +3158,7 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
                 let current = core
                     .settings
                     .get("menu_driver")
-                    .map_or("oneui", String::as_str);
+                    .map_or("materialui", String::as_str);
                 let next = menu::MenuDriver::next_ident(current);
                 core.settings.set("menu_driver", next);
                 core.configure_from_settings();
@@ -3184,7 +3184,7 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
                 let driver = core
                     .settings
                     .get("menu_driver")
-                    .map_or("oneui", String::as_str);
+                    .map_or("materialui", String::as_str);
                 let (key, values): (&str, &[&str]) = match (driver, action_id) {
                     ("ozone", 270) => ("ozone_show_sidebar", &["true", "false"]),
                     ("ozone", 271) => (
