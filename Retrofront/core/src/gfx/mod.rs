@@ -3,6 +3,7 @@ pub mod context;
 pub mod drivers;
 pub mod frame;
 pub mod hardware;
+pub mod shader;
 
 use crate::libretro;
 pub use config::{GfxFilterMode, GfxScaleMode, GfxVideoConfig};
@@ -13,6 +14,9 @@ pub use drivers::{DriverFrame, GfxDriver, PresentStatus};
 pub use frame::{PixelFormat, VideoFrame};
 pub use hardware::{
     GfxBackendKind, HardwareFrame, HardwareRenderRequest, HostRenderHandles, WgpuRenderCommand,
+};
+pub use shader::{
+    LibrashaderPipeline, LibrashaderRuntimeKind, LibrashaderStatus, RawLibrashaderHandles,
 };
 
 pub const CLEAR_COLOR_RGBA: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
@@ -32,6 +36,7 @@ pub struct GfxRuntime {
     pixel_format: PixelFormat,
     video_config: GfxVideoConfig,
     status: GfxStatus,
+    shader: LibrashaderPipeline,
 }
 
 impl GfxRuntime {
@@ -44,11 +49,14 @@ impl GfxRuntime {
             pixel_format: PixelFormat::ZeroRgb1555,
             video_config: GfxVideoConfig::default(),
             status: GfxStatus::default(),
+            shader: LibrashaderPipeline::default(),
         }
     }
 
     pub fn set_backend(&mut self, backend: GfxBackendKind) {
         self.backend = backend;
+        self.shader
+            .configure_from_host(self.backend, self.context.handles());
     }
 
     pub fn set_pixel_format(&mut self, format: PixelFormat) {
@@ -71,6 +79,7 @@ impl GfxRuntime {
 
     pub fn set_host_handles(&mut self, handles: HostRenderHandles) {
         self.context.set_handles(handles);
+        self.shader.configure_from_host(self.backend, handles);
         self.wgpu.configure(&self.context);
         self.status.hardware_ready = self.context.hardware_ready();
     }
@@ -78,6 +87,8 @@ impl GfxRuntime {
     pub fn set_hardware_render_request(&mut self, request: HardwareRenderRequest) {
         self.context.set_hardware_request(request);
         self.backend = request.preferred_backend();
+        self.shader
+            .configure_from_host(self.backend, self.context.handles());
         self.status.hardware_ready = self.context.hardware_ready();
     }
 
@@ -138,6 +149,21 @@ impl GfxRuntime {
 
     pub fn context_handles(&self) -> HostRenderHandles {
         self.context.handles()
+    }
+
+    pub fn load_shader_preset(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<LibrashaderStatus, String> {
+        self.shader.load_preset(path)
+    }
+
+    pub fn clear_shader_preset(&mut self) {
+        self.shader.clear();
+    }
+
+    pub fn shader_status(&self) -> &LibrashaderStatus {
+        self.shader.status()
     }
 
     pub fn last_frame(&self) -> &VideoFrame {
