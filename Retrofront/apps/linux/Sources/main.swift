@@ -12,6 +12,7 @@ enum FrontendAssetArchive: String, CaseIterable {
   case assets
   case info
   case overlays
+  case gluiMinimalAssets = "glui_minimal_assets"
 
   var fileName: String { "\(rawValue).zip" }
   var downloadURL: URL { URL(string: "https://buildbot.libretro.com/assets/frontend/\(fileName)")! }
@@ -313,7 +314,7 @@ final class LinuxRetrofrontRuntime {
     // directory so ozone/materialui/xmb/rgui assets and overlays resolve from
     // the same paths RetroArch writes to retroarch.cfg.
     switch archive {
-    case .assets: return layout.assetsDirectory
+    case .assets, .gluiMinimalAssets: return layout.assetsDirectory
     case .info: return layout.infoDirectory
     case .overlays: return layout.overlaysDirectory
     }
@@ -596,7 +597,7 @@ func printUsage() {
     retrofront-linux load-core --core <core-path>
     retrofront-linux settings
     retrofront-linux set --key <setting> --value <value>
-    retrofront-linux fetch-assets <assets|info|overlays|all>
+    retrofront-linux fetch-assets <assets|info|overlays|glui_minimal_assets|all>
 
   Examples:
     retrofront-linux import ~/ROMs/game.gba
@@ -655,7 +656,7 @@ func runCommand(_ options: CommandLineOptions, runtime: LinuxRetrofrontRuntime) 
     } else if let archive = FrontendAssetArchive(rawValue: requested) {
       archives = [archive]
     } else {
-      throw RuntimeError.message("fetch-assets requires assets, info, overlays, or all")
+      throw RuntimeError.message("fetch-assets requires assets, info, overlays, glui_minimal_assets, or all")
     }
     for archive in archives {
       let report = try runtime.downloadAndInstallAsset(archive)

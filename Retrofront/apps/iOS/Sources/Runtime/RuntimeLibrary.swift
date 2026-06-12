@@ -6,6 +6,7 @@ public enum FrontendAssetArchive: String, CaseIterable, Identifiable, Sendable {
   case assets
   case info
   case overlays
+  case gluiMinimalAssets = "glui_minimal_assets"
 
   public var id: String { rawValue }
   public var fileName: String { "\(rawValue).zip" }
@@ -148,7 +149,7 @@ extension EmulatorRuntimeModel {
     // directory so ozone/materialui/xmb/rgui assets and overlays resolve from
     // the same paths RetroArch writes to retroarch.cfg.
     switch archive {
-    case .assets: return storageLayout.assetsDirectory
+    case .assets, .gluiMinimalAssets: return storageLayout.assetsDirectory
     case .info: return storageLayout.infoDirectory
     case .overlays: return storageLayout.overlaysDirectory
     }

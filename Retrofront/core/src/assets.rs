@@ -65,10 +65,17 @@ fn strip_matching_destination_root(path: &Path, destination_dir: &Path) -> PathB
         return path.to_path_buf();
     };
     if first == destination_name {
-        components.as_path().to_path_buf()
-    } else {
-        path.to_path_buf()
+        return components.as_path().to_path_buf();
     }
+    if first == "frontend" {
+        let Some(Component::Normal(second)) = components.next() else {
+            return path.to_path_buf();
+        };
+        if second == destination_name {
+            return components.as_path().to_path_buf();
+        }
+    }
+    path.to_path_buf()
 }
 
 fn is_macos_metadata_path(path: &Path) -> bool {
@@ -128,6 +135,13 @@ mod tests {
         assert_eq!(
             strip_matching_destination_root(
                 Path::new("glui/add.png"),
+                Path::new("/tmp/RetroArch/assets")
+            ),
+            PathBuf::from("glui/add.png")
+        );
+        assert_eq!(
+            strip_matching_destination_root(
+                Path::new("frontend/assets/glui/add.png"),
                 Path::new("/tmp/RetroArch/assets")
             ),
             PathBuf::from("glui/add.png")

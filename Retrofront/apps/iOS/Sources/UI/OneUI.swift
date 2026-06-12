@@ -123,10 +123,10 @@ struct AppScreen<Content: View>: View {
 
     private func ozoneRail(_ skin: RetroArchMenuSkin) -> some View {
         VStack(spacing: 22) {
-            Image(systemName: "house.fill")
-            Image(systemName: "rectangle.stack.fill")
-            Image(systemName: "cpu.fill")
-            Image(systemName: "gearshape.fill")
+            RetroArchMenuAssetImage(url: skin.assets.iconURL(named: "history"), systemName: "house.fill")
+            RetroArchMenuAssetImage(url: skin.assets.iconURL(named: "load-content"), systemName: "rectangle.stack.fill")
+            RetroArchMenuAssetImage(url: skin.assets.iconURL(named: "core"), systemName: "cpu.fill")
+            RetroArchMenuAssetImage(url: skin.assets.iconURL(named: "settings"), systemName: "gearshape.fill")
             Spacer()
         }
         .font(.title3)
@@ -137,9 +137,9 @@ struct AppScreen<Content: View>: View {
 
     private func xmbRibbon(_ skin: RetroArchMenuSkin) -> some View {
         HStack(spacing: 30) {
-            ForEach(["house.fill", "rectangle.stack.fill", "cpu.fill", "gearshape.fill"], id: \.self) { icon in
-                Image(systemName: icon)
-                    .font(.system(size: 28, weight: .light))
+            ForEach([(systemName: "house.fill", assetName: "history"), (systemName: "rectangle.stack.fill", assetName: "load-content"), (systemName: "cpu.fill", assetName: "core"), (systemName: "gearshape.fill", assetName: "settings")], id: \.systemName) { icon in
+                RetroArchMenuAssetImage(url: skin.assets.iconURL(named: icon.assetName), systemName: icon.systemName)
+                    .frame(width: 30, height: 30)
                     .foregroundColor(skin.palette.ink.opacity(0.82))
             }
         }

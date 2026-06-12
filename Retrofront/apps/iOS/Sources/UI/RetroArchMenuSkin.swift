@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 struct RetroArchMenuAssets {
     let root: URL
@@ -25,13 +26,17 @@ struct RetroArchMenuAssets {
             driverRoot.appendingPathComponent("font.ttf"),
             driverRoot.appendingPathComponent("regular.ttf"),
             driverRoot.appendingPathComponent("bold.ttf"),
-            root.appendingPathComponent("pkg/apple/RetroArch_Metal.xcassets")
+            root.appendingPathComponent("xmb/monochrome/font.ttf"),
+            root.appendingPathComponent("ozone/regular.ttf"),
+            root.appendingPathComponent("glui/font.ttf")
         ]
         let backgroundCandidates = [
             driverRoot.appendingPathComponent("bg.png"),
             driverRoot.appendingPathComponent("wallpaper.png"),
             driverRoot.appendingPathComponent("png/retroarch.png"),
-            driverRoot.appendingPathComponent("monochrome/png/retroarch.png")
+            driverRoot.appendingPathComponent("monochrome/png/retroarch.png"),
+            root.appendingPathComponent("xmb/monochrome/png/retroarch.png"),
+            root.appendingPathComponent("ozone/png/retroarch.png")
         ]
         return RetroArchMenuAssets(root: root, driverRoot: driverRoot, iconDirectory: iconDirectory, fontCandidates: fontCandidates, backgroundCandidates: backgroundCandidates)
     }
@@ -42,6 +47,45 @@ struct RetroArchMenuAssets {
 
     func firstExisting(_ urls: [URL]) -> URL? {
         urls.first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    func iconURL(named name: String) -> URL? {
+        guard let iconDirectory else { return nil }
+        let candidates = [
+            iconDirectory.appendingPathComponent("\(name).png"),
+            iconDirectory.appendingPathComponent("\(name).svg"),
+            driverRoot.appendingPathComponent("png/\(name).png"),
+            driverRoot.appendingPathComponent("monochrome/png/\(name).png"),
+            driverRoot.appendingPathComponent("\(name).png")
+        ]
+        return firstExisting(candidates)
+    }
+
+    var backgroundURL: URL? { firstExisting(backgroundCandidates) }
+}
+
+struct RetroArchMenuAssetImage: View {
+    let url: URL?
+    let systemName: String
+    let renderingMode: Image.TemplateRenderingMode
+
+    init(url: URL?, systemName: String, renderingMode: Image.TemplateRenderingMode = .template) {
+        self.url = url
+        self.systemName = systemName
+        self.renderingMode = renderingMode
+    }
+
+    var body: some View {
+        Group {
+            if let url,
+               url.pathExtension.lowercased() == "png",
+               let image = UIImage(contentsOfFile: url.path) {
+                Image(uiImage: image).renderingMode(renderingMode).resizable().scaledToFit()
+            } else {
+                Image(systemName: systemName).resizable().scaledToFit()
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -70,6 +114,7 @@ struct RetroArchMenuSkin {
     let showsXmbRibbon: Bool
     let showsMaterialBar: Bool
 
+    @MainActor
     static func current(runtime: EmulatorRuntimeModel) -> RetroArchMenuSkin {
         let rawDriver = runtime.settingValue("menu_driver")
         let driver = rawDriver.isEmpty ? "materialui" : rawDriver.lowercased()
@@ -151,6 +196,32 @@ struct RetroArchMenuSkin {
         }
     }
 
+    func assetIconName(for actionId: UInt32) -> String {
+        switch actionId {
+        case 1, 20, 21, 222: return "core"
+        case 2, 36, 37: return "load-content"
+        case 3: return "network"
+        case 4, 210...221, 260...274: return "settings"
+        case 8: return "menu"
+        case 9: return "restart"
+        case 10: return "resume"
+        case 12, 26: return "close"
+        case 13: return "shader-options"
+        case 14, 27, 28, 29, 30, 38, 39: return "savestate"
+        case 15: return "take-screenshot"
+        case 16: return "add-favorite"
+        case 17: return "cheat-options"
+        case 19, 25, 213: return "input"
+        case 22, 211: return "video"
+        case 23, 212: return "audio"
+        default: return "default"
+        }
+    }
+
+    func iconURL(for actionId: UInt32) -> URL? {
+        assets.iconURL(named: assetIconName(for: actionId))
+    }
+
     func iconName(for actionId: UInt32) -> String {
         switch actionId {
         case 1, 20, 21, 222: return "cpu.fill"
@@ -180,6 +251,14 @@ struct RetroArchMenuBackground: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             skin.palette.background
+            if let backgroundURL = skin.assets.backgroundURL,
+               backgroundURL.pathExtension.lowercased() == "png",
+               let image = UIImage(contentsOfFile: backgroundURL.path) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .opacity(skin.layout == .xmb ? 0.36 : 0.18)
+            }
             switch skin.layout {
             case .material:
                 LinearGradient(colors: [skin.palette.surface, skin.palette.background], startPoint: .top, endPoint: .bottom)

@@ -165,6 +165,7 @@ struct RuntimeMenuEntries: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            let skin = RetroArchMenuSkin.current(runtime: runtime)
             Text("RetroArch Menu • \(runtime.menuDriverLabel)")
                 .font(driverFont)
                 .foregroundColor(driverAccent)
@@ -174,10 +175,10 @@ struct RuntimeMenuEntries: View {
                         activate(entry)
                     } label: {
                         HStack(spacing: 12) {
-                            Image(systemName: icon(for: entry))
-                                .font(.system(size: 15, weight: .bold))
+                            RetroArchMenuAssetImage(url: skin.iconURL(for: entry.actionId), systemName: icon(for: entry))
                                 .foregroundColor(tint(for: entry))
-                                .frame(width: 34, height: 34)
+                                .frame(width: 18, height: 18)
+                                .padding(8)
                                 .background(Circle().fill(tint(for: entry).opacity(0.13)))
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(entry.label).font(.subheadline.bold()).foregroundColor(OneUI.ink)
@@ -198,7 +199,7 @@ struct RuntimeMenuEntries: View {
     }
 
     private var driver: String {
-        runtime.settingValue("menu_driver").isEmpty ? "oneui" : runtime.settingValue("menu_driver")
+        runtime.settingValue("menu_driver").isEmpty ? "materialui" : runtime.settingValue("menu_driver")
     }
 
     private var driverFont: Font {
