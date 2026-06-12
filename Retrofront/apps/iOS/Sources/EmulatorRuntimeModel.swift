@@ -16,6 +16,17 @@ public struct OverlayChoice: Identifiable, Equatable, Sendable {
   public let label: String
 }
 
+
+private func decodeLaunchDecision(_ value: UInt32) -> LaunchDecision {
+  switch value {
+  case 0: return .selected
+  case 1: return .needsCoreChoice
+  case 2: return .noCore
+  default: return .noCore // fallback（安全側）
+  }
+}
+
+
 @MainActor
 public final class EmulatorRuntimeModel: ObservableObject {
   @Published private(set) var frontendState: FrontendState = .empty
