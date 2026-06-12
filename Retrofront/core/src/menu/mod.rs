@@ -79,11 +79,11 @@ pub struct MenuDriverSpec {
 
 impl MenuDriver {
     pub const ALL: [MenuDriver; 5] = [
-        MenuDriver::OneUi,
-        MenuDriver::Ozone,
         MenuDriver::MaterialUi,
-        MenuDriver::Rgui,
+        MenuDriver::Ozone,
         MenuDriver::Xmb,
+        MenuDriver::Rgui,
+        MenuDriver::OneUi,
     ];
 
     pub fn from_ident(value: &str) -> Self {
@@ -92,7 +92,8 @@ impl MenuDriver {
             "glui" | "materialui" => MenuDriver::MaterialUi,
             "rgui" => MenuDriver::Rgui,
             "xmb" => MenuDriver::Xmb,
-            _ => MenuDriver::OneUi,
+            "oneui" => MenuDriver::OneUi,
+            _ => MenuDriver::MaterialUi,
         }
     }
 
@@ -191,7 +192,7 @@ impl MenuEngine {
         let mut engine = Self {
             history: Vec::new(),
             skin: MenuSkin {
-                driver: "oneui".to_string(),
+                driver: "materialui".to_string(),
                 theme: "dark".to_string(),
                 assets_directory: String::new(),
             },
@@ -649,7 +650,9 @@ impl MenuEngine {
     pub fn apply_skin_from_settings(&mut self, settings: &Settings) {
         let driver = settings
             .get("menu_driver")
-            .map_or(MenuDriver::OneUi, |value| MenuDriver::from_ident(value));
+            .map_or(MenuDriver::MaterialUi, |value| {
+                MenuDriver::from_ident(value)
+            });
         let spec = driver.spec();
         self.skin = MenuSkin {
             driver: spec.ident.to_string(),
@@ -1019,7 +1022,9 @@ impl MenuEngine {
                 Self::setting(
                     "Menu",
                     "menu_driver",
-                    settings.get("menu_driver").map_or("oneui", String::as_str),
+                    settings
+                        .get("menu_driver")
+                        .map_or("materialui", String::as_str),
                     603,
                 ),
             ],

@@ -33,7 +33,33 @@ enum OneUI {
     }
 }
 
+
+struct RetroArchMenuPalette {
+    let background: Color
+    let surface: Color
+    let elevated: Color
+    let ink: Color
+    let secondary: Color
+    let accent: Color
+
+    static func driver(_ ident: String) -> RetroArchMenuPalette {
+        switch ident.lowercased() {
+        case "ozone":
+            return .init(background: Color(red: 0.07, green: 0.08, blue: 0.10), surface: Color(red: 0.10, green: 0.11, blue: 0.14), elevated: Color(red: 0.16, green: 0.18, blue: 0.22), ink: .white, secondary: Color(red: 0.70, green: 0.74, blue: 0.80), accent: Color(red: 0.28, green: 0.58, blue: 0.95))
+        case "xmb":
+            return .init(background: Color(red: 0.02, green: 0.06, blue: 0.16), surface: Color(red: 0.05, green: 0.11, blue: 0.24), elevated: Color(red: 0.09, green: 0.18, blue: 0.36), ink: .white, secondary: Color(red: 0.72, green: 0.82, blue: 0.96), accent: Color(red: 0.58, green: 0.78, blue: 1.00))
+        case "rgui":
+            return .init(background: .black, surface: Color(red: 0.02, green: 0.08, blue: 0.08), elevated: Color(red: 0.00, green: 0.18, blue: 0.16), ink: Color(red: 0.72, green: 1.0, blue: 0.82), secondary: Color(red: 0.42, green: 0.82, blue: 0.62), accent: Color(red: 0.95, green: 0.90, blue: 0.45))
+        case "oneui":
+            return .init(background: OneUI.background, surface: OneUI.surface, elevated: OneUI.elevated, ink: OneUI.ink, secondary: OneUI.secondary, accent: OneUI.accent)
+        default:
+            return .init(background: Color(red: 0.05, green: 0.05, blue: 0.06), surface: Color(red: 0.10, green: 0.10, blue: 0.12), elevated: Color(red: 0.16, green: 0.16, blue: 0.18), ink: .white, secondary: Color(red: 0.74, green: 0.74, blue: 0.78), accent: Color(red: 0.00, green: 0.74, blue: 0.83))
+        }
+    }
+}
+
 struct AppScreen<Content: View>: View {
+    @EnvironmentObject private var runtime: EmulatorRuntimeModel
     let title: String
     let subtitle: String
     @ViewBuilder var content: Content
@@ -45,10 +71,10 @@ struct AppScreen<Content: View>: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(title)
                             .font(.system(size: 34, weight: .bold, design: .default))
-                            .foregroundColor(OneUI.ink)
+                            .foregroundColor(palette.ink)
                         Text(subtitle)
                             .font(.subheadline.weight(.medium))
-                            .foregroundColor(OneUI.secondary)
+                            .foregroundColor(palette.secondary)
                     }
                     .padding(.top, 16)
 
@@ -57,8 +83,20 @@ struct AppScreen<Content: View>: View {
                 .padding(.horizontal, 18)
                 .padding(.bottom, 28)
             }
-            .background(OneUI.auroraBackground.ignoresSafeArea())
+            .background(menuBackground.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
+        }
+    }
+
+    private var palette: RetroArchMenuPalette {
+        RetroArchMenuPalette.driver(runtime.settingValue("menu_driver").isEmpty ? "materialui" : runtime.settingValue("menu_driver"))
+    }
+
+    private var menuBackground: some View {
+        ZStack {
+            palette.background
+            LinearGradient(colors: [palette.accent.opacity(0.22), .clear], startPoint: .topLeading, endPoint: .center)
+            RadialGradient(colors: [palette.elevated.opacity(0.75), .clear], center: .bottomTrailing, startRadius: 20, endRadius: 440)
         }
     }
 }

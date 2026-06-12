@@ -65,13 +65,7 @@ public struct RetroArchStorageLayout: Sendable {
   public var databaseDirectory: URL { applicationDataRoot.appendingPathComponent("database/rdb", isDirectory: true) }
   public var coreAssetsDirectory: URL { applicationDataRoot.appendingPathComponent("downloads", isDirectory: true) }
   public var downloadsDirectory: URL { coreAssetsDirectory }
-  public var infoDirectory: URL {
-    #if os(Linux)
-    applicationDataRoot.appendingPathComponent("cores", isDirectory: true)
-    #else
-    applicationDataRoot.appendingPathComponent("info", isDirectory: true)
-    #endif
-  }
+  public var infoDirectory: URL { applicationDataRoot.appendingPathComponent("info", isDirectory: true) }
   public var overlaysDirectory: URL { applicationDataRoot.appendingPathComponent("overlays", isDirectory: true) }
   public var oskOverlaysDirectory: URL { overlaysDirectory.appendingPathComponent("keyboards", isDirectory: true) }
   public var shadersDirectory: URL { applicationDataRoot.appendingPathComponent("shaders", isDirectory: true) }
@@ -91,7 +85,7 @@ public struct RetroArchStorageLayout: Sendable {
   public var cacheDirectory: URL { root.appendingPathComponent("cache", isDirectory: true) }
   public var dynamicWallpapersDirectory: URL { root.appendingPathComponent("wallpapers", isDirectory: true) }
 
-  public var overlayConfig: URL { overlaysDirectory.appendingPathComponent("gamepads/flat/retropad.cfg") }
+  public var overlayConfig: URL { overlaysDirectory.appendingPathComponent("gamepads/Named_Overlays/retropad.cfg") }
 
   public var retroArchSettings: [(key: String, url: URL)] {
     [
