@@ -16,14 +16,33 @@ settings:
 
 targets:
 
+  # =========================
+  # C / Rust bridge module
+  # =========================
+  CRetrofrontCore:
+    type: framework
+    platform: iOS
+    sources:
+      - path: frontend/CRetrofrontCore
+    settings:
+      base:
+        DEFINES_MODULE: YES
+        CLANG_ENABLE_MODULES: YES
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
+
+  # =========================
+  # Swift framework
+  # =========================
   RetrofrontSwift:
     type: framework
     platform: iOS
 
     sources:
       - path: frontend/Sources/RetrofrontSwift
-      - path: frontend/CRetrofrontCore
-      
+
+    dependencies:
+      - target: CRetrofrontCore
+
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.retrofront.swift
@@ -31,14 +50,13 @@ targets:
         DEFINES_MODULE: YES
         MACH_O_TYPE: mh_dylib
         BUILD_LIBRARY_FOR_DISTRIBUTION: YES
-        CLANG_ENABLE_MODULES: YES
-        # Rust/Cヘッダ参照
-        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
-        HEADER_SEARCH_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
+
         LIBRARY_SEARCH_PATHS: "$(SRCROOT)/target/aarch64-apple-ios/release"
         OTHER_LDFLAGS: "$(inherited) -lretrofront_core"
-        OTHER_SWIFT_FLAGS: "-I $(SRCROOT)/frontend/CRetrofrontCore"
-        SWIFT_IMPORT_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
+
+  # =========================
+  # iOS App
+  # =========================
   RetrofrontiOS:
     type: application
     platform: iOS
@@ -63,7 +81,8 @@ targets:
 
           sign_core() {
             if [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
-              codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" --preserve-metadata=identifier,entitlements "$1"
+              codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" \
+                --preserve-metadata=identifier,entitlements "$1"
             fi
           }
 
@@ -71,13 +90,13 @@ targets:
 
           if [ -d "${CORES_SRC}" ]; then
 
-            find "${CORES_SRC}" -maxdepth 1 -type f -name '*.dylib' -print | while IFS= read -r core; do
+            find "${CORES_SRC}" -maxdepth 1 -type f -name '*.dylib' | while read -r core; do
               destination="${CORES_DST}/$(basename "${core}")"
               cp -f "${core}" "${destination}"
               sign_core "${destination}"
             done
 
-            find "${CORES_SRC}" -maxdepth 1 -type d -name '*.framework' -print | while IFS= read -r core; do
+            find "${CORES_SRC}" -maxdepth 1 -type d -name '*.framework' | while read -r core; do
               destination="${CORES_DST}/$(basename "${core}")"
               rm -rf "${destination}"
               ditto "${core}" "${destination}"
