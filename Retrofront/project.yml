@@ -37,6 +37,7 @@ targets:
         LIBRARY_SEARCH_PATHS: "$(SRCROOT)/target/aarch64-apple-ios/release"
         OTHER_LDFLAGS: "$(inherited) -lretrofront_core"
         OTHER_SWIFT_FLAGS: "-I $(SRCROOT)/frontend/CRetrofrontCore"
+        SWIFT_IMPORT_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
   RetrofrontiOS:
     type: application
     platform: iOS
