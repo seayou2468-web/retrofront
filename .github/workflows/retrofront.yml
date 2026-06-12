@@ -54,6 +54,12 @@ jobs:
         shell: bash
         run: chmod +x scripts/fetch-frontend-assets.sh
 
+      - name: Make AppImage build script executable
+        working-directory: Retrofront
+        shell: bash
+        run: |
+          chmod +x scripts/build-linux-appimage.sh
+          
       - name: Fetch bundled frontend assets
         working-directory: Retrofront
         shell: bash
