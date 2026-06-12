@@ -31,7 +31,7 @@ targets:
         PUBLIC_HEADERS_FOLDER_PATH: include
 
   RetrofrontSwift:
-    type: framework
+    type: library.static
     platform: iOS
 
     sources:
@@ -45,6 +45,10 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.retrofront.swift
         PRODUCT_NAME: RetrofrontSwift
         DEFINES_MODULE: YES
+
+        # C/Rust static library を正しくリンクする
+        LIBRARY_SEARCH_PATHS: "$(SRCROOT)/target/aarch64-apple-ios/release"
+        OTHER_LDFLAGS: "$(inherited) -lretrofront_core"
 
   RetrofrontiOS:
     type: application
