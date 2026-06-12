@@ -199,6 +199,15 @@ public struct MenuLayoutMetrics: Equatable, Sendable {
   public let scale: Float
 }
 
+public struct MenuResolvedAssets: Equatable, Sendable {
+  public let rootDirectory: String
+  public let driverDirectory: String
+  public let iconDirectory: String
+  public let fontPath: String
+  public let backgroundPath: String
+  public let assetsReady: Bool
+}
+
 public struct RetrofrontSetting: Equatable, Sendable {
   public let key: String
   public let value: String
@@ -711,6 +720,19 @@ public final class Retrofront: @unchecked Sendable {
       verticalPadding: raw.vertical_padding,
       backgroundMode: raw.background_mode,
       scale: raw.scale
+    )
+  }
+
+  public func menuResolvedAssets() -> MenuResolvedAssets? {
+    var raw = RfMenuResolvedAssets()
+    guard rf_frontend_menu_resolved_assets(handle, &raw) else { return nil }
+    return MenuResolvedAssets(
+      rootDirectory: String(cString: raw.root_directory),
+      driverDirectory: String(cString: raw.driver_directory),
+      iconDirectory: String(cString: raw.icon_directory),
+      fontPath: String(cString: raw.font_path),
+      backgroundPath: String(cString: raw.background_path),
+      assetsReady: raw.assets_ready
     )
   }
 

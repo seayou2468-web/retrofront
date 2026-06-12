@@ -153,6 +153,15 @@ typedef struct RfMenuLayoutMetrics {
     float scale;
 } RfMenuLayoutMetrics;
 
+typedef struct RfMenuResolvedAssets {
+    const char *root_directory;
+    const char *driver_directory;
+    const char *icon_directory;
+    const char *font_path;
+    const char *background_path;
+    bool assets_ready;
+} RfMenuResolvedAssets;
+
 typedef struct RfSettingEntry {
     const char *key;
     const char *value;
@@ -244,6 +253,7 @@ bool rf_frontend_menu_activate(RfFrontend *frontend, uint32_t action_id);
 bool rf_frontend_menu_pop(RfFrontend *frontend);
 uintptr_t rf_frontend_menu_source_file_count(void);
 bool rf_frontend_menu_layout_metrics(RfFrontend *frontend, uint32_t width, uint32_t height, RfMenuLayoutMetrics *out_metrics);
+bool rf_frontend_menu_resolved_assets(RfFrontend *frontend, RfMenuResolvedAssets *out_assets);
 
 // RetroArch-style Settings API
 bool rf_frontend_load_settings(RfFrontend *frontend, const char *path);

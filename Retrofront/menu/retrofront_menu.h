@@ -21,11 +21,13 @@ typedef struct rf_menu_driver_spec {
 typedef const char *(*rf_menu_get_setting_fn)(const char *key, void *userdata);
 typedef uint32_t (*rf_menu_set_setting_fn)(const char *key, const char *value, void *userdata);
 typedef uint32_t (*rf_menu_directory_exists_fn)(const char *path, void *userdata);
+typedef uint32_t (*rf_menu_file_exists_fn)(const char *path, void *userdata);
 
 typedef struct rf_menu_host_callbacks {
     rf_menu_get_setting_fn get_setting;
     rf_menu_set_setting_fn set_setting;
     rf_menu_directory_exists_fn directory_exists;
+    rf_menu_file_exists_fn file_exists;
     void *userdata;
 } rf_menu_host_callbacks;
 
@@ -61,11 +63,21 @@ typedef struct rf_menu_runtime_config {
     uint32_t assets_ready;
 } rf_menu_runtime_config;
 
+typedef struct rf_menu_resolved_assets {
+    const char *root_directory;
+    const char *driver_directory;
+    const char *icon_directory;
+    const char *font_path;
+    const char *background_path;
+    uint32_t assets_ready;
+} rf_menu_resolved_assets;
+
 
 uint32_t rf_menu_source_file_count(void);
 const rf_menu_source_file *rf_menu_source_file_at(uint32_t index);
 uint32_t rf_menu_layout_for_viewport(const char *driver_ident, uint32_t viewport_width, uint32_t viewport_height, rf_menu_layout_metrics *out_metrics);
 uint32_t rf_menu_asset_path(const char *driver_ident, const char *asset_name, char *out_path, uint32_t out_path_len);
+uint32_t rf_menu_resolve_assets(const char *driver_ident, rf_menu_resolved_assets *out_assets);
 
 uint32_t rf_menu_driver_count(void);
 const rf_menu_driver_spec *rf_menu_driver_at(uint32_t index);

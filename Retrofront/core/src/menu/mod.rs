@@ -24,6 +24,7 @@ struct NativeMenuHostCallbacks {
     get_setting: Option<extern "C" fn(*const c_char, *mut c_void) -> *const c_char>,
     set_setting: Option<extern "C" fn(*const c_char, *const c_char, *mut c_void) -> c_uint>,
     directory_exists: Option<extern "C" fn(*const c_char, *mut c_void) -> c_uint>,
+    file_exists: Option<extern "C" fn(*const c_char, *mut c_void) -> c_uint>,
     userdata: *mut c_void,
 }
 
@@ -61,6 +62,16 @@ struct NativeMenuRuntimeConfig {
     assets_ready: c_uint,
 }
 
+#[repr(C)]
+struct NativeMenuResolvedAssets {
+    root_directory: *const c_char,
+    driver_directory: *const c_char,
+    icon_directory: *const c_char,
+    font_path: *const c_char,
+    background_path: *const c_char,
+    assets_ready: c_uint,
+}
+
 extern "C" {
     fn rf_menu_source_file_count() -> c_uint;
     fn rf_menu_source_file_at(index: c_uint) -> *const NativeMenuSourceFile;
@@ -75,6 +86,10 @@ extern "C" {
     fn rf_menu_driver_next_ident(ident: *const c_char) -> *const c_char;
     fn rf_menu_connect_host(callbacks: *const NativeMenuHostCallbacks);
     fn rf_menu_get_runtime_config(out_config: *mut NativeMenuRuntimeConfig) -> c_uint;
+    fn rf_menu_resolve_assets(
+        driver_ident: *const c_char,
+        out_assets: *mut NativeMenuResolvedAssets,
+    ) -> c_uint;
 }
 
 #[derive(Debug)]
@@ -103,6 +118,7 @@ impl NativeMenuBridge {
             get_setting: Some(native_bridge_get_setting),
             set_setting: Some(native_bridge_set_setting),
             directory_exists: Some(native_bridge_directory_exists),
+            file_exists: Some(native_bridge_file_exists),
             userdata: (self as *mut Self).cast(),
         };
         unsafe { rf_menu_connect_host(&callbacks) };
@@ -142,6 +158,51 @@ impl Default for NativeMenuRuntimeSnapshot {
             theme: "dark".to_string(),
             assets_directory: String::new(),
             assets_ready: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct NativeMenuAssetsSnapshot {
+    pub root_directory: String,
+    pub driver_directory: String,
+    pub icon_directory: String,
+    pub font_path: String,
+    pub background_path: String,
+    pub assets_ready: bool,
+}
+
+impl NativeMenuBridge {
+    pub fn resolve_assets(&mut self, driver: &str) -> NativeMenuAssetsSnapshot {
+        let callbacks = NativeMenuHostCallbacks {
+            get_setting: Some(native_bridge_get_setting),
+            set_setting: Some(native_bridge_set_setting),
+            directory_exists: Some(native_bridge_directory_exists),
+            file_exists: Some(native_bridge_file_exists),
+            userdata: (self as *mut Self).cast(),
+        };
+        unsafe { rf_menu_connect_host(&callbacks) };
+        let driver = CString::new(driver).unwrap_or_default();
+        let mut raw = NativeMenuResolvedAssets {
+            root_directory: std::ptr::null(),
+            driver_directory: std::ptr::null(),
+            icon_directory: std::ptr::null(),
+            font_path: std::ptr::null(),
+            background_path: std::ptr::null(),
+            assets_ready: 0,
+        };
+        let ok = unsafe { rf_menu_resolve_assets(driver.as_ptr(), &mut raw) } != 0;
+        unsafe { rf_menu_connect_host(std::ptr::null()) };
+        if !ok {
+            return NativeMenuAssetsSnapshot::default();
+        }
+        NativeMenuAssetsSnapshot {
+            root_directory: c_str_lossy(raw.root_directory).unwrap_or_default(),
+            driver_directory: c_str_lossy(raw.driver_directory).unwrap_or_default(),
+            icon_directory: c_str_lossy(raw.icon_directory).unwrap_or_default(),
+            font_path: c_str_lossy(raw.font_path).unwrap_or_default(),
+            background_path: c_str_lossy(raw.background_path).unwrap_or_default(),
+            assets_ready: raw.assets_ready != 0,
         }
     }
 }
@@ -268,6 +329,13 @@ extern "C" fn native_bridge_directory_exists(
         return 0;
     };
     Path::new(&path).is_dir() as c_uint
+}
+
+extern "C" fn native_bridge_file_exists(path: *const c_char, _userdata: *mut c_void) -> c_uint {
+    let Some(path) = c_str_lossy(path) else {
+        return 0;
+    };
+    Path::new(&path).is_file() as c_uint
 }
 
 fn c_str_lossy(ptr: *const c_char) -> Option<String> {
@@ -2019,11 +2087,21 @@ mod tests {
         settings.set("menu_driver", "ozone");
         settings.set("menu_theme", "dark");
         settings.set("menu_assets_directory", &root.to_string_lossy());
+        std::fs::create_dir_all(root.join("ozone/png")).unwrap();
+        std::fs::write(root.join("ozone/regular.ttf"), b"font").unwrap();
+        std::fs::write(root.join("ozone/png/retroarch.png"), b"png").unwrap();
         let mut bridge = NativeMenuBridge::from_settings(&settings);
         let snapshot = bridge.sync_runtime_config();
         assert_eq!(snapshot.driver, "ozone");
         assert_eq!(snapshot.assets_directory, root.to_string_lossy());
         assert!(snapshot.assets_ready);
+        let resolved = bridge.resolve_assets("ozone");
+        assert!(resolved.assets_ready);
+        assert!(resolved.icon_directory.ends_with("ozone/png"));
+        assert!(resolved.font_path.ends_with("ozone/regular.ttf"));
+        assert!(resolved
+            .background_path
+            .ends_with("ozone/png/retroarch.png"));
         let _ = std::fs::remove_dir_all(root);
     }
 

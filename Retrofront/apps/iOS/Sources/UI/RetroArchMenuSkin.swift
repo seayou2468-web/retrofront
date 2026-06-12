@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import UIKit
+import RetrofrontSwift
 
 struct RetroArchMenuAssets {
     let root: URL
@@ -9,27 +10,32 @@ struct RetroArchMenuAssets {
     let fontCandidates: [URL]
     let backgroundCandidates: [URL]
 
-    static func resolve(driver: String, assetsRootPath: String) -> RetroArchMenuAssets {
-        let root = URL(fileURLWithPath: assetsRootPath.isEmpty ? "assets" : assetsRootPath, isDirectory: true)
+    static func resolve(driver: String, assetsRootPath: String, native: MenuResolvedAssets? = nil) -> RetroArchMenuAssets {
+        let root = URL(fileURLWithPath: native?.rootDirectory.isEmpty == false ? native!.rootDirectory : (assetsRootPath.isEmpty ? "assets" : assetsRootPath), isDirectory: true)
         let normalized = driver.lowercased()
         let directoryName = normalized
-        let driverRoot = root.appendingPathComponent(directoryName, isDirectory: true)
+        let driverRoot = URL(fileURLWithPath: native?.driverDirectory.isEmpty == false ? native!.driverDirectory : root.appendingPathComponent(directoryName, isDirectory: true).path, isDirectory: true)
         let iconDirectory: URL?
-        switch normalized {
-        case "ozone": iconDirectory = driverRoot.appendingPathComponent("png", isDirectory: true)
-        case "xmb": iconDirectory = driverRoot.appendingPathComponent("monochrome/png", isDirectory: true)
-        case "rgui": iconDirectory = driverRoot.appendingPathComponent("png", isDirectory: true)
-        case "materialui": iconDirectory = driverRoot
-        default: iconDirectory = nil
+        if let native, !native.iconDirectory.isEmpty {
+            iconDirectory = URL(fileURLWithPath: native.iconDirectory, isDirectory: true)
+        } else {
+            switch normalized {
+            case "ozone": iconDirectory = driverRoot.appendingPathComponent("png", isDirectory: true)
+            case "xmb": iconDirectory = driverRoot.appendingPathComponent("png", isDirectory: true)
+            case "rgui": iconDirectory = driverRoot.appendingPathComponent("png", isDirectory: true)
+            case "materialui": iconDirectory = driverRoot
+            default: iconDirectory = nil
+            }
         }
-        let fontCandidates = [
+        var fontCandidates = [
             driverRoot.appendingPathComponent("font.ttf"),
             driverRoot.appendingPathComponent("regular.ttf"),
             driverRoot.appendingPathComponent("bold.ttf"),
             root.appendingPathComponent("xmb/monochrome/font.ttf"),
             root.appendingPathComponent("ozone/regular.ttf")
         ]
-        let backgroundCandidates = [
+        if let native, !native.fontPath.isEmpty { fontCandidates.insert(URL(fileURLWithPath: native.fontPath), at: 0) }
+        var backgroundCandidates = [
             driverRoot.appendingPathComponent("bg.png"),
             driverRoot.appendingPathComponent("wallpaper.png"),
             driverRoot.appendingPathComponent("png/retroarch.png"),
@@ -37,6 +43,7 @@ struct RetroArchMenuAssets {
             root.appendingPathComponent("xmb/monochrome/png/retroarch.png"),
             root.appendingPathComponent("ozone/png/retroarch.png")
         ]
+        if let native, !native.backgroundPath.isEmpty { backgroundCandidates.insert(URL(fileURLWithPath: native.backgroundPath), at: 0) }
         return RetroArchMenuAssets(root: root, driverRoot: driverRoot, iconDirectory: iconDirectory, fontCandidates: fontCandidates, backgroundCandidates: backgroundCandidates)
     }
 
@@ -117,14 +124,14 @@ struct RetroArchMenuSkin {
         let rawDriver = runtime.settingValue("menu_driver")
         let driver = rawDriver.isEmpty ? "materialui" : rawDriver.lowercased()
         let assetsRoot = runtime.settingValue("menu_assets_directory").isEmpty ? runtime.settingValue("assets_directory") : runtime.settingValue("menu_assets_directory")
-        return RetroArchMenuSkin(driver: driver, assetsRootPath: assetsRoot)
+        return RetroArchMenuSkin(driver: driver, assetsRootPath: assetsRoot, nativeAssets: runtime.frontend?.menuResolvedAssets())
     }
 
-    init(driver: String, assetsRootPath: String) {
+    init(driver: String, assetsRootPath: String, nativeAssets: MenuResolvedAssets? = nil) {
         let normalized = driver.lowercased()
         self.driver = normalized
         self.palette = RetroArchMenuPalette.driver(normalized)
-        self.assets = .resolve(driver: normalized, assetsRootPath: assetsRootPath)
+        self.assets = .resolve(driver: normalized, assetsRootPath: assetsRootPath, native: nativeAssets)
         switch normalized {
         case "ozone":
             displayName = "Ozone"

@@ -87,6 +87,59 @@ static const rf_menu_source_file RF_MENU_SOURCE_FILES[] = {
 
 static rf_menu_host_callbacks rf_menu_host;
 
+static char rf_menu_resolved_driver_dir[4096];
+static char rf_menu_resolved_icon_dir[4096];
+static char rf_menu_resolved_font_path[4096];
+static char rf_menu_resolved_background_path[4096];
+
+static uint32_t rf_menu_join3(char *out_path, uint32_t out_path_len, const char *a, const char *b, const char *c)
+{
+    int written;
+    if (!out_path || out_path_len == 0 || !a || !*a || !b || !*b)
+        return 0;
+    written = c && *c
+        ? snprintf(out_path, out_path_len, "%s/%s/%s", a, b, c)
+        : snprintf(out_path, out_path_len, "%s/%s", a, b);
+    if (written < 0 || (uint32_t)written >= out_path_len)
+    {
+        out_path[0] = '\0';
+        return 0;
+    }
+    return 1;
+}
+
+static uint32_t rf_menu_host_file_exists(const char *path)
+{
+    if (!path || !*path)
+        return 0;
+    if (rf_menu_host.file_exists)
+        return rf_menu_host.file_exists(path, rf_menu_host.userdata);
+    if (rf_menu_host.directory_exists)
+        return rf_menu_host.directory_exists(path, rf_menu_host.userdata);
+    return 0;
+}
+
+static const char *rf_menu_first_existing(const char *const *candidates, uint32_t count, char *storage, uint32_t storage_len)
+{
+    uint32_t i;
+    if (!candidates || !storage || storage_len == 0)
+        return NULL;
+    for (i = 0; i < count; i++)
+    {
+        const char *candidate = candidates[i];
+        if (candidate && *candidate && rf_menu_host_file_exists(candidate))
+        {
+            size_t len = strlen(candidate);
+            if (len >= storage_len)
+                return NULL;
+            memcpy(storage, candidate, len + 1);
+            return storage;
+        }
+    }
+    return NULL;
+}
+
+
 static int rf_ascii_casecmp(const char *left, const char *right)
 {
     unsigned char l;
@@ -212,8 +265,6 @@ uint32_t rf_menu_asset_path(const char *driver_ident, const char *asset_name, ch
 {
     const char *assets_directory;
     const rf_menu_driver_spec *driver;
-    int written;
-
     if (!asset_name || !*asset_name || !out_path || out_path_len == 0 || !rf_menu_host.get_setting)
         return 0;
 
@@ -224,12 +275,75 @@ uint32_t rf_menu_asset_path(const char *driver_ident, const char *asset_name, ch
         return 0;
 
     driver = rf_menu_driver_find(driver_ident);
-    written = snprintf(out_path, out_path_len, "%s/%s/%s", assets_directory, driver->asset_subdirectory, asset_name);
-    if (written < 0 || (uint32_t)written >= out_path_len)
-    {
-        out_path[0] = '\0';
+    return rf_menu_join3(out_path, out_path_len, assets_directory, driver->asset_subdirectory, asset_name);
+}
+
+
+uint32_t rf_menu_resolve_assets(const char *driver_ident, rf_menu_resolved_assets *out_assets)
+{
+    const char *assets_directory;
+    const rf_menu_driver_spec *driver;
+    const char *font_candidates[5];
+    const char *background_candidates[6];
+    uint32_t font_count = 0;
+    uint32_t background_count = 0;
+    char driver_png[4096];
+    char xmb_png[4096];
+    char ozone_png[4096];
+    char font_a[4096];
+    char font_b[4096];
+    char font_c[4096];
+    char bg_a[4096];
+    char bg_b[4096];
+    char bg_c[4096];
+    char bg_d[4096];
+
+    if (!out_assets || !rf_menu_host.get_setting)
         return 0;
+
+    memset(out_assets, 0, sizeof(*out_assets));
+    assets_directory = rf_menu_host.get_setting("menu_assets_directory", rf_menu_host.userdata);
+    if (!assets_directory || !*assets_directory)
+        assets_directory = rf_menu_host.get_setting("assets_directory", rf_menu_host.userdata);
+    if (!assets_directory || !*assets_directory)
+        return 0;
+
+    driver = rf_menu_driver_find(driver_ident);
+    if (!rf_menu_join3(rf_menu_resolved_driver_dir, sizeof(rf_menu_resolved_driver_dir), assets_directory, driver->asset_subdirectory, NULL))
+        return 0;
+
+    out_assets->root_directory = assets_directory;
+    out_assets->driver_directory = rf_menu_resolved_driver_dir;
+    out_assets->assets_ready = rf_menu_assets_ready();
+
+    if (rf_ascii_casecmp(driver->ident, "xmb") == 0)
+    {
+        if (rf_menu_join3(rf_menu_resolved_icon_dir, sizeof(rf_menu_resolved_icon_dir), assets_directory, driver->asset_subdirectory, "png"))
+            out_assets->icon_directory = rf_menu_resolved_icon_dir;
     }
+    else if (rf_menu_join3(rf_menu_resolved_icon_dir, sizeof(rf_menu_resolved_icon_dir), assets_directory, driver->asset_subdirectory, "png"))
+    {
+        if (rf_menu_host.directory_exists && rf_menu_host.directory_exists(rf_menu_resolved_icon_dir, rf_menu_host.userdata))
+            out_assets->icon_directory = rf_menu_resolved_icon_dir;
+        else
+            out_assets->icon_directory = rf_menu_resolved_driver_dir;
+    }
+
+    if (rf_menu_join3(font_a, sizeof(font_a), rf_menu_resolved_driver_dir, "font.ttf", NULL)) font_candidates[font_count++] = font_a;
+    if (rf_menu_join3(font_b, sizeof(font_b), rf_menu_resolved_driver_dir, "regular.ttf", NULL)) font_candidates[font_count++] = font_b;
+    if (rf_menu_join3(font_c, sizeof(font_c), rf_menu_resolved_driver_dir, "bold.ttf", NULL)) font_candidates[font_count++] = font_c;
+    if (rf_menu_join3(xmb_png, sizeof(xmb_png), assets_directory, "xmb/monochrome", "font.ttf")) font_candidates[font_count++] = xmb_png;
+    if (rf_menu_join3(ozone_png, sizeof(ozone_png), assets_directory, "ozone", "regular.ttf")) font_candidates[font_count++] = ozone_png;
+    out_assets->font_path = rf_menu_first_existing(font_candidates, font_count, rf_menu_resolved_font_path, sizeof(rf_menu_resolved_font_path));
+
+    if (rf_menu_join3(bg_a, sizeof(bg_a), rf_menu_resolved_driver_dir, "bg.png", NULL)) background_candidates[background_count++] = bg_a;
+    if (rf_menu_join3(bg_b, sizeof(bg_b), rf_menu_resolved_driver_dir, "wallpaper.png", NULL)) background_candidates[background_count++] = bg_b;
+    if (rf_menu_join3(bg_c, sizeof(bg_c), rf_menu_resolved_driver_dir, "png/retroarch.png", NULL)) background_candidates[background_count++] = bg_c;
+    if (rf_menu_join3(bg_d, sizeof(bg_d), rf_menu_resolved_driver_dir, "monochrome/png/retroarch.png", NULL)) background_candidates[background_count++] = bg_d;
+    if (rf_menu_join3(driver_png, sizeof(driver_png), assets_directory, "xmb/monochrome/png", "retroarch.png")) background_candidates[background_count++] = driver_png;
+    if (rf_menu_join3(ozone_png, sizeof(ozone_png), assets_directory, "ozone/png", "retroarch.png")) background_candidates[background_count++] = ozone_png;
+    out_assets->background_path = rf_menu_first_existing(background_candidates, background_count, rf_menu_resolved_background_path, sizeof(rf_menu_resolved_background_path));
+
     return 1;
 }
 

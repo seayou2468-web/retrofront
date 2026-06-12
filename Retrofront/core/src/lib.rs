@@ -1766,6 +1766,16 @@ pub struct RfMenuLayoutMetrics {
 }
 
 #[repr(C)]
+pub struct RfMenuResolvedAssets {
+    pub root_directory: *const c_char,
+    pub driver_directory: *const c_char,
+    pub icon_directory: *const c_char,
+    pub font_path: *const c_char,
+    pub background_path: *const c_char,
+    pub assets_ready: bool,
+}
+
+#[repr(C)]
 pub struct RfSettingEntry {
     pub key: *const c_char,
     pub value: *const c_char,
@@ -2824,6 +2834,48 @@ pub unsafe extern "C" fn rf_frontend_menu_layout_metrics(
         true
     })
 }
+#[no_mangle]
+pub unsafe extern "C" fn rf_frontend_menu_resolved_assets(
+    frontend: *mut RfFrontend,
+    out_assets: *mut RfMenuResolvedAssets,
+) -> bool {
+    let Some(frontend) = (unsafe { frontend.as_mut() }) else {
+        return false;
+    };
+    let Some(out_assets) = (unsafe { out_assets.as_mut() }) else {
+        return false;
+    };
+    with_active_frontend(|core| {
+        let driver = core
+            .settings
+            .get("menu_driver")
+            .map_or("materialui", String::as_str)
+            .to_string();
+        let mut bridge = menu::NativeMenuBridge::from_settings(&core.settings);
+        let assets = bridge.resolve_assets(&driver);
+
+        let root_c = CString::new(assets.root_directory).unwrap_or_default();
+        let driver_c = CString::new(assets.driver_directory).unwrap_or_default();
+        let icon_c = CString::new(assets.icon_directory).unwrap_or_default();
+        let font_c = CString::new(assets.font_path).unwrap_or_default();
+        let background_c = CString::new(assets.background_path).unwrap_or_default();
+
+        out_assets.root_directory = root_c.as_ptr();
+        out_assets.driver_directory = driver_c.as_ptr();
+        out_assets.icon_directory = icon_c.as_ptr();
+        out_assets.font_path = font_c.as_ptr();
+        out_assets.background_path = background_c.as_ptr();
+        out_assets.assets_ready = assets.assets_ready;
+
+        frontend.cached_strings.push(root_c);
+        frontend.cached_strings.push(driver_c);
+        frontend.cached_strings.push(icon_c);
+        frontend.cached_strings.push(font_c);
+        frontend.cached_strings.push(background_c);
+        true
+    })
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn rf_frontend_menu_current_list(
     frontend: *mut RfFrontend,
