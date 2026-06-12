@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# プロジェクトルート
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APPDIR="${ROOT_DIR}/dist/Retrofront.AppDir"
 APPIMAGE="${ROOT_DIR}/dist/Retrofront-x86_64.AppImage"
 APPIMAGETOOL="${APPIMAGETOOL:-appimagetool}"
 
 cd "${ROOT_DIR}"
+
+# Linux UI を Release ビルド
 make linux-ui
 
+# AppDir と AppImage をクリーン
 rm -rf "${APPDIR}" "${APPIMAGE}"
+
+# AppDir のディレクトリ作成
 mkdir -p \
   "${APPDIR}/usr/bin" \
   "${APPDIR}/usr/lib/retrofront/cores" \
@@ -17,14 +23,25 @@ mkdir -p \
   "${APPDIR}/usr/share/icons/hicolor/256x256/apps" \
   "${APPDIR}/usr/share/retrofront/assets"
 
-cp target/release/retrofront "${APPDIR}/usr/bin/retrofront"
+# Swift Release バイナリをコピー
+SWIFT_BIN=".build/release/retrofront-linux"
+if [ ! -f "$SWIFT_BIN" ]; then
+  echo "Error: Swift Linux binary not found at $SWIFT_BIN" >&2
+  exit 1
+fi
+cp "$SWIFT_BIN" "${APPDIR}/usr/bin/retrofront"
+
+# libretro コアをコピー（存在する場合）
 if compgen -G "archifacts/linux/*.so" > /dev/null; then
   cp archifacts/linux/*.so "${APPDIR}/usr/lib/retrofront/cores/"
 fi
+
+# frontend assets をコピー（存在する場合）
 if compgen -G "apps/iOS/Resources/*.zip" > /dev/null; then
   cp apps/iOS/Resources/*.zip "${APPDIR}/usr/share/retrofront/assets/"
 fi
 
+# AppRun スクリプトを作成
 cat > "${APPDIR}/AppRun" <<'APPRUN'
 #!/usr/bin/env bash
 HERE="$(dirname "$(readlink -f "$0")")"
@@ -34,6 +51,7 @@ exec "${HERE}/usr/bin/retrofront" "$@"
 APPRUN
 chmod +x "${APPDIR}/AppRun"
 
+# デスクトップファイルを作成
 cat > "${APPDIR}/retrofront.desktop" <<'DESKTOP'
 [Desktop Entry]
 Type=Application
@@ -45,11 +63,13 @@ Terminal=false
 DESKTOP
 cp "${APPDIR}/retrofront.desktop" "${APPDIR}/usr/share/applications/retrofront.desktop"
 
+# アイコンを作成
 python3 - <<'PY' > "${APPDIR}/retrofront.svg"
 print('<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><rect width="256" height="256" rx="54" fill="#101820"/><path d="M66 98h124a30 30 0 0 1 29 24l12 58a25 25 0 0 1-42 23l-24-25H91l-24 25a25 25 0 0 1-42-23l12-58a30 30 0 0 1 29-24Z" fill="#2d7ff9"/><path d="M75 131h42M96 110v42" stroke="white" stroke-width="13" stroke-linecap="round"/><circle cx="169" cy="132" r="11" fill="white"/><circle cx="197" cy="155" r="11" fill="white"/></svg>')
 PY
 cp "${APPDIR}/retrofront.svg" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/retrofront.svg"
 
+# AppImage 作成
 if command -v "${APPIMAGETOOL}" >/dev/null 2>&1; then
   ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "${APPIMAGETOOL}" "${APPDIR}" "${APPIMAGE}"
 else
