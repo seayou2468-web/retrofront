@@ -16,6 +16,19 @@ settings:
 
 targets:
 
+  CRetrofrontCore:
+    type: library.static
+    platform: iOS
+
+    sources:
+      - path: frontend/CRetrofrontCore
+
+    settings:
+      base:
+        DEFINES_MODULE: YES
+        CLANG_ENABLE_MODULES: YES
+        PUBLIC_HEADERS_FOLDER_PATH: include
+
   RetrofrontSwift:
     type: framework
     platform: iOS
@@ -23,23 +36,19 @@ targets:
     sources:
       - path: frontend/Sources/RetrofrontSwift
 
+    dependencies:
+      - target: CRetrofrontCore
+      - framework: target/aarch64-apple-ios/release/libretrofront_core.a
+        embed: false
+
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.retrofront.swift
-        DEFINES_MODULE: "YES"
-
-        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
-        HEADER_SEARCH_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
-
-        OTHER_SWIFT_FLAGS: "$(inherited) -Xcc -I$(SRCROOT)/frontend/CRetrofrontCore -Xcc -fmodule-map-file=$(SRCROOT)/frontend/CRetrofrontCore/module.modulemap"
+        DEFINES_MODULE: YES
 
         LIBRARY_SEARCH_PATHS: "$(SRCROOT)/target/aarch64-apple-ios/release"
 
         OTHER_LDFLAGS: "$(inherited) -lretrofront_core"
-
-    dependencies:
-      - framework: target/aarch64-apple-ios/release/libretrofront_core.a
-        embed: false
 
   RetrofrontiOS:
     type: application
@@ -105,3 +114,4 @@ schemes:
       targets:
         RetrofrontiOS: all
         RetrofrontSwift: all
+        CRetrofrontCore: all
