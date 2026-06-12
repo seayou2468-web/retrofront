@@ -46,6 +46,11 @@ jobs:
             | sh -s -- -y
 
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      
+      - name: add premission script
+        working-directory: Retrofront
+        shell: bash
+        run: chmod +x scripts/fetch-frontend-assets.sh
 
       - name: Fetch bundled frontend assets
         working-directory: Retrofront
@@ -92,6 +97,11 @@ jobs:
         shell: bash
         run: |
           rustup target add aarch64-apple-ios
+
+      - name: add premission script
+        working-directory: Retrofront
+        shell: bash
+        run: chmod +x scripts/fetch-frontend-assets.sh
 
       - name: Fetch bundled frontend assets
         working-directory: Retrofront
