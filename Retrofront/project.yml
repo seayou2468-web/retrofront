@@ -60,6 +60,8 @@ targets:
 
     dependencies:
       - target: RetrofrontSwift
+      - framework: target/aarch64-apple-ios/release/libretrofront_core.a
+        embed: false
       - framework: ../Externals/MoltenVK/MoltenVK.xcframework
       - sdk: Metal.framework
       - sdk: MetalKit.framework
