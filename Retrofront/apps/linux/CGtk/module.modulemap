@@ -1,5 +1,0 @@
-module CGtk [system] {
-  header "gtk_shim.h"
-  link "gtk-3"
-  export *
-}
