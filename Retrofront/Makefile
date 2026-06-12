@@ -18,7 +18,7 @@ test: rust
 
 linux-ui: rust
 	@pkg-config --exists libadwaita-1 gtksourceview-5 || (echo "Missing Linux GUI development packages. Install libadwaita-1-dev and libgtksourceview-5-dev, then retry." >&2; exit 1)
-	swift build --product retrofront-linux
+	swift build -c release --product retrofront-linux
 
 linux-appimage: frontend-assets linux-ui
 	./scripts/build-linux-appimage.sh
