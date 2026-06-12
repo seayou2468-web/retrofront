@@ -59,6 +59,99 @@ pub const ACTION_SETTINGS_CORE: u32 = 222;
 pub const ACTION_SKIN_SETTINGS: u32 = 260;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuDriver {
+    OneUi,
+    Ozone,
+    MaterialUi,
+    Rgui,
+    Xmb,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MenuDriverSpec {
+    pub ident: &'static str,
+    pub display_name: &'static str,
+    pub layout_model: &'static str,
+    pub input_model: &'static str,
+    pub thumbnail_model: &'static str,
+    pub animation_model: &'static str,
+}
+
+impl MenuDriver {
+    pub const ALL: [MenuDriver; 5] = [
+        MenuDriver::OneUi,
+        MenuDriver::Ozone,
+        MenuDriver::MaterialUi,
+        MenuDriver::Rgui,
+        MenuDriver::Xmb,
+    ];
+
+    pub fn from_ident(value: &str) -> Self {
+        match value.to_ascii_lowercase().as_str() {
+            "ozone" => MenuDriver::Ozone,
+            "glui" | "materialui" => MenuDriver::MaterialUi,
+            "rgui" => MenuDriver::Rgui,
+            "xmb" => MenuDriver::Xmb,
+            _ => MenuDriver::OneUi,
+        }
+    }
+
+    pub fn spec(self) -> MenuDriverSpec {
+        match self {
+            MenuDriver::OneUi => MenuDriverSpec {
+                ident: "oneui",
+                display_name: "One UI",
+                layout_model: "card_stack",
+                input_model: "touch_first_retropad",
+                thumbnail_model: "list_card_badges",
+                animation_model: "spring_cards",
+            },
+            MenuDriver::Ozone => MenuDriverSpec {
+                ident: "ozone",
+                display_name: "Ozone",
+                layout_model: "desktop_sidebar_detail",
+                input_model: "pointer_keyboard_retropad",
+                thumbnail_model: "right_panel_dual_thumbnail",
+                animation_model: "fade_slide_sidebar",
+            },
+            MenuDriver::MaterialUi => MenuDriverSpec {
+                ident: "materialui",
+                display_name: "Material UI",
+                layout_model: "mobile_appbar_navigation",
+                input_model: "touch_navigation_retropad",
+                thumbnail_model: "responsive_dual_thumbnail_list",
+                animation_model: "material_elevation_ripple",
+            },
+            MenuDriver::Rgui => MenuDriverSpec {
+                ident: "rgui",
+                display_name: "RGUI",
+                layout_model: "fixed_grid_terminal",
+                input_model: "retropad_keyboard",
+                thumbnail_model: "inline_or_side_thumbnail",
+                animation_model: "instant_low_memory",
+            },
+            MenuDriver::Xmb => MenuDriverSpec {
+                ident: "xmb",
+                display_name: "XMB",
+                layout_model: "horizontal_categories_vertical_items",
+                input_model: "retropad_keyboard",
+                thumbnail_model: "background_thumbnail_wallpaper",
+                animation_model: "carousel_easing",
+            },
+        }
+    }
+
+    pub fn next_ident(current: &str) -> &'static str {
+        let current = MenuDriver::from_ident(current);
+        let index = Self::ALL
+            .iter()
+            .position(|driver| *driver == current)
+            .unwrap_or(0);
+        Self::ALL[(index + 1) % Self::ALL.len()].spec().ident
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuEntryKind {
     Action,
     Submenu,
@@ -554,8 +647,12 @@ impl MenuEngine {
     }
 
     pub fn apply_skin_from_settings(&mut self, settings: &Settings) {
+        let driver = settings
+            .get("menu_driver")
+            .map_or(MenuDriver::OneUi, |value| MenuDriver::from_ident(value));
+        let spec = driver.spec();
         self.skin = MenuSkin {
-            driver: "oneui".to_string(),
+            driver: spec.ident.to_string(),
             theme: settings
                 .get("menu_theme")
                 .cloned()
@@ -569,30 +666,253 @@ impl MenuEngine {
 
     pub fn push_skin_settings(&mut self, settings: &Settings) {
         self.apply_skin_from_settings(settings);
-        let entries = vec![
+        let spec = MenuDriver::from_ident(&self.skin.driver).spec();
+        let mut entries = vec![
             Self::setting(
                 "Menu Engine",
-                "Locked to One UI; legacy engines are not exposed",
-                &self.skin.driver,
+                "Shared iOS/Linux engine: oneui, ozone, materialui, rgui, xmb",
+                format!("{} ({})", spec.display_name, spec.ident),
                 ACTION_SKIN_SETTINGS,
             ),
             Self::setting(
-                "Theme",
-                "Dark One UI color theme",
-                &self.skin.theme,
+                "Layout Model",
+                "RetroArch driver layout translated into platform-neutral rows",
+                spec.layout_model,
                 ACTION_SKIN_SETTINGS + 1,
             ),
             Self::setting(
-                "Skin Assets",
-                "One UI skin asset root",
-                &self.skin.assets_directory,
+                "Input Model",
+                "Pointer, touch, keyboard and RetroPad behavior for this driver",
+                spec.input_model,
                 ACTION_SKIN_SETTINGS + 2,
             ),
+            Self::setting(
+                "Thumbnails",
+                "Driver-specific thumbnail placement and list treatment",
+                spec.thumbnail_model,
+                ACTION_SKIN_SETTINGS + 3,
+            ),
+            Self::setting(
+                "Animation",
+                "Driver-specific transition and selection behavior",
+                spec.animation_model,
+                ACTION_SKIN_SETTINGS + 4,
+            ),
+            Self::setting(
+                "Theme",
+                "Theme / color preset shared by all menu drivers",
+                &self.skin.theme,
+                ACTION_SKIN_SETTINGS + 5,
+            ),
+            Self::setting(
+                "Skin Assets",
+                "Common menu asset root used by ozone/materialui/rgui/xmb",
+                &self.skin.assets_directory,
+                ACTION_SKIN_SETTINGS + 6,
+            ),
         ];
+        entries.extend(self.driver_specific_skin_entries(settings, spec.ident));
         self.history.push(MenuList {
             title: "User Interface".to_string(),
             entries,
         });
+    }
+
+    fn driver_specific_skin_entries(&self, settings: &Settings, driver: &str) -> Vec<MenuEntry> {
+        match driver {
+            "ozone" => vec![
+                Self::setting(
+                    "Ozone Sidebar",
+                    "Show/collapse the left category sidebar",
+                    settings
+                        .get("ozone_show_sidebar")
+                        .map_or("true", String::as_str),
+                    270,
+                ),
+                Self::setting(
+                    "Ozone Header",
+                    "Header icon and separator treatment",
+                    settings
+                        .get("ozone_header_style")
+                        .map_or("icon_separator", String::as_str),
+                    271,
+                ),
+                Self::setting(
+                    "Ozone Padding",
+                    "Density multiplier used by the shared renderer",
+                    settings
+                        .get("ozone_padding_factor")
+                        .map_or("1.0", String::as_str),
+                    272,
+                ),
+                Self::setting(
+                    "Ozone Font Scale",
+                    "Global and per-list text scale",
+                    settings
+                        .get("ozone_font_scale")
+                        .map_or("1.0", String::as_str),
+                    273,
+                ),
+                Self::setting(
+                    "Ozone Thumbnail Scale",
+                    "Metadata panel thumbnail scale",
+                    settings
+                        .get("ozone_thumbnail_scale_factor")
+                        .map_or("1.0", String::as_str),
+                    274,
+                ),
+            ],
+            "materialui" => vec![
+                Self::setting(
+                    "Material Icons",
+                    "Enable Material icon glyphs in list rows",
+                    settings
+                        .get("materialui_icons_enable")
+                        .map_or("true", String::as_str),
+                    270,
+                ),
+                Self::setting(
+                    "Switch Icons",
+                    "Use switch-style toggle indicators",
+                    settings
+                        .get("materialui_switch_icons")
+                        .map_or("true", String::as_str),
+                    271,
+                ),
+                Self::setting(
+                    "Navigation Bar",
+                    "Show the Material navigation bar",
+                    settings
+                        .get("materialui_show_nav_bar")
+                        .map_or("true", String::as_str),
+                    272,
+                ),
+                Self::setting(
+                    "Auto Rotate Nav",
+                    "Rotate navigation controls with orientation",
+                    settings
+                        .get("materialui_auto_rotate_nav_bar")
+                        .map_or("true", String::as_str),
+                    273,
+                ),
+                Self::setting(
+                    "Dual Thumbnail List",
+                    "Use dual-thumbnail list layout when space allows",
+                    settings
+                        .get("materialui_dual_thumbnail_list_view_enable")
+                        .map_or("true", String::as_str),
+                    274,
+                ),
+            ],
+            "rgui" => vec![
+                Self::setting(
+                    "RGUI Theme",
+                    "Classic terminal palette / preset",
+                    settings
+                        .get("rgui_menu_theme_preset")
+                        .map_or("default", String::as_str),
+                    270,
+                ),
+                Self::setting(
+                    "RGUI Aspect",
+                    "Aspect-ratio lock used by grid layout",
+                    settings
+                        .get("rgui_aspect_ratio")
+                        .map_or("auto", String::as_str),
+                    271,
+                ),
+                Self::setting(
+                    "Inline Thumbnails",
+                    "Draw thumbnails inside rows",
+                    settings
+                        .get("rgui_inline_thumbnails")
+                        .map_or("false", String::as_str),
+                    272,
+                ),
+                Self::setting(
+                    "Extended ASCII",
+                    "Use extended box drawing glyphs",
+                    settings
+                        .get("rgui_extended_ascii")
+                        .map_or("true", String::as_str),
+                    273,
+                ),
+                Self::setting(
+                    "Full Width",
+                    "Stretch list to the full viewport width",
+                    settings
+                        .get("rgui_full_width_layout")
+                        .map_or("true", String::as_str),
+                    274,
+                ),
+            ],
+            "xmb" => vec![
+                Self::setting(
+                    "XMB Icons",
+                    "Icon theme used for horizontal categories",
+                    settings
+                        .get("xmb_theme")
+                        .map_or("monochrome", String::as_str),
+                    270,
+                ),
+                Self::setting(
+                    "Horizontal List",
+                    "Show category carousel",
+                    settings
+                        .get("xmb_show_horizontal_list")
+                        .map_or("true", String::as_str),
+                    271,
+                ),
+                Self::setting(
+                    "Shadows",
+                    "Draw icon and text shadows",
+                    settings
+                        .get("xmb_shadows_enable")
+                        .map_or("true", String::as_str),
+                    272,
+                ),
+                Self::setting(
+                    "Alpha Factor",
+                    "Background alpha / wallpaper blending",
+                    settings
+                        .get("xmb_alpha_factor")
+                        .map_or("75", String::as_str),
+                    273,
+                ),
+                Self::setting(
+                    "Layout",
+                    "XMB column/row spacing preset",
+                    settings.get("xmb_layout").map_or("auto", String::as_str),
+                    274,
+                ),
+            ],
+            _ => vec![
+                Self::setting(
+                    "Density",
+                    "One UI spacing preset",
+                    settings
+                        .get("menu_layout_density")
+                        .map_or("standard", String::as_str),
+                    270,
+                ),
+                Self::setting(
+                    "Cards",
+                    "One UI card surface treatment",
+                    settings
+                        .get("menu_card_style")
+                        .map_or("modern", String::as_str),
+                    271,
+                ),
+                Self::setting(
+                    "Quick Menu",
+                    "Quick menu presentation style",
+                    settings
+                        .get("quick_menu_style")
+                        .map_or("oneui_fullscreen", String::as_str),
+                    272,
+                ),
+            ],
+        }
     }
 
     pub fn push_settings(&mut self, settings: &Settings) {
@@ -620,8 +940,8 @@ impl MenuEngine {
                     ACTION_SETTINGS_INPUT,
                 ),
                 Self::submenu(
-                    "One UI & Skin",
-                    "Dark mode, density, cards and skin assets",
+                    "Menu UI & Skin",
+                    "One UI, Ozone, Material UI, RGUI, XMB, themes and assets",
                     ACTION_SETTINGS_USER_INTERFACE,
                 ),
                 Self::submenu(
@@ -1398,7 +1718,7 @@ mod tests {
             "Video",
             "Audio",
             "Input",
-            "One UI & Skin",
+            "Menu UI & Skin",
             "Directories",
             "Saving",
             "Latency",
@@ -1431,6 +1751,41 @@ mod tests {
             "Auto Load State",
         ] {
             assert!(labels.contains(&expected), "missing {expected}");
+        }
+    }
+
+    #[test]
+    fn menu_skin_settings_expose_retroarch_driver_models() {
+        let mut engine = MenuEngine::new();
+        let mut settings = Settings::new();
+        for (driver, expected) in [
+            ("ozone", "Ozone Sidebar"),
+            ("materialui", "Material Icons"),
+            ("rgui", "RGUI Theme"),
+            ("xmb", "XMB Icons"),
+            ("oneui", "Density"),
+        ] {
+            settings.set("menu_driver", driver);
+            engine.push_skin_settings(&settings);
+            let labels: Vec<&str> = engine
+                .current()
+                .unwrap()
+                .entries
+                .iter()
+                .map(|entry| entry.label.as_str())
+                .collect();
+            assert!(
+                labels.contains(&"Menu Engine"),
+                "missing driver selector for {driver}"
+            );
+            assert!(
+                labels.contains(&expected),
+                "missing {expected} for {driver}"
+            );
+            assert!(
+                labels.contains(&"Layout Model"),
+                "missing layout model for {driver}"
+            );
         }
     }
 }

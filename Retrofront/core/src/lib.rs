@@ -3150,9 +3150,100 @@ pub unsafe extern "C" fn rf_frontend_menu_activate(
                 core.menu.push_input_settings(&core.settings);
                 true
             }
-            menu::ACTION_SETTINGS_USER_INTERFACE | menu::ACTION_SKIN_SETTINGS..=262 => {
+            menu::ACTION_SETTINGS_USER_INTERFACE => {
                 core.menu.push_skin_settings(&core.settings);
                 true
+            }
+            menu::ACTION_SKIN_SETTINGS => {
+                let current = core
+                    .settings
+                    .get("menu_driver")
+                    .map_or("oneui", String::as_str);
+                let next = menu::MenuDriver::next_ident(current);
+                core.settings.set("menu_driver", next);
+                core.configure_from_settings();
+                core.menu.push_skin_settings(&core.settings);
+                true
+            }
+            value if value == menu::ACTION_SKIN_SETTINGS + 5 => {
+                let current = core
+                    .settings
+                    .get("menu_theme")
+                    .map_or("dark", String::as_str);
+                let next = match current {
+                    "dark" => "light",
+                    "light" => "auto",
+                    "auto" => "high_contrast",
+                    _ => "dark",
+                };
+                core.settings.set("menu_theme", next);
+                core.menu.push_skin_settings(&core.settings);
+                true
+            }
+            270..=274 => {
+                let driver = core
+                    .settings
+                    .get("menu_driver")
+                    .map_or("oneui", String::as_str);
+                let (key, values): (&str, &[&str]) = match (driver, action_id) {
+                    ("ozone", 270) => ("ozone_show_sidebar", &["true", "false"]),
+                    ("ozone", 271) => (
+                        "ozone_header_style",
+                        &["icon_separator", "icon", "separator", "none"],
+                    ),
+                    ("ozone", 272) => ("ozone_padding_factor", &["0.75", "1.0", "1.25", "1.5"]),
+                    ("ozone", 273) => ("ozone_font_scale", &["0.85", "1.0", "1.15", "1.30"]),
+                    ("ozone", 274) => (
+                        "ozone_thumbnail_scale_factor",
+                        &["0.75", "1.0", "1.25", "1.5"],
+                    ),
+                    ("materialui", 270) => ("materialui_icons_enable", &["true", "false"]),
+                    ("materialui", 271) => ("materialui_switch_icons", &["true", "false"]),
+                    ("materialui", 272) => ("materialui_show_nav_bar", &["true", "false"]),
+                    ("materialui", 273) => ("materialui_auto_rotate_nav_bar", &["true", "false"]),
+                    ("materialui", 274) => (
+                        "materialui_dual_thumbnail_list_view_enable",
+                        &["true", "false"],
+                    ),
+                    ("rgui", 270) => (
+                        "rgui_menu_theme_preset",
+                        &["default", "classic", "blue", "gruvbox", "solarized"],
+                    ),
+                    ("rgui", 271) => ("rgui_aspect_ratio", &["auto", "4:3", "16:9", "16:10"]),
+                    ("rgui", 272) => ("rgui_inline_thumbnails", &["false", "true"]),
+                    ("rgui", 273) => ("rgui_extended_ascii", &["true", "false"]),
+                    ("rgui", 274) => ("rgui_full_width_layout", &["true", "false"]),
+                    ("xmb", 270) => (
+                        "xmb_theme",
+                        &["monochrome", "flatui", "systematic", "automatic"],
+                    ),
+                    ("xmb", 271) => ("xmb_show_horizontal_list", &["true", "false"]),
+                    ("xmb", 272) => ("xmb_shadows_enable", &["true", "false"]),
+                    ("xmb", 273) => ("xmb_alpha_factor", &["35", "50", "75", "100"]),
+                    ("xmb", 274) => ("xmb_layout", &["auto", "desktop", "handheld", "console"]),
+                    (_, 270) => (
+                        "menu_layout_density",
+                        &["compact", "standard", "comfortable"],
+                    ),
+                    (_, 271) => ("menu_card_style", &["modern", "flat", "outlined"]),
+                    (_, 272) => (
+                        "quick_menu_style",
+                        &["oneui_fullscreen", "bottom_sheet", "compact"],
+                    ),
+                    _ => ("", &[]),
+                };
+                if !key.is_empty() && !values.is_empty() {
+                    let current = core.settings.get(key).map_or(values[0], String::as_str);
+                    let index = values
+                        .iter()
+                        .position(|value| *value == current)
+                        .unwrap_or(0);
+                    core.settings.set(key, values[(index + 1) % values.len()]);
+                    core.menu.push_skin_settings(&core.settings);
+                    true
+                } else {
+                    false
+                }
             }
             menu::ACTION_SETTINGS_DIRECTORIES => {
                 core.menu.push_directory_settings(&core.settings);
