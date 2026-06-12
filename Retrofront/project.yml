@@ -30,6 +30,7 @@ targets:
         DEFINES_MODULE: YES
         MACH_O_TYPE: mh_dylib
         BUILD_LIBRARY_FOR_DISTRIBUTION: YES
+        OTHER_SWIFT_FLAGS: "-I $(SRCROOT)/frontend/CRetrofrontCore"
 
         # Rust/Cヘッダ参照
         SWIFT_INCLUDE_PATHS: "$(SRCROOT)/frontend/CRetrofrontCore"
