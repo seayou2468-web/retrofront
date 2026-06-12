@@ -25,12 +25,13 @@ targets:
 
     settings:
       base:
+        PRODUCT_NAME: CRetrofrontCore
         DEFINES_MODULE: YES
         CLANG_ENABLE_MODULES: YES
         PUBLIC_HEADERS_FOLDER_PATH: include
 
   RetrofrontSwift:
-    type: library.static
+    type: framework
     platform: iOS
 
     sources:
@@ -38,17 +39,12 @@ targets:
 
     dependencies:
       - target: CRetrofrontCore
-      - framework: target/aarch64-apple-ios/release/libretrofront_core.a
-        embed: false
 
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.retrofront.swift
+        PRODUCT_NAME: RetrofrontSwift
         DEFINES_MODULE: YES
-
-        LIBRARY_SEARCH_PATHS: "$(SRCROOT)/target/aarch64-apple-ios/release"
-
-        OTHER_LDFLAGS: "$(inherited) -lretrofront_core"
 
   RetrofrontiOS:
     type: application
@@ -60,8 +56,6 @@ targets:
 
     dependencies:
       - target: RetrofrontSwift
-      - framework: target/aarch64-apple-ios/release/libretrofront_core.a
-        embed: false
       - framework: ../Externals/MoltenVK/MoltenVK.xcframework
       - sdk: Metal.framework
       - sdk: MetalKit.framework
@@ -109,11 +103,3 @@ targets:
         FRAMEWORK_SEARCH_PATHS: "$(inherited) $(SRCROOT)/cores $(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Frameworks"
 
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @loader_path/Frameworks"
-　　　　　ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: NO
-schemes:
-  RetrofrontiOS:
-    build:
-      targets:
-        RetrofrontiOS: all
-        RetrofrontSwift: all
-        CRetrofrontCore: all
