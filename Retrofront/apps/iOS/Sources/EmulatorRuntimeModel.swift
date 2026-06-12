@@ -214,8 +214,9 @@ case .noCore:
   statusMessage = "No compatible core found for .\(plan.contentExtension). Load a matching bundled core first."
 
 @unknown default:
+  assertionFailure("Unhandled LaunchDecision: \(plan.decision)")
   statusMessage = "Unknown launch decision"
-  assertionFailure("Unhandled LaunchDecision case")
+  break
 }
   }
 
