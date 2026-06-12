@@ -207,17 +207,20 @@ public final class EmulatorRuntimeModel: ObservableObject {
       statusMessage = "Could not create launch plan"
       return
     }
-    switch plan.decision {
-case .selected:
+    switch LaunchDecision(rawValue: plan.decision) {
+case .selected?:
   doLaunch(url, preferredCore: plan.selectedCorePath)
 
-case .needsCoreChoice:
+case .needsCoreChoice?:
   pendingContentURL = url
   pendingCoreChoices = frontend.launchCandidates()
   statusMessage = "Select a core for .\(plan.contentExtension)"
 
-case .noCore:
+case .noCore?:
   statusMessage = "No compatible core found for .\(plan.contentExtension). Load a matching bundled core first."
+
+case .none:
+  statusMessage = "Unknown launch decision"
 }
   }
 
