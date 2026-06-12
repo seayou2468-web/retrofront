@@ -22,7 +22,8 @@ targets:
 
     sources:
       - path: frontend/Sources/RetrofrontSwift
-
+      - path: frontend/CRetrofrontCore
+      
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.retrofront.swift
