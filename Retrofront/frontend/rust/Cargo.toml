@@ -1,0 +1,3 @@
+[workspace]
+members = ["retrofront-core"]
+resolver = "2"
