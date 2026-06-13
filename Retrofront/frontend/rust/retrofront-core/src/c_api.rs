@@ -14,6 +14,7 @@ use crate::{
     input::{InputEvent, InputSource, MenuAction},
     libretro::{GameInfo, GameInfoHandle},
     menu::MenuEntry,
+    menu::RETROFRONT_MENU_SOURCE_FILES,
     renderer::{PixelFormat, VideoFrame},
     settings::SettingValue,
     RetrofrontRuntime,
@@ -48,7 +49,7 @@ pub extern "C" fn retrofront_runtime_init(data_dir: *const c_char) -> bool {
         .to_string_lossy()
         .into_owned();
     let runtime = RetrofrontRuntime::new(PathBuf::from(data_dir));
-    if runtime.filesystem.ensure_layout().is_err() || runtime.settings.load().is_err() {
+    if runtime.prepare_storage().is_err() {
         return false;
     }
     RUNTIME.set(runtime).is_ok()
@@ -157,6 +158,46 @@ pub extern "C" fn retrofront_menu_title(dst: *mut c_char, dst_len: usize) -> boo
         return false;
     };
     copy_cstr(runtime.menu.read().title(), dst, dst_len)
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_menu_source_file_count() -> usize {
+    RETROFRONT_MENU_SOURCE_FILES.len()
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_menu_source_file(
+    index: usize,
+    dst: *mut c_char,
+    dst_len: usize,
+) -> bool {
+    let Some(path) = RETROFRONT_MENU_SOURCE_FILES.get(index) else {
+        return false;
+    };
+    copy_cstr(path, dst, dst_len)
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_menu_set_driver(name: *const c_char) -> bool {
+    let Some(runtime) = runtime() else {
+        return false;
+    };
+    let Some(name) = cstr(name) else {
+        return false;
+    };
+    let Some(driver) = crate::menu::MenuDriver::from_name(&name) else {
+        return false;
+    };
+    runtime.menu.write().set_driver(driver);
+    true
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_menu_driver(dst: *mut c_char, dst_len: usize) -> bool {
+    let Some(runtime) = runtime() else {
+        return false;
+    };
+    copy_cstr(runtime.menu.read().driver().as_name(), dst, dst_len)
 }
 
 #[no_mangle]

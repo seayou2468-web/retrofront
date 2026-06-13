@@ -23,7 +23,7 @@ use std::{fs as std_fs, path::PathBuf};
 
 use fs::HostFilesystem;
 use input::InputSystem;
-use menu::{MenuEntry, MenuEntryType, MenuIntent, MenuModel};
+use menu::{MenuDriver, MenuEntry, MenuEntryType, MenuIntent, MenuModel};
 use parking_lot::RwLock;
 use playlist::PlaylistStore;
 use renderer::VideoRenderer;
@@ -84,6 +84,11 @@ impl RetrofrontRuntime {
     pub fn prepare_storage(&self) -> std::io::Result<()> {
         self.filesystem.ensure_layout()?;
         self.settings.load()?;
+        if let Some(settings::SettingValue::String(name)) = self.settings.get("menu_driver") {
+            if let Some(driver) = MenuDriver::from_name(&name) {
+                self.menu.write().set_driver(driver);
+            }
+        }
         Ok(())
     }
 
@@ -181,6 +186,14 @@ impl RetrofrontRuntime {
                 "Settings".into(),
                 vec![
                     MenuEntry {
+                        label: "Menu driver".into(),
+                        value: self.menu.read().driver().as_name().into(),
+                        sublabel: "Uses fixed C menu drivers: ozone/xmb/materialui/rgui".into(),
+                        path: "retrofront://menu-drivers".into(),
+                        entry_type: MenuEntryType::Enum,
+                        ..Default::default()
+                    },
+                    MenuEntry {
                         label: "Video driver".into(),
                         value: "wgpu".into(),
                         sublabel: "Linux Vulkan / iOS Metal".into(),
@@ -193,6 +206,43 @@ impl RetrofrontRuntime {
                     },
                 ],
             ),
+            "retrofront://menu-drivers" => (
+                "Menu Driver".into(),
+                ["ozone", "xmb", "materialui", "rgui"]
+                    .into_iter()
+                    .map(|name| MenuEntry {
+                        label: name.into(),
+                        path: format!("menu-driver://{name}"),
+                        checked: self.menu.read().driver().as_name() == name,
+                        entry_type: MenuEntryType::Enum,
+                        ..Default::default()
+                    })
+                    .collect(),
+            ),
+            _ if path.starts_with("menu-driver://") => {
+                let name = path.trim_start_matches("menu-driver://");
+                if let Some(driver) = MenuDriver::from_name(name) {
+                    self.menu.write().set_driver(driver);
+                    self.settings.set(
+                        "menu_driver",
+                        settings::SettingValue::String(driver.as_name().into()),
+                    );
+                    let _ = self.settings.save();
+                }
+                (
+                    "Menu Driver".into(),
+                    ["ozone", "xmb", "materialui", "rgui"]
+                        .into_iter()
+                        .map(|name| MenuEntry {
+                            label: name.into(),
+                            path: format!("menu-driver://{name}"),
+                            checked: self.menu.read().driver().as_name() == name,
+                            entry_type: MenuEntryType::Enum,
+                            ..Default::default()
+                        })
+                        .collect(),
+                )
+            }
             _ if path.starts_with("playlist://") => {
                 let name = path.trim_start_matches("playlist://");
                 (name.into(), self.entries_for_playlist(name))

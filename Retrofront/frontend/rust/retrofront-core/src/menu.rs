@@ -3,6 +3,37 @@ use serde::{Deserialize, Serialize};
 use crate::input::MenuAction;
 
 pub const MENU_LABEL_MAX_LENGTH: usize = 1024;
+include!(concat!(env!("OUT_DIR"), "/menu_sources.rs"));
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum MenuDriver {
+    #[default]
+    Ozone,
+    Xmb,
+    MaterialUi,
+    Rgui,
+}
+
+impl MenuDriver {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "ozone" => Some(Self::Ozone),
+            "xmb" => Some(Self::Xmb),
+            "materialui" => Some(Self::MaterialUi),
+            "rgui" => Some(Self::Rgui),
+            _ => None,
+        }
+    }
+
+    pub fn as_name(self) -> &'static str {
+        match self {
+            Self::Ozone => "ozone",
+            Self::Xmb => "xmb",
+            Self::MaterialUi => "materialui",
+            Self::Rgui => "rgui",
+        }
+    }
+}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MenuEntry {
@@ -45,6 +76,7 @@ pub enum MenuIntent {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MenuModel {
     title: String,
+    driver: MenuDriver,
     stack: Vec<Vec<MenuEntry>>,
     titles: Vec<String>,
     selection: Vec<usize>,
@@ -54,6 +86,7 @@ impl Default for MenuModel {
     fn default() -> Self {
         Self {
             title: "Retrofront".into(),
+            driver: MenuDriver::default(),
             stack: vec![Vec::new()],
             titles: vec!["Retrofront".into()],
             selection: vec![0],
@@ -73,6 +106,12 @@ impl MenuModel {
     }
     pub fn title(&self) -> &str {
         &self.title
+    }
+    pub fn driver(&self) -> MenuDriver {
+        self.driver
+    }
+    pub fn set_driver(&mut self, driver: MenuDriver) {
+        self.driver = driver;
     }
     pub fn current_entries(&self) -> &[MenuEntry] {
         self.stack.last().map(Vec::as_slice).unwrap_or(&[])
@@ -151,5 +190,14 @@ mod tests {
         );
         menu.action(MenuAction::Down);
         assert_eq!(menu.current_selection(), 0);
+    }
+
+    #[test]
+    fn fixed_c_menu_contract_contains_all_32_files() {
+        assert_eq!(RETROFRONT_MENU_SOURCE_FILES.len(), 32);
+        assert!(RETROFRONT_MENU_SOURCE_FILES.contains(&"drivers/ozone.c"));
+        assert!(RETROFRONT_MENU_SOURCE_FILES.contains(&"drivers/materialui.c"));
+        assert!(RETROFRONT_MENU_SOURCE_FILES.contains(&"drivers/xmb.c"));
+        assert!(RETROFRONT_MENU_SOURCE_FILES.contains(&"drivers/rgui.c"));
     }
 }
