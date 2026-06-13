@@ -1,509 +1,350 @@
-# RetroArch UI をそのまま使い、UI 以外を Rust に置き換えるためのロードマップ
+# RetroArch と同じ UI を Retrofront で完全動作させるための最小作業計画
 
-## 0. ゴール定義
+## 0. この計画の前提
 
-`reference/RetroArch/` の RetroArch UI 全域を可能な限り無改変で `Retrofront/` に取り込み、UI が期待する RetroArch 側のグローバル状態・設定・描画・入力・ファイルシステム・タスク・ネットワーク・libretro 管理などを Rust 実装で提供する。最終状態は「C の UI ソースは RetroArch 追従可能な薄い移植層として残し、実体のアプリケーション状態と副作用は Rust が所有する」構成にする。
+この計画は、`Retrofront/frontend/menu/` がすでに `reference/RetroArch/` の UI ソースに追従していることを前提にする。したがって、`Retrofront/frontend/menu/` の更新、upstream 差分調査、追従運用、RetroArch 本体機能の移植計画はここには含めない。
 
-重要な前提は次の通り。
+現在必要なのは「完全な UI が動くこと」だけである。core 起動、実 playlist 管理、実 download、実 database scan、実 netplay、実 achievements、実 shader 編集保存などの本機能は、UI が完全に表示・遷移・操作できるようになってから実装する。この段階では、UI が必要とする値と成功応答を Rust 側の UI runtime が返し、画面・入力・アニメーション・テーマ・フォント・ダミーデータ・無効状態表示を破綻なく動かすことをゴールにする。
 
-- UI ソースは「仕様」として扱い、UI ロジックそのものの Rust 再実装を最初のゴールにしない。
-- `reference/RetroArch/menu/` だけでは UI 全域ではない。メニューは `menu/`、描画は `gfx/` と `gfx/font/`、アセット/翻訳/シェーダ/設定/タスク/入力/音声/ネットワーク/playlist/database などに広く依存する。
-- 依存先を一気に全置換しない。まず C UI をビルド可能にし、未実装依存を Rust 側の最小 stub で満たし、その後に stub を本実装へ置き換える。
-- C と Rust の境界は C ABI に固定する。Rust の内部設計を C UI に漏らさず、C UI から見える関数・構造体・列挙値は RetroArch 互換の adapter 層で吸収する。
-- ライセンス、著作権表示、RetroArch 追従手順を最初から運用に含める。
+描画 backend は `wgpu` を使う。shader 連携は `librashader` を使うが、`librashader` の wgpu runtime は使わない。`wgpu` から Vulkan/Metal/D3D12 等の raw handle を取り出し、その raw handle を `librashader` の通常 runtime に渡す方針にする。
 
-## 1. 成果物の完成形
+## 1. ゴール
 
-### 1.1 ディレクトリ構成の目標
+`Retrofront/` で RetroArch と同じ UI を、実機能なしでも最後まで操作できる状態にする。
+
+具体的な完成条件は次の通り。
+
+- `xmb`、`ozone`、`rgui`、`materialui` の menu driver が起動できる。
+- 各 driver でトップメニュー、設定、履歴、playlist、core 一覧、shader、オンライン更新、情報、終了確認などの主要画面に遷移できる。
+- 実機能が未実装の項目は、クラッシュせず、空一覧・ダミー一覧・disabled 表示・「未実装」message のいずれかで UI として成立する。
+- font、icon、wallpaper、thumbnail placeholder、theme color、animation、scroll、cursor、breadcrumb、sub-label、help text が表示される。
+- keyboard、gamepad、mouse、touch の UI 操作が動く。
+- window resize、DPI scale、safe area、orientation change に UI が追従する。
+- `wgpu` renderer 上で menu の描画 command が安定して表示される。
+- `librashader` は raw handle 経由で接続可能な設計にしておき、UI 上の shader 画面や preview が破綻しない。
+- 実 core を起動しなくても UI の全導線を自動操作テストで巡回できる。
+
+## 2. 実装しないもの
+
+UI 完全動作前には次を実装しない。
+
+- libretro core の実起動。
+- 実 ROM/content load。
+- 実 playlist scan。
+- 実 database query。
+- 実 thumbnail download。
+- 実 online updater。
+- 実 netplay。
+- 実 achievements login/sync。
+- 実 shader preset の恒久保存。
+- 実 save/state/screenshot/rewind。
+- 実 audio mixer。
+- 実 cloud/smb/network filesystem。
+
+ただし、これらの画面を UI として表示するための dummy data、placeholder、disabled action、success/failure mock は実装する。
+
+## 3. 全体構成
 
 ```text
 Retrofront/
   frontend/
-    menu/                 # RetroArch menu/ の追従コピー。原則無改変。
-    ui_compat/            # RetroArch UI が include/call する互換 C shim。
-    renderer/             # C から見える最小描画 ABI と必要な glue。
+    menu/                         # 既存の RetroArch UI 追従ソース。更新しない。
+    menu/retrofront_menu_bridge.* # C UI から Rust UI runtime へ渡す橋渡し。
+    renderer/                     # C 側の薄い描画 glue。
     rust/
-      retrofront-core/    # Rust が所有する状態・描画・入力・FS・task・libretro。
-reference/
-  RetroArch/              # upstream 参照。直接編集しない。
-docs/
-  retroarch-ui-rust-replacement-roadmap.md
+      retrofront-core/
+        src/
+          ui_runtime/             # UI 完全動作用の状態・mock・設定・一覧。
+          renderer/               # wgpu renderer。
+          shader/                 # raw handle 経由 librashader 接続点。
+          input/                  # UI 入力変換。
+          assets/                 # UI asset/font/icon/thumbnail placeholder。
+          platform/               # window/surface/raw handle 抽出。
 ```
 
-### 1.2 レイヤー境界
-
-| レイヤー | 言語 | 役割 | 変更方針 |
-| --- | --- | --- | --- |
-| RetroArch UI source | C/C++/ObjC | menu drivers、menu callbacks、表示リスト、UI 状態遷移 | 原則 upstream 追従。局所 patch は `ui_compat` へ逃がす。 |
-| Compatibility shim | C | RetroArch の関数名/型/ヘッダを満たし Rust ABI へ転送 | 小さく保つ。UI から見える互換面だけ実装。 |
-| Rust core | Rust | アプリ状態、副作用、描画 backend、入力、FS、設定、task、libretro | 実装本体。テストを書く。 |
-| Platform host | Swift/C/Rust | iOS/Linux window、イベントループ、surface 提供 | Rust core と C UI を起動する。 |
-
-## 2. Phase 0: 現状調査と固定化
-
-### 2.1 upstream 差分を確認する
-
-1. `reference/RetroArch/` のコミット hash または取得元 tag を記録する。
-2. `reference/RetroArch/menu/` と `Retrofront/frontend/menu/` の差分を取る。
-3. 差分を次の 4 種に分類する。
-   - 単純コピー漏れ。
-   - Retrofront 用の意図的変更。
-   - build を通すための一時 stub。
-   - upstream 更新で解消すべき古い差分。
-4. 差分分類表を `docs/retroarch-ui-upstream-diff.md` に作る。
-5. 以後、UI ソース変更時は必ず差分分類表を更新する。
-
-### 2.2 UI 全域の対象範囲を確定する
-
-最低限対象に入れるもの。
-
-- `reference/RetroArch/menu/`
-  - `menu_driver.c`
-  - `menu_displaylist.c`
-  - `menu_setting.c`
-  - `menu_shader.c`
-  - `menu_explore.c`
-  - `menu_contentless_cores.c`
-  - `menu_screensaver.c`
-  - `menu/cbs/*.c`
-  - `menu/drivers/materialui.c`
-  - `menu/drivers/ozone.c`
-  - `menu/drivers/rgui.c`
-  - `menu/drivers/xmb.c`
-- `reference/RetroArch/gfx/` のうち UI 描画に必要な display/font/texture/video context API。
-- `reference/RetroArch/assets/` 相当の theme/font/icon/wallpaper。
-- `reference/RetroArch/intl/` 相当の翻訳文字列。
-- `reference/RetroArch/configuration.*`、`settings.*`、`paths.*`、`file_path_special.*` 相当の設定/パス API。
-- `reference/RetroArch/tasks/` 相当の非同期タスク API。
-- playlist、database、favorites、history、core info、shader preset、cheevos 表示など UI が列挙するデータ source。
-
-### 2.3 「UI 以外」の Rust 所有物を明文化する
-
-Rust が所有するものを固定する。
-
-- Window/surface/device/swapchain/context。
-- GPU resources、texture upload、font atlas、shader pipeline。
-- Input event、gamepad/touch/keyboard mapping、menu action 変換。
-- Settings store、config load/save、runtime overrides。
-- Path resolution、VFS、archive、network path、content scan。
-- Task queue、download、scan、thumbnail load、database query。
-- Playlist/history/favorites/contentless core list。
-- libretro core load/unload、environment callback、audio/video/input callbacks。
-- Audio mixer と menu sound。
-- Logging、metrics、crash boundary。
-
-## 3. Phase 1: ビルド境界を作る
-
-### 3.1 C UI を独立 static library 化する
-
-1. `Retrofront/frontend/menu/` を `retrofront-ui-c` という C static library として扱う。
-2. C compiler flags を upstream に寄せる。
-3. platform 固有 macro を最小化する。
-4. 使用 driver を最初は 1 つに絞る。推奨順は `rgui`、`ozone`、`xmb`、`materialui`。
-   - `rgui`: 依存が少なく最初の疎通向き。
-   - `ozone`: 現代的 UI 検証向き。
-   - `xmb`: assets と animation 依存が多い。
-   - `materialui`: touch/mobile 検証向き。
-5. `menu/drivers/*.c` は全て残すが、build feature で有効 driver を切り替える。
-
-### 3.2 互換 header セットを作る
-
-1. `Retrofront/frontend/ui_compat/include/` を作る。
-2. RetroArch UI が include する header 名をそのまま配置する。
-3. header の中身は次のどちらかにする。
-   - upstream と ABI 互換が必要な struct/enum 定義。
-   - Rust ABI へ転送する関数宣言。
-4. `reference/RetroArch/` の巨大 header を無条件に include しない。
-5. 依存が増えたら header ごとに owner を決め、stub か本実装かを台帳化する。
-
-### 3.3 Rust ABI crate を固定する
-
-1. `retrofront-core` に `crate-type = ["staticlib", "cdylib", "rlib"]` を設定する。
-2. `retrofront_rust.h` を C 側唯一の Rust 入口にする。
-3. ABI 関数名は `retrofront_` prefix に統一する。
-4. C から Rust へ渡す pointer の lifetime を全て文書化する。
-5. Rust panic は ABI を越えないように `catch_unwind` 境界または panic abort 方針を決める。
-6. error は整数 code + thread-local/handle-based message で返す。
-
-## 4. Phase 2: 依存関係の完全棚卸し
-
-### 4.1 symbol 収集
-
-1. C UI library を未解決 symbol を許す形で compile する。
-2. `nm -u` または linker map で未解決 symbol 一覧を作る。
-3. symbol を次の category に分ける。
-   - settings/config。
-   - paths/filesystem/VFS。
-   - menu state/list/entries。
-   - video/display/font/texture。
-   - input。
-   - task/thread/timer。
-   - playlist/database/core info。
-   - shader。
-   - network/download。
-   - audio/menu sound。
-   - logging/message。
-   - platform/window。
-   - memory/string/list utility。
-4. 依存ごとに「Rust 本実装」「C shim」「upstream common を残す」「削除」の方針を決める。
-
-### 4.2 include 依存収集
-
-1. `clang -M` または `cc -MMD` で include graph を生成する。
-2. `reference/RetroArch/libretro-common/` へ依存する箇所を抽出する。
-3. C utility として残してよいものを選ぶ。
-   - 文字列 utility。
-   - list/vector utility。
-   - path utility の pure 関数。
-   - hash/encoding の pure 関数。
-4. 副作用を持つものは Rust へ移す。
-   - file IO。
-   - thread。
-   - network。
-   - platform API。
-   - config 永続化。
-
-### 4.3 dependency ledger を作る
-
-`docs/retroarch-ui-dependency-ledger.md` に次の列で表を作る。
-
-| UI symbol/header | upstream path | 用途 | owner | Rust module | 実装状態 | test |
-| --- | --- | --- | --- | --- | --- | --- |
-
-状態は `not_started`、`stub`、`partial`、`complete`、`upstream_c_kept` の 5 段階にする。
-
-## 5. Phase 3: 最小起動ループ
-
-### 5.1 Rust 側 AppState を作る
-
-最初に必要な状態。
-
-- `MenuRuntime`。
-- `SettingsStore`。
-- `PathStore`。
-- `AssetStore`。
-- `InputState`。
-- `RendererHandle`。
-- `TaskRuntime`。
-- `PlaylistStore`。
-- `CoreInfoStore`。
-
-C には opaque handle だけ渡す。
-
-### 5.2 起動 sequence
-
-1. platform host が window/surface を作る。
-2. Rust core を初期化する。
-3. Rust core が renderer を初期化する。
-4. C UI を初期化する。
-5. menu driver を選択する。
-6. assets path と config path を C UI に見せる。
-7. main loop を開始する。
-8. 1 frame ごとに次を実行する。
-   - platform event poll。
-   - Rust input update。
-   - C UI menu iterate。
-   - C UI が描画 command を出す。
-   - C shim が Rust renderer へ command を転送する。
-   - Rust renderer が present する。
-
-### 5.3 最小 acceptance criteria
-
-- 空の playlist でもメニュー画面が出る。
-- 上下左右/決定/戻るが動く。
-- 設定画面を開ける。
-- 1 つの setting 値を変更できる。
-- アプリ再起動後に変更が残る。
-- 画面 resize に追従する。
-- 終了時に leak sanitizer または Rust drop log で大きな leak がない。
-
-## 6. Phase 4: 描画を Rust へ置き換える
-
-### 6.1 C UI から見た描画 API を保つ
-
-UI driver が期待する概念を維持する。
-
-- viewport。
-- scissor。
-- font draw。
-- text metrics。
-- texture load/free/update。
-- colored quad。
-- image quad。
-- icon atlas。
-- menu animation alpha/transform。
-- video frame background。
-- shader preview/preset 表示。
-
-### 6.2 Rust renderer に変換する
-
-1. C 側 draw call を immediate に GPU 実行しない。
-2. C shim で `MenuDrawCommand` に詰める。
-3. Rust が frame 終端で command list を受け取る。
-4. Rust が batching、texture bind、font atlas、pipeline 選択を行う。
-5. backend は最初 `wgpu` に統一する。
-6. iOS では Metal surface、Linux では Vulkan/Wayland/X11 surface を使う。
-7. raw handle が必要な shader integration は Rust renderer 内部に閉じ込める。
-
-### 6.3 font/text
-
-1. RetroArch と同じ font file と fallback 順を使う。
-2. glyph metrics の差が UI 崩れの最大原因なので snapshot test を作る。
-3. HarfBuzz 等の shaping が必要な言語を後回しにしない。
-4. C UI には text width/height API だけ見せる。
-5. Rust 側で atlas eviction 方針を決める。
-
-### 6.4 texture/assets
-
-1. assets zip または directory の layout を RetroArch 互換にする。
-2. icon 名から asset path への解決は Rust が行う。
-3. PNG/JPEG/TGA decode は Rust crate に寄せる。
-4. C UI の texture handle は整数 ID にする。
-5. reload、theme switch、DPI scale change を test する。
-
-## 7. Phase 5: 入力を Rust へ置き換える
-
-1. platform event を Rust が受け取る。
-2. keyboard/gamepad/touch/mouse を `InputEvent` に正規化する。
-3. `InputEvent` を RetroArch menu action に変換する。
-4. key repeat、hold acceleration、analog threshold を設定化する。
-5. touch gesture は `materialui` 用に tap/long press/scroll/fling を実装する。
-6. C UI には `menu_input_state` 相当の問い合わせ結果だけ返す。
-7. hotkey と menu navigation の優先順位を決める。
-8. input recording/replay test を作る。
-
-## 8. Phase 6: 設定とパスを Rust へ置き換える
-
-### 8.1 設定 store
-
-1. RetroArch の setting key を Rust の typed schema に写像する。
-2. unknown key を落とさず保存できる escape hatch を用意する。
-3. UI の callback が参照する setting は全て ledger に登録する。
-4. bool/int/float/string/path/enum の getter/setter ABI を作る。
-5. setting change event を Rust core 内で publish する。
-6. C UI から直接 global settings struct を変更させない。
-
-### 8.2 path store
-
-1. config、assets、cores、system、saves、states、playlists、thumbnails、shaders、logs を定義する。
-2. iOS sandbox と Linux XDG の path policy を分ける。
-3. relative path と absolute path の normalize を Rust に統一する。
-4. content path display 用の短縮表示 API を用意する。
-5. permission error を UI message に変換する。
-
-## 9. Phase 7: メニュー data source を Rust へ置き換える
-
-### 9.1 menu display list
-
-1. C UI は display list を組み立てるが、元データは Rust が提供する。
-2. cores、playlists、history、favorites、settings、directories を Rust API で列挙する。
-3. C 側には `label`、`sublabel`、`path`、`type`、`icon`、`flags` の配列として渡す。
-4. 文字列 lifetime は「呼び出し中だけ有効」か「handle 解放まで有効」か統一する。
-5. 大量 playlist では pagination/lazy loading を実装する。
-
-### 9.2 playlist/history/favorites
-
-1. RetroArch playlist format の read/write を Rust で実装する。
-2. 既存 playlist を round-trip test する。
-3. duplicate detection を設定化する。
-4. thumbnail lookup と playlist entry を結びつける。
-5. 最近使った項目は atomic write する。
-
-### 9.3 core info
-
-1. core directory を scan する。
-2. `.info` parser を Rust で実装する。
-3. supported extensions、display name、firmware requirements を expose する。
-4. contentless core を list する。
-5. core missing/incompatible を UI に表示する。
-
-## 10. Phase 8: task system を Rust へ置き換える
-
-1. UI から task enqueue する ABI を作る。
-2. Rust で async runtime または thread pool を選ぶ。
-3. task type を enum 化する。
-   - directory scan。
-   - playlist scan。
-   - thumbnail load/download。
-   - core info refresh。
-   - shader load。
-   - archive listing。
-   - network update。
-4. progress、cancel、complete、error を pollable にする。
-5. C UI の notification/message queue へ completion を戻す。
-6. task 中の UI freeze がないことを frame time test で確認する。
-
-## 11. Phase 9: shader と video preview
-
-1. menu shader UI が参照する preset list を Rust が列挙する。
-2. preset parse/validate を Rust に寄せる。
-3. preview thumbnail または current core frame background を Rust renderer が提供する。
-4. shader parameter setting を typed schema と同期する。
-5. invalid shader は fallback 表示にする。
-6. Vulkan/Metal の差は Rust renderer 内に閉じる。
-
-## 12. Phase 10: libretro core 実行との統合
-
-1. Rust が core lifecycle を所有する。
-2. C UI からは「content load」「core unload」「run state change」だけ要求できるようにする。
-3. libretro environment callback は Rust で実装する。
-4. menu が必要とする core metadata を Rust が返す。
-5. content launch 後も menu overlay を出せるよう renderer composition を作る。
-6. save/state/screenshot/rewind/netplay 等の UI 項目は未実装時も明示的 disabled にする。
-
-## 13. Phase 11: 翻訳・アクセシビリティ・テーマ完全化
-
-1. `intl` の message hash と翻訳 table を Rust で load する。
-2. fallback language を `en` にする。
-3. missing translation を log する。
-4. DPI scale、safe area、reduced motion、high contrast を Rust setting にする。
-5. screen reader 連携が必要な platform では C UI の focus item を Rust host へ通知する。
-
-## 14. Phase 12: upstream 追従運用
-
-1. `reference/RetroArch/` を更新する手順を script 化する。
-2. `menu/` 差分を自動生成する。
-3. C UI に直接当てた patch は最小化し、必ず理由を書く。
-4. dependency ledger を再生成する。
-5. visual regression を走らせる。
-6. 破壊的変更があれば Rust shim を更新する。
-7. 追従 PR では「upstream 変更」「compat 変更」「Rust 実装変更」を commit 分割する。
-
-## 15. Phase 13: テスト計画
-
-### 15.1 unit test
-
-- settings schema round-trip。
-- path normalization。
-- playlist parser/writer。
-- `.info` parser。
-- asset resolver。
-- input mapping。
-- task state machine。
-- C ABI string/handle lifetime。
-
-### 15.2 integration test
-
-- C UI static library link test。
-- Rust core + C UI init/shutdown test。
-- menu navigation replay test。
-- setting change persistence test。
-- playlist large data test。
-- renderer command list validation。
-
-### 15.3 visual regression
-
-1. 決まった window size で各 menu driver を起動する。
-2. 同じ input replay を流す。
-3. screenshot を保存する。
-4. reference image と pixel diff する。
-5. font rendering 差を許容する threshold を決める。
-6. iOS と Linux の baseline を別に持つ。
-
-### 15.4 performance test
-
-- cold start time。
-- first menu frame time。
-- large playlist scroll frame time。
-- thumbnail load 中の frame drop。
-- shader list 表示時間。
-- memory peak。
-- texture atlas 使用量。
-
-## 16. Phase 14: リスクと対策
-
-| リスク | 原因 | 対策 |
-| --- | --- | --- |
-| UI だけのつもりが RetroArch 全体を移植する規模になる | menu が global state と subsystems に強く依存する | dependency ledger で owner を決め、stub から段階移行する。 |
-| upstream 追従不能になる | C UI を直接改変する | `ui_compat` へ変更を逃がし、menu 差分を常時監視する。 |
-| 描画が微妙に違う | font metrics、texture sampling、DPI、animation timer 差 | visual regression と metrics test を早期導入する。 |
-| Rust/C 境界でクラッシュする | lifetime、ownership、panic、thread 境界不備 | opaque handle、明示 free、ABI test、panic 方針を固定する。 |
-| iOS で動かない | dynamic loading、sandbox、Metal surface、署名制約 | platform policy を Rust host に閉じ、iOS 実機 CI を用意する。 |
-| 設定項目が多すぎる | RetroArch settings が巨大 | UI が実際に読む key から優先実装し、unknown key 保持を入れる。 |
-| assets が揃わない | theme/icon/font path の違い | RetroArch 互換 layout を採用し、asset resolver test を作る。 |
-
-## 17. 実装順チェックリスト
-
-### Milestone A: 調査完了
-
-- [ ] upstream 参照 commit を記録する。
-- [ ] `menu/` 差分表を作る。
-- [ ] include graph を作る。
-- [ ] unresolved symbol 一覧を作る。
-- [ ] dependency ledger を作る。
-
-### Milestone B: C UI が link する
-
-- [ ] C UI static library を作る。
-- [ ] `ui_compat/include` を作る。
-- [ ] Rust ABI header を固定する。
-- [ ] 全未解決 symbol を stub で埋める。
-- [ ] init/shutdown test を通す。
-
-### Milestone C: 最小メニュー表示
-
-- [ ] Rust renderer command list を作る。
-- [ ] font/text metrics API を作る。
-- [ ] asset resolver を作る。
-- [ ] 1 driver でメニューを表示する。
-- [ ] keyboard navigation を動かす。
-
-### Milestone D: 実用メニュー
-
-- [ ] settings store を実装する。
-- [ ] path store を実装する。
-- [ ] playlist/core info を実装する。
-- [ ] task runtime を実装する。
-- [ ] thumbnails を表示する。
-- [ ] shader list を表示する。
-
-### Milestone E: core 起動統合
-
-- [ ] libretro core loader を Rust 所有にする。
-- [ ] content launch を menu から要求できるようにする。
-- [ ] core 実行画面と menu overlay を合成する。
-- [ ] save/state/screenshot の UI 項目を接続する。
-
-### Milestone F: 品質固定
-
-- [ ] visual regression を CI に入れる。
-- [ ] input replay test を CI に入れる。
-- [ ] sanitizer または leak check を定期実行する。
-- [ ] iOS 実機 build を確認する。
-- [ ] upstream 追従 script を用意する。
-
-## 18. 最初の 10 作業
-
-1. `docs/retroarch-ui-dependency-ledger.md` の雛形を作る。
-2. `reference/RetroArch/menu/` と `Retrofront/frontend/menu/` の差分を生成する。
-3. `Retrofront/frontend/ui_compat/include/` を追加する。
-4. C UI library の build target を追加する。
-5. `rgui` だけを有効化して link error を収集する。
-6. link error を category 分けして ledger に登録する。
-7. Rust ABI の `retrofront_menu_runtime_create/destroy` を作る。
-8. settings/path/logging の stub を Rust に作る。
-9. renderer command list の型だけ作る。
-10. init/shutdown integration test を追加する。
-
-## 19. 判断基準
-
-この方針を続けるかどうかは、Milestone C の時点で判断する。
-
-続行してよい条件。
-
-- C UI への直接 patch が小さい。
-- 依存 ledger の 60% 以上が Rust owner として分類済み。
-- 最小 driver が 60 FPS 近くで描画できる。
-- font/asset 差分が visual regression で追える。
-- Rust/C ABI の crash が再現 test で潰せる。
-
-方針転換を検討する条件。
-
-- menu source への直接改変が増え続ける。
-- RetroArch global state の再現が UI 以外の本体移植に近づく。
-- upstream 追従のたびに大規模 conflict が出る。
-- 描画差分の原因が C UI 側 assumptions にあり shim で吸収できない。
+責務は次のように分ける。
+
+| 領域 | 役割 |
+| --- | --- |
+| `Retrofront/frontend/menu/` | UI の C ソース本体。既存追従済みとして扱い、この計画では更新しない。 |
+| `retrofront_menu_bridge.*` | UI が必要とする RetroArch 風 API を受け、Rust UI runtime の mock/状態へ転送する。 |
+| `ui_runtime` | UI 表示に必要な設定、一覧、ダミーデータ、画面遷移結果、message を保持する。 |
+| `renderer` | `wgpu` で font、icon、quad、texture、clip、animation frame を描画する。 |
+| `shader` | `wgpu` raw handle を取り出して `librashader` 通常 runtime に接続する境界を持つ。 |
+| `input` | platform input を menu action に変換する。 |
+| `assets` | RetroArch UI 互換の asset path 解決、font load、placeholder texture を提供する。 |
+
+## 4. 作業 1: UI runtime の骨格を作る
+
+1. Rust 側に `ui_runtime` module を作る。
+2. `UiRuntime` struct を作る。
+3. `UiRuntime` に現在の menu driver、window size、DPI scale、safe area、theme、language、selected index、navigation stack を持たせる。
+4. `UiRuntime` に UI 専用の mock settings を持たせる。
+5. `UiRuntime` に UI 専用の mock content data を持たせる。
+6. `UiRuntime` に UI 専用の notification queue を持たせる。
+7. C から使う opaque handle を作る。
+8. `retrofront_ui_runtime_create` を作る。
+9. `retrofront_ui_runtime_destroy` を作る。
+10. `retrofront_ui_runtime_begin_frame` を作る。
+11. `retrofront_ui_runtime_end_frame` を作る。
+12. panic が C ABI を越えないようにする。
+13. C へ返す文字列の lifetime policy を固定する。
+14. runtime 作成/破棄を 100 回繰り返すテストを追加する。
+
+## 5. 作業 2: C bridge を UI 専用 API に寄せる
+
+1. `retrofront_menu_bridge.c` から Rust UI runtime を呼ぶ関数を集約する。
+2. C UI が要求する設定 getter を Rust mock settings に接続する。
+3. C UI が要求する設定 setter を Rust mock settings に接続する。
+4. C UI が要求する path getter を Rust asset/path resolver に接続する。
+5. C UI が要求する message push を Rust notification queue に接続する。
+6. C UI が要求する list source を Rust mock list provider に接続する。
+7. 実機能へ進もうとする action は UI runtime で受け止める。
+8. 未実装 action は `未実装` message を出し、UI stack は壊さない。
+9. bridge に本機能の実装を入れない。
+10. bridge の関数は薄く保ち、状態は Rust に置く。
+
+## 6. 作業 3: wgpu renderer を UI 表示専用で完成させる
+
+1. `wgpu` instance、adapter、device、queue、surface を初期化する。
+2. surface format、present mode、alpha mode を決める。
+3. window resize 時に surface config を再作成する。
+4. UI 用 orthographic projection を作る。
+5. colored rectangle pipeline を作る。
+6. textured rectangle pipeline を作る。
+7. scissor/clip rect を command に含める。
+8. alpha blend を RetroArch UI に近い見た目で設定する。
+9. vertex buffer ring を作る。
+10. index buffer ring を作る。
+11. texture bind group cache を作る。
+12. 1 frame の draw command list を Rust 側で受け取る。
+13. command list を batch 化する。
+14. present 前後の error handling を入れる。
+15. lost/outdated surface 時に renderer を復旧する。
+16. headless では command validation test を動かせるようにする。
+
+## 7. 作業 4: C UI 描画 command を Rust renderer に渡す
+
+1. C 側に `RetrofrontDrawCommand` enum を作る。
+2. command 種別は `FillRect`、`DrawTexture`、`DrawText`、`SetClip`、`ClearClip`、`PushTransform`、`PopTransform` から始める。
+3. C UI の既存描画呼び出しを command 生成へ変換する。
+4. command buffer は Rust が所有し、C は append だけ行う。
+5. command buffer overflow 時は frame を壊さず warning を出す。
+6. text draw は最初 command として積み、Rust font renderer で処理する。
+7. texture handle は Rust 発行の integer ID にする。
+8. C pointer を renderer 内部 resource にしない。
+9. frame 終端で Rust renderer が command buffer を consume する。
+10. 同じ frame を screenshot できる debug path を用意する。
+
+## 8. 作業 5: font と text を完成させる
+
+1. RetroArch UI と同じ font asset を読み込める resolver を作る。
+2. Latin、日本語、記号、絵文字 fallback の順序を決める。
+3. glyph rasterizer を Rust 側に置く。
+4. glyph atlas texture を `wgpu` texture として管理する。
+5. text width API を C UI へ返す。
+6. text height API を C UI へ返す。
+7. line spacing と baseline を menu driver ごとに崩れない値にする。
+8. ellipsis、marquee、scrolling text を破綻なく描画する。
+9. sub-label の折り返しを検証する。
+10. 右寄せ/中央寄せ/左寄せを検証する。
+11. 日本語 UI 文字列で clipping しないか確認する。
+12. font atlas overflow 時に atlas を拡張または再生成する。
+
+## 9. 作業 6: assets と placeholder を揃える
+
+1. RetroArch UI 互換の asset root を Rust で解決する。
+2. menu driver ごとの theme directory を解決する。
+3. icon texture を読み込む。
+4. wallpaper texture を読み込む。
+5. menu thumbnail placeholder を用意する。
+6. missing icon placeholder を用意する。
+7. missing thumbnail placeholder を用意する。
+8. texture decode は Rust 側で行う。
+9. texture upload は `wgpu` queue で行う。
+10. asset reload を frame 境界で安全に行う。
+11. theme switch 後に古い texture を破棄する。
+12. asset missing 時は UI を止めず placeholder に差し替える。
+
+## 10. 作業 7: input を UI 操作として完成させる
+
+1. keyboard event を Rust input module に集約する。
+2. gamepad event を Rust input module に集約する。
+3. mouse event を Rust input module に集約する。
+4. touch event を Rust input module に集約する。
+5. 上下左右、決定、戻る、メニュー、検索、タブ切替を menu action に変換する。
+6. key repeat を実装する。
+7. analog stick threshold を実装する。
+8. trigger/button repeat を実装する。
+9. mouse hover と click を menu selection に反映する。
+10. touch scroll、tap、long press、fling を実装する。
+11. materialui 用の safe area/touch hit target を調整する。
+12. input replay file を読み、同じ UI 操作を再現できるようにする。
+
+## 11. 作業 8: UI 表示用 mock settings を作る
+
+1. video、audio、input、user、directory、playlist、network、shader、menu の setting category を作る。
+2. 各 category に UI 表示用 key/value を用意する。
+3. bool setting を変更できるようにする。
+4. int setting を左右キーで変更できるようにする。
+5. enum setting を左右キーで変更できるようにする。
+6. string/path setting は編集画面へ入れるが保存は mock に留める。
+7. restart required 表示を出せるようにする。
+8. disabled setting 表示を出せるようにする。
+9. dependency により灰色になる setting を mock で再現する。
+10. UI 操作中だけ値が保持される in-memory store にする。
+11. 必要なら debug build だけ JSON snapshot を吐く。
+12. 本物の設定ファイル保存は行わない。
+
+## 12. 作業 9: UI 表示用 mock list provider を作る
+
+1. main menu の項目を返す。
+2. settings menu の階層を返す。
+3. playlist 一覧の mock を返す。
+4. playlist entry の mock を返す。
+5. history の mock を返す。
+6. favorites の mock を返す。
+7. core 一覧の mock を返す。
+8. contentless core の mock を返す。
+9. shader preset 一覧の mock を返す。
+10. online updater の mock 項目を返す。
+11. information の mock 項目を返す。
+12. directory browser の mock directory/file を返す。
+13. empty state を返す mode を用意する。
+14. large list を返す mode を用意する。
+15. long label、long sub-label、日本語 label を含める。
+16. thumbnail あり/なしの両方を含める。
+17. disabled action を含める。
+18. action 実行時は画面遷移、message、disabled のいずれかに変換する。
+
+## 13. 作業 10: menu driver 4 種を順番に通す
+
+### 13.1 rgui
+
+1. 最初に `rgui` を起動する。
+2. font/text/rect/list navigation を確認する。
+3. 最小 command set で全階層を巡回する。
+4. resize 後も崩れないことを確認する。
+
+### 13.2 ozone
+
+1. `ozone` を起動する。
+2. sidebar、header、footer、thumbnail area を表示する。
+3. long list scroll を確認する。
+4. icon と thumbnail placeholder を確認する。
+
+### 13.3 xmb
+
+1. `xmb` を起動する。
+2. horizontal category navigation を確認する。
+3. icon animation と alpha を確認する。
+4. wallpaper と theme color を確認する。
+
+### 13.4 materialui
+
+1. `materialui` を起動する。
+2. touch 操作を確認する。
+3. safe area と DPI scale を確認する。
+4. portrait/landscape 相当の resize を確認する。
+
+## 14. 作業 11: librashader 接続点を作る
+
+1. `wgpu` device/queue/surface から backend raw handle を取得する設計にする。
+2. Vulkan backend では instance/device/physical device/queue/command buffer/image view 等の必要 handle を整理する。
+3. Metal backend では device/command queue/texture 等の必要 handle を整理する。
+4. D3D12 backend では device/queue/resource handle 等の必要 handle を整理する。
+5. `librashader` の wgpu runtime は使わない。
+6. raw handle を `librashader` の通常 runtime に渡す wrapper を `shader` module に置く。
+7. UI 完全動作段階では shader 実適用を必須にしない。
+8. shader 画面では preset 一覧、parameter mock、preview placeholder を表示する。
+9. raw handle 取得不能な環境では shader preview を disabled 表示にする。
+10. renderer と shader の lifetime を分け、surface 再作成時に安全に再接続できるようにする。
+
+## 15. 作業 12: 未実装機能を UI として成立させる
+
+1. core 起動 action は `Core launch is not implemented yet` message にする。
+2. content load action は file browser mock へ遷移する。
+3. online updater action は progress mock を表示して完了 message を出す。
+4. playlist scan action は progress mock を表示して完了 message を出す。
+5. thumbnail download action は progress mock を表示して完了 message を出す。
+6. achievements login action は disabled または mock error にする。
+7. netplay action は disabled または mock error にする。
+8. shader apply action は UI 上の selected state だけ更新する。
+9. save/state/screenshot action は未実装 message にする。
+10. exit action は confirmation UI だけ表示する。
+11. どの未実装 action でも crash、無限 loop、stack 破壊を起こさない。
+
+## 16. 作業 13: UI 自動巡回テストを作る
+
+1. `rgui` 用 input replay を作る。
+2. `ozone` 用 input replay を作る。
+3. `xmb` 用 input replay を作る。
+4. `materialui` 用 input replay を作る。
+5. 各 replay で main menu 全 category を開く。
+6. settings 階層を深さ 3 以上まで開く。
+7. playlist mock を開く。
+8. shader mock を開く。
+9. online updater mock を開く。
+10. information mock を開く。
+11. disabled action を押す。
+12. back navigation で root へ戻る。
+13. replay 中に panic しないことを確認する。
+14. replay 終了時に navigation stack が正常であることを確認する。
+
+## 17. 作業 14: screenshot regression を作る
+
+1. 各 menu driver の root 画面 screenshot を撮る。
+2. settings 画面 screenshot を撮る。
+3. playlist 画面 screenshot を撮る。
+4. shader 画面 screenshot を撮る。
+5. long list scroll 中 screenshot を撮る。
+6. missing asset fallback screenshot を撮る。
+7. Japanese label screenshot を撮る。
+8. resize 後 screenshot を撮る。
+9. touch layout screenshot を撮る。
+10. baseline との差分を出す。
+11. 初期段階は threshold を緩めにし、明らかな崩れだけ検出する。
+12. UI が固まったら threshold を厳しくする。
+
+## 18. 作業 15: 完了判定
+
+UI 完全動作段階の完了条件は次の通り。
+
+- 4 menu driver が起動する。
+- 4 menu driver で root から主要画面へ遷移できる。
+- mock settings を変更して UI 表示が更新される。
+- mock list の empty/large/long label/Japanese label が表示できる。
+- 未実装 action がすべて安全に message、disabled、mock progress のいずれかへ変換される。
+- keyboard/gamepad/mouse/touch の操作が最低 1 driver 以上で確認され、driver 固有操作も確認される。
+- `wgpu` renderer が resize、surface lost/outdated に耐える。
+- font/icon/wallpaper/placeholder が missing 時も UI が止まらない。
+- `librashader` raw handle 接続点が module として存在し、使わない環境では disabled fallback になる。
+- UI replay test が panic なしで完走する。
+- screenshot regression で主要画面の崩れを検出できる。
+
+## 19. 作業順の最短ルート
+
+1. `UiRuntime` と C opaque handle を作る。
+2. C bridge を Rust UI runtime に接続する。
+3. `wgpu` renderer を初期化する。
+4. rect/texture/text の draw command を通す。
+5. font atlas と text metrics を完成させる。
+6. asset resolver と placeholder texture を完成させる。
+7. keyboard/gamepad 入力を通す。
+8. mock settings を返す。
+9. mock list provider を返す。
+10. `rgui` を完走させる。
+11. `ozone` を完走させる。
+12. `xmb` を完走させる。
+13. `materialui` を完走させる。
+14. mouse/touch を完成させる。
+15. 未実装 action の message/disabled/mock progress を揃える。
+16. `librashader` raw handle 接続点を作る。
+17. UI replay test を作る。
+18. screenshot regression を作る。
+19. resize/DPI/safe area を固める。
+20. UI 完全動作完了として、次段階の実機能実装へ進む。
 
 ## 20. まとめ
 
-最短ルートは「RetroArch UI を C のまま固定して先に link し、未実装依存を Rust stub で全部埋め、画面を出してから stub を実装へ置き換える」こと。最初から全依存を完璧に Rust 化しようとすると、UI が起動する前に作業量が膨らむ。必ず dependency ledger、ABI 境界、visual regression、upstream 差分管理を先に作り、以後の移植を機械的に進められる状態にする。
+今の段階で必要なのは、RetroArch 本体機能を Rust に移植することではなく、既に追従している `Retrofront/frontend/menu/` を使って UI を完全に表示・遷移・操作できるようにすること。したがって作業は、`wgpu` renderer、font、assets、input、mock settings、mock list、未実装 action の安全な受け止め、4 menu driver の巡回、UI replay、screenshot regression に集中する。実 core 起動や実 playlist scan などは、UI が完全に動くことを確認してから次段階で実装する。
