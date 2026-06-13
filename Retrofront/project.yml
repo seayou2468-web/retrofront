@@ -19,8 +19,6 @@ targets:
     dependencies:
       - sdk: Metal.framework
       - sdk: QuartzCore.framework
-      - framework: lib/ios/libretrofront_core.a
-        embed: false
     settings:
       base:
         INFOPLIST_FILE: platforms/ios/Info.plist
@@ -29,6 +27,10 @@ targets:
         SUPPORTED_PLATFORMS: iphoneos
         ONLY_ACTIVE_ARCH: NO
         VALID_ARCHS: arm64
+        LIBRARY_SEARCH_PATHS:
+          - "$(SRCROOT)/lib/ios"
+        OTHER_LDFLAGS:
+          - "-lretrofront_core"
     postCompileScripts:
       - name: Bundle libretro cores
         script: |
