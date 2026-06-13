@@ -5,7 +5,10 @@ use std::{
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
-use crate::{menu::MenuModel, shader::ShaderManager};
+use crate::{
+    menu::{MenuLayout, MenuModel},
+    shader::ShaderManager,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RendererError {
@@ -82,11 +85,30 @@ pub struct MenuAsset {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RenderCommand {
-    MenuDriver { name: String, source: String },
-    MenuAsset { kind: MenuAssetKind, path: PathBuf },
+    MenuDriver {
+        name: String,
+        source: String,
+        layout: MenuLayout,
+        accent_rgba: u32,
+        background_rgba: u32,
+        row_height: u32,
+        icon_size: u32,
+        sidebar_width: u32,
+        thumbnail_size: u32,
+    },
+    MenuAsset {
+        kind: MenuAssetKind,
+        path: PathBuf,
+    },
     MenuTitle(String),
-    MenuEntry { label: String, selected: bool },
-    Frame { width: u32, height: u32 },
+    MenuEntry {
+        label: String,
+        selected: bool,
+    },
+    Frame {
+        width: u32,
+        height: u32,
+    },
 }
 
 /// WGPU renderer facade used by menu video drawing and libretro video frames.
@@ -254,9 +276,17 @@ impl VideoRenderer {
             let _ = shaders.rebuild_pipeline_from_wgpu(gpu);
         }
         self.commands.clear();
+        let driver = menu.driver().descriptor();
         self.commands.push(RenderCommand::MenuDriver {
-            name: menu.driver().as_name().to_owned(),
-            source: menu.driver().source_file().to_owned(),
+            name: driver.name.to_owned(),
+            source: driver.source_file.to_owned(),
+            layout: driver.layout,
+            accent_rgba: driver.accent_rgba,
+            background_rgba: driver.background_rgba,
+            row_height: driver.row_height,
+            icon_size: driver.icon_size,
+            sidebar_width: driver.sidebar_width,
+            thumbnail_size: driver.thumbnail_size,
         });
         for asset in self.menu_assets.iter().take(32) {
             self.commands.push(RenderCommand::MenuAsset {

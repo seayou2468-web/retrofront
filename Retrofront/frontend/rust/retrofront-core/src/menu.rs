@@ -5,6 +5,47 @@ use crate::input::MenuAction;
 pub const MENU_LABEL_MAX_LENGTH: usize = 1024;
 include!(concat!(env!("OUT_DIR"), "/menu_sources.rs"));
 
+#[repr(C)]
+struct CMenuDriverDescriptor {
+    name: *const std::ffi::c_char,
+    source_file: *const std::ffi::c_char,
+    layout: u32,
+    accent_rgba: u32,
+    background_rgba: u32,
+    row_height: u32,
+    icon_size: u32,
+    sidebar_width: u32,
+    thumbnail_size: u32,
+}
+
+extern "C" {
+    fn retrofront_c_menu_driver_by_name(
+        name: *const std::ffi::c_char,
+    ) -> *const CMenuDriverDescriptor;
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum MenuLayout {
+    #[default]
+    Ozone = 1,
+    Xmb = 2,
+    MaterialUi = 3,
+    Rgui = 4,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MenuDriverDescriptor {
+    pub name: &'static str,
+    pub source_file: &'static str,
+    pub layout: MenuLayout,
+    pub accent_rgba: u32,
+    pub background_rgba: u32,
+    pub row_height: u32,
+    pub icon_size: u32,
+    pub sidebar_width: u32,
+    pub thumbnail_size: u32,
+}
+
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MenuDriver {
     Ozone,
@@ -42,6 +83,41 @@ impl MenuDriver {
             Self::Rgui => "drivers/rgui.c",
         }
     }
+
+    pub fn descriptor(self) -> MenuDriverDescriptor {
+        let cname = std::ffi::CString::new(self.as_name()).expect("static driver name has no nul");
+        let ptr = unsafe { retrofront_c_menu_driver_by_name(cname.as_ptr()) };
+        if !ptr.is_null() {
+            let c = unsafe { &*ptr };
+            return MenuDriverDescriptor {
+                name: self.as_name(),
+                source_file: self.source_file(),
+                layout: match c.layout {
+                    2 => MenuLayout::Xmb,
+                    3 => MenuLayout::MaterialUi,
+                    4 => MenuLayout::Rgui,
+                    _ => MenuLayout::Ozone,
+                },
+                accent_rgba: c.accent_rgba,
+                background_rgba: c.background_rgba,
+                row_height: c.row_height,
+                icon_size: c.icon_size,
+                sidebar_width: c.sidebar_width,
+                thumbnail_size: c.thumbnail_size,
+            };
+        }
+        MenuDriverDescriptor {
+            name: self.as_name(),
+            source_file: self.source_file(),
+            layout: MenuLayout::default(),
+            accent_rgba: 0xffffffff,
+            background_rgba: 0x000000ff,
+            row_height: 48,
+            icon_size: 32,
+            sidebar_width: 0,
+            thumbnail_size: 0,
+        }
+    }
 }
 
 pub const FIXED_MENU_DRIVERS: &[MenuDriver] = &[
@@ -70,7 +146,7 @@ pub fn fixed_menu_sources() -> impl Iterator<Item = FixedMenuSource> {
 }
 
 pub fn fixed_menu_contract_complete() -> bool {
-    RETROFRONT_MENU_SOURCE_FILES.len() == 32
+    RETROFRONT_MENU_SOURCE_FILES.len() == 34
         && FIXED_MENU_DRIVERS
             .iter()
             .all(|driver| RETROFRONT_MENU_SOURCE_FILES.contains(&driver.source_file()))
@@ -257,12 +333,20 @@ mod tests {
         assert_eq!(menu.current_selection(), 0);
     }
     #[test]
-    fn fixed_c_menu_contract_contains_all_32_files() {
+    fn fixed_c_menu_contract_contains_all_34_files_and_compiled_bridge() {
         assert!(fixed_menu_contract_complete());
-        assert_eq!(fixed_menu_sources().count(), 32);
+        assert_eq!(fixed_menu_sources().count(), 34);
         assert!(RETROFRONT_MENU_SOURCE_FILES.contains(&"drivers/ozone.c"));
         assert!(RETROFRONT_MENU_SOURCE_FILES.contains(&"drivers/materialui.c"));
         assert!(RETROFRONT_MENU_SOURCE_FILES.contains(&"drivers/xmb.c"));
         assert!(RETROFRONT_MENU_SOURCE_FILES.contains(&"drivers/rgui.c"));
+        assert!(RETROFRONT_MENU_SOURCE_FILES.contains(&"retrofront_menu_bridge.c"));
+        assert_eq!(MenuDriver::Ozone.descriptor().layout, MenuLayout::Ozone);
+        assert_eq!(MenuDriver::Xmb.descriptor().layout, MenuLayout::Xmb);
+        assert_eq!(
+            MenuDriver::MaterialUi.descriptor().layout,
+            MenuLayout::MaterialUi
+        );
+        assert_eq!(MenuDriver::Rgui.descriptor().layout, MenuLayout::Rgui);
     }
 }

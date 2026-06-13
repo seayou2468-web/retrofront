@@ -42,9 +42,17 @@ fn collect_files(root: &Path, dir: &Path, out: &mut Vec<String>) {
 fn main() {
     let header = PathBuf::from("../../libretro/libretro.h");
     let menu_root = PathBuf::from("../../menu");
+    let menu_bridge = menu_root.join("retrofront_menu_bridge.c");
     println!("cargo:rerun-if-changed={}", header.display());
     println!("cargo:rerun-if-changed={}", menu_root.display());
+    println!("cargo:rerun-if-changed={}", menu_bridge.display());
     println!("cargo:rerun-if-changed=../../../../reference/RetroArch");
+
+    cc::Build::new()
+        .file(&menu_bridge)
+        .include(&menu_root)
+        .warnings(false)
+        .compile("retrofront_menu_bridge");
 
     let bindings = bindgen::Builder::default()
         .header(header.display().to_string())
@@ -82,8 +90,8 @@ fn main() {
     menu_sources.dedup();
     assert_eq!(
         menu_sources.len(),
-        32,
-        "Retrofront/frontend/menu must remain the fixed 32-file UI contract"
+        34,
+        "Retrofront/frontend/menu must remain the fixed 34-file UI contract, including the compiled C bridge"
     );
     let generated = format!(
         "pub const RETROFRONT_MENU_SOURCE_FILES: &[&str] = &[{}];\n",
