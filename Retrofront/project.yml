@@ -21,6 +21,8 @@ targets:
 
     resources:
       - path: Resources/assets.zip
+      - path: platforms/ios/RetroArchUI
+        type: folder
 
     dependencies:
       - sdk: Metal.framework

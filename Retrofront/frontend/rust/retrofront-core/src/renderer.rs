@@ -81,6 +81,7 @@ pub struct MenuAsset {
     pub kind: MenuAssetKind,
     pub name: String,
     pub path: PathBuf,
+    pub driver: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -99,6 +100,7 @@ pub enum RenderCommand {
     MenuAsset {
         kind: MenuAssetKind,
         path: PathBuf,
+        driver: Option<String>,
     },
     MenuTitle(String),
     MenuEntry {
@@ -257,7 +259,13 @@ impl VideoRenderer {
                     self.load_overlay(name.clone(), &path)
                 }
             }
-            self.menu_assets.push(MenuAsset { kind, name, path });
+            let driver = classify_menu_driver_asset(&path);
+            self.menu_assets.push(MenuAsset {
+                kind,
+                name,
+                path,
+                driver,
+            });
         }
     }
 
@@ -288,10 +296,21 @@ impl VideoRenderer {
             sidebar_width: driver.sidebar_width,
             thumbnail_size: driver.thumbnail_size,
         });
-        for asset in self.menu_assets.iter().take(32) {
+        for asset in self
+            .menu_assets
+            .iter()
+            .filter(|asset| {
+                asset
+                    .driver
+                    .as_deref()
+                    .is_none_or(|name| name == driver.name)
+            })
+            .take(128)
+        {
             self.commands.push(RenderCommand::MenuAsset {
                 kind: asset.kind.clone(),
                 path: asset.path.clone(),
+                driver: asset.driver.clone(),
             });
         }
         self.commands
@@ -308,6 +327,27 @@ impl VideoRenderer {
     pub fn wgpu_state(&self) -> Option<&WgpuState> {
         self.gpu.as_ref()
     }
+}
+
+fn classify_menu_driver_asset(path: &Path) -> Option<String> {
+    let mut previous_was_assets = false;
+    for component in path.components() {
+        let name = component.as_os_str().to_string_lossy().to_ascii_lowercase();
+        match name.as_str() {
+            "ozone" | "xmb" | "rgui" => return Some(name),
+            "glui" | "materialui" => return Some("materialui".to_owned()),
+            _ => {}
+        }
+        if previous_was_assets {
+            return match name.as_str() {
+                "ozone" | "xmb" | "rgui" => Some(name),
+                "glui" | "materialui" => Some("materialui".to_owned()),
+                _ => None,
+            };
+        }
+        previous_was_assets = name == "assets";
+    }
+    None
 }
 
 impl Default for VideoRenderer {
@@ -341,6 +381,10 @@ mod tests {
         let mut renderer = VideoRenderer::new();
         assert_eq!(renderer.load_menu_assets_from(&root), 2);
         assert_eq!(renderer.menu_assets().len(), 2);
+        assert!(renderer
+            .menu_assets()
+            .iter()
+            .any(|asset| asset.driver.as_deref() == Some("xmb")));
         assert!(renderer
             .commands()
             .iter()

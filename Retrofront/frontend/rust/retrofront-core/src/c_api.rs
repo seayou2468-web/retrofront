@@ -473,6 +473,43 @@ pub extern "C" fn retrofront_menu_asset_path(
 }
 
 #[no_mangle]
+pub extern "C" fn retrofront_menu_asset_driver(
+    index: usize,
+    dst: *mut c_char,
+    dst_len: usize,
+) -> bool {
+    let Some(runtime) = runtime() else {
+        return false;
+    };
+    let renderer = runtime.renderer.read();
+    let Some(asset) = renderer.menu_assets().get(index) else {
+        return false;
+    };
+    copy_cstr(asset.driver.as_deref().unwrap_or(""), dst, dst_len)
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_menu_driver_row_height() -> u32 {
+    runtime()
+        .map(|runtime| runtime.menu.read().driver().descriptor().row_height)
+        .unwrap_or(48)
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_menu_driver_icon_size() -> u32 {
+    runtime()
+        .map(|runtime| runtime.menu.read().driver().descriptor().icon_size)
+        .unwrap_or(32)
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_menu_driver_sidebar_width() -> u32 {
+    runtime()
+        .map(|runtime| runtime.menu.read().driver().descriptor().sidebar_width)
+        .unwrap_or(0)
+}
+
+#[no_mangle]
 pub extern "C" fn retrofront_import_rom(path: *const c_char, playlist: *const c_char) -> bool {
     let Some(runtime) = runtime() else {
         return false;

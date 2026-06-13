@@ -104,6 +104,14 @@ impl RetrofrontRuntime {
         ] {
             loaded += renderer.load_menu_assets_from(root);
         }
+        for driver in menu::FIXED_MENU_DRIVERS {
+            let descriptor = driver.descriptor();
+            for rel in [descriptor.asset_dir, descriptor.font_dir] {
+                if !rel.is_empty() {
+                    loaded += renderer.load_menu_assets_from(self.filesystem.root().join(rel));
+                }
+            }
+        }
         loaded
     }
 

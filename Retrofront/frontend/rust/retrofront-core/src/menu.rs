@@ -16,6 +16,9 @@ struct CMenuDriverDescriptor {
     icon_size: u32,
     sidebar_width: u32,
     thumbnail_size: u32,
+    asset_dir: *const std::ffi::c_char,
+    font_dir: *const std::ffi::c_char,
+    dependency_group: *const std::ffi::c_char,
 }
 
 extern "C" {
@@ -44,6 +47,9 @@ pub struct MenuDriverDescriptor {
     pub icon_size: u32,
     pub sidebar_width: u32,
     pub thumbnail_size: u32,
+    pub asset_dir: &'static str,
+    pub font_dir: &'static str,
+    pub dependency_group: &'static str,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -104,6 +110,9 @@ impl MenuDriver {
                 icon_size: c.icon_size,
                 sidebar_width: c.sidebar_width,
                 thumbnail_size: c.thumbnail_size,
+                asset_dir: cstr_static(c.asset_dir).unwrap_or_default(),
+                font_dir: cstr_static(c.font_dir).unwrap_or_default(),
+                dependency_group: cstr_static(c.dependency_group).unwrap_or_default(),
             };
         }
         MenuDriverDescriptor {
@@ -116,8 +125,18 @@ impl MenuDriver {
             icon_size: 32,
             sidebar_width: 0,
             thumbnail_size: 0,
+            asset_dir: "",
+            font_dir: "",
+            dependency_group: "",
         }
     }
+}
+
+fn cstr_static(ptr: *const std::ffi::c_char) -> Option<&'static str> {
+    if ptr.is_null() {
+        return None;
+    }
+    unsafe { std::ffi::CStr::from_ptr(ptr).to_str().ok() }
 }
 
 pub const FIXED_MENU_DRIVERS: &[MenuDriver] = &[

@@ -77,11 +77,20 @@ private struct SurfaceEntry {
     let checked: Bool
 }
 
+private struct SurfaceAsset {
+    let kind: UInt32
+    let path: String
+    let driver: String
+}
+
 final class RetrofrontMenuSurfaceView: UIView {
     private var title = "Retrofront"
     private var driver = "materialui"
     private var selectedIndex = 0
     private var entries: [SurfaceEntry] = []
+    private var assets: [SurfaceAsset] = []
+    private var menuFont: UIFont?
+    private var menuIcon: UIImage?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -106,6 +115,9 @@ final class RetrofrontMenuSurfaceView: UIView {
         driver = readString { retrofront_menu_driver($0, $1) }
         selectedIndex = Int(retrofront_menu_selected_index())
         let count = Int(retrofront_menu_entry_count())
+        assets = loadSurfaceAssets(for: driver)
+        menuFont = assets.lazy.filter { $0.kind == 1 }.compactMap { UIFont(contentsOfFile: $0.path) }.first
+        menuIcon = assets.lazy.filter { $0.kind == 2 }.compactMap { UIImage(contentsOfFile: $0.path) }.first
         entries = (0..<count).map { index in
             var raw = retrofront_menu_entry_t()
             _ = retrofront_menu_entry(index, &raw)
@@ -132,29 +144,52 @@ final class RetrofrontMenuSurfaceView: UIView {
         context.setFillColor(palette.background.cgColor)
         context.fill(rect)
 
-        drawText(title, in: CGRect(x: 24, y: safeAreaInsets.top + 20, width: rect.width - 48, height: 42), font: .boldSystemFont(ofSize: 32), color: palette.title)
-        drawText(driver.uppercased(), in: CGRect(x: 24, y: safeAreaInsets.top + 64, width: rect.width - 48, height: 24), font: .systemFont(ofSize: 13), color: palette.subtext)
+        if let menuIcon {
+            menuIcon.draw(in: CGRect(x: 24, y: safeAreaInsets.top + 20, width: 36, height: 36))
+        }
+        let titleX: CGFloat = menuIcon == nil ? 24 : 72
+        drawText(title, in: CGRect(x: titleX, y: safeAreaInsets.top + 20, width: rect.width - titleX - 24, height: 42), font: menuFont ?? .boldSystemFont(ofSize: 32), color: palette.title)
+        drawText("\(driver.uppercased()) · assets: \(assets.count)", in: CGRect(x: 24, y: safeAreaInsets.top + 64, width: rect.width - 48, height: 24), font: .systemFont(ofSize: 13), color: palette.subtext)
 
         let startY = safeAreaInsets.top + 104
-        let rowHeight: CGFloat = driver == "rgui" ? 34 : 58
+        let rowHeight = CGFloat(max(retrofront_menu_driver_row_height(), UInt32(driver == "rgui" ? 34 : 58)))
         for (visibleIndex, entry) in entries.enumerated() {
             let y = startY + CGFloat(visibleIndex) * rowHeight
             guard y < rect.maxY - safeAreaInsets.bottom - 20 else { break }
-            let row = CGRect(x: 16, y: y, width: rect.width - 32, height: rowHeight - 6)
+            let sidebar = CGFloat(retrofront_menu_driver_sidebar_width())
+            let rowX = driver == "ozone" && sidebar > 0 ? min(sidebar * 0.25, 96) : 16
+            let row = CGRect(x: rowX, y: y, width: rect.width - rowX - 16, height: rowHeight - 6)
             if entry.index == selectedIndex {
                 context.setFillColor(palette.selection.cgColor)
                 context.fill(row)
             }
             let prefix = entry.checked ? "✓ " : ""
-            drawText(prefix + entry.label, in: row.insetBy(dx: 16, dy: 6), font: .systemFont(ofSize: driver == "rgui" ? 17 : 20, weight: entry.index == selectedIndex ? .bold : .regular), color: palette.text)
+            let iconSize = CGFloat(min(max(retrofront_menu_driver_icon_size(), UInt32(8)), UInt32(48)))
+            if let menuIcon, driver != "rgui" {
+                menuIcon.draw(in: CGRect(x: row.minX + 8, y: row.midY - iconSize / 2, width: iconSize, height: iconSize))
+            }
+            let textInset = driver == "rgui" || menuIcon == nil ? 16 : iconSize + 20
+            drawText(prefix + entry.label, in: row.insetBy(dx: textInset, dy: 6), font: menuFont ?? .systemFont(ofSize: driver == "rgui" ? 17 : 20, weight: entry.index == selectedIndex ? .bold : .regular), color: palette.text)
             if !entry.sublabel.isEmpty {
-                drawText(entry.sublabel, in: CGRect(x: row.minX + 16, y: row.minY + 30, width: row.width - 32, height: 20), font: .systemFont(ofSize: 13), color: palette.subtext)
+                drawText(entry.sublabel, in: CGRect(x: row.minX + CGFloat(textInset), y: row.minY + 30, width: row.width - CGFloat(textInset) - 16, height: 20), font: .systemFont(ofSize: 13), color: palette.subtext)
             }
             if !entry.value.isEmpty {
                 drawText(entry.value, in: CGRect(x: row.maxX - 150, y: row.minY + 9, width: 132, height: 22), font: .systemFont(ofSize: 13), color: palette.subtext, alignment: .right)
             }
         }
         drawControls(in: rect, palette: palette)
+    }
+
+
+    private func loadSurfaceAssets(for driver: String) -> [SurfaceAsset] {
+        let count = Int(retrofront_menu_asset_count())
+        return (0..<count).compactMap { index in
+            let path = readString { retrofront_menu_asset_path(index, $0, $1) }
+            guard !path.isEmpty else { return nil }
+            let assetDriver = readString { retrofront_menu_asset_driver(index, $0, $1) }
+            guard assetDriver.isEmpty || assetDriver == driver else { return nil }
+            return SurfaceAsset(kind: retrofront_menu_asset_kind(index), path: path, driver: assetDriver)
+        }
     }
 
     func showBootError(_ message: String) {
@@ -186,7 +221,7 @@ final class RetrofrontMenuSurfaceView: UIView {
     @objc private func tap(_ recognizer: UITapGestureRecognizer) {
         let location = recognizer.location(in: self)
         if handleControlTap(location) { return }
-        let rowHeight: CGFloat = driver == "rgui" ? 34 : 58
+        let rowHeight = CGFloat(max(retrofront_menu_driver_row_height(), UInt32(driver == "rgui" ? 34 : 58)))
         let row = Int((location.y - (safeAreaInsets.top + 104)) / rowHeight)
         if row >= 0 && row < entries.count {
             _ = retrofront_menu_set_selected_index(entries[row].index)
