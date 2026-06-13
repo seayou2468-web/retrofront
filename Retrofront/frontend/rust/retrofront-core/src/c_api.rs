@@ -208,6 +208,15 @@ pub extern "C" fn retrofront_menu_selected_index() -> usize {
 }
 
 #[no_mangle]
+pub extern "C" fn retrofront_menu_set_selected_index(index: usize) -> bool {
+    let Some(runtime) = runtime() else {
+        return false;
+    };
+    runtime.menu.write().set_selection(index);
+    true
+}
+
+#[no_mangle]
 pub extern "C" fn retrofront_menu_draw() -> bool {
     let Some(runtime) = runtime() else {
         return false;
@@ -280,6 +289,20 @@ pub extern "C" fn retrofront_menu_pump_input() -> bool {
         if let Some(intent) = intent {
             runtime.dispatch_menu_intent(intent);
         }
+    }
+    true
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_menu_action(action: u32) -> bool {
+    let Some(runtime) = runtime() else {
+        return false;
+    };
+    let Some(action) = action_from_u32(action) else {
+        return false;
+    };
+    if let Some(intent) = runtime.menu.write().action(action) {
+        runtime.dispatch_menu_intent(intent);
     }
     true
 }

@@ -119,6 +119,12 @@ impl MenuModel {
     pub fn current_selection(&self) -> usize {
         *self.selection.last().unwrap_or(&0)
     }
+    pub fn set_selection(&mut self, index: usize) {
+        let max = self.current_entries().len().saturating_sub(1);
+        if let Some(selection) = self.selection.last_mut() {
+            *selection = index.min(max);
+        }
+    }
     pub fn selected_entry(&self) -> Option<&MenuEntry> {
         self.current_entries().get(self.current_selection())
     }
