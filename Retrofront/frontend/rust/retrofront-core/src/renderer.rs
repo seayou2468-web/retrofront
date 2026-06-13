@@ -1,4 +1,7 @@
-use std::path::PathBuf;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
@@ -54,7 +57,23 @@ pub struct OverlayAsset {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MenuAssetKind {
+    Font,
+    Image,
+    Config,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MenuAsset {
+    pub kind: MenuAssetKind,
+    pub name: String,
+    pub path: PathBuf,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RenderCommand {
+    MenuDriver { name: String, source: String },
+    MenuAsset { kind: MenuAssetKind, path: PathBuf },
     MenuTitle(String),
     MenuEntry { label: String, selected: bool },
     Frame { width: u32, height: u32 },
@@ -69,6 +88,7 @@ pub struct VideoRenderer {
     commands: Vec<RenderCommand>,
     fonts: Vec<FontAsset>,
     overlays: Vec<OverlayAsset>,
+    menu_assets: Vec<MenuAsset>,
 }
 
 impl VideoRenderer {
@@ -81,6 +101,7 @@ impl VideoRenderer {
             commands: Vec::new(),
             fonts: Vec::new(),
             overlays: Vec::new(),
+            menu_assets: Vec::new(),
         }
     }
 
@@ -95,6 +116,9 @@ impl VideoRenderer {
     }
     pub fn last_frame(&self) -> Option<&VideoFrame> {
         self.last_frame.as_ref()
+    }
+    pub fn menu_assets(&self) -> &[MenuAsset] {
+        &self.menu_assets
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -156,6 +180,55 @@ impl VideoRenderer {
         });
     }
 
+    pub fn load_menu_assets_from(&mut self, root: impl AsRef<Path>) -> usize {
+        let before = self.menu_assets.len();
+        self.scan_menu_assets(root.as_ref());
+        self.menu_assets.sort_by(|a, b| a.path.cmp(&b.path));
+        self.menu_assets.dedup_by(|a, b| a.path == b.path);
+        self.menu_assets.len().saturating_sub(before)
+    }
+
+    fn scan_menu_assets(&mut self, dir: &Path) {
+        let Ok(read_dir) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                self.scan_menu_assets(&path);
+                continue;
+            }
+            let Some(ext) = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_ascii_lowercase())
+            else {
+                continue;
+            };
+            let kind = match ext.as_str() {
+                "ttf" | "otf" | "ttc" => MenuAssetKind::Font,
+                "png" | "jpg" | "jpeg" | "bmp" | "tga" => MenuAssetKind::Image,
+                "cfg" | "json" | "slangp" | "glslp" | "cgp" => MenuAssetKind::Config,
+                _ => continue,
+            };
+            if path.components().any(|c| c.as_os_str() == "__MACOSX") {
+                continue;
+            }
+            let name = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("asset")
+                .to_owned();
+            match kind {
+                MenuAssetKind::Font => self.load_font(name.clone(), &path),
+                MenuAssetKind::Image | MenuAssetKind::Config => {
+                    self.load_overlay(name.clone(), &path)
+                }
+            }
+            self.menu_assets.push(MenuAsset { kind, name, path });
+        }
+    }
+
     pub fn submit_libretro_frame(&mut self, frame: VideoFrame) {
         self.commands.push(RenderCommand::Frame {
             width: frame.width,
@@ -171,6 +244,16 @@ impl VideoRenderer {
             let _ = shaders.rebuild_pipeline_from_wgpu(gpu);
         }
         self.commands.clear();
+        self.commands.push(RenderCommand::MenuDriver {
+            name: menu.driver().as_name().to_owned(),
+            source: menu.driver().source_file().to_owned(),
+        });
+        for asset in self.menu_assets.iter().take(32) {
+            self.commands.push(RenderCommand::MenuAsset {
+                kind: asset.kind.clone(),
+                path: asset.path.clone(),
+            });
+        }
         self.commands
             .push(RenderCommand::MenuTitle(menu.title().to_owned()));
         let selected = menu.current_selection();
@@ -199,4 +282,29 @@ pub struct WgpuState {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub surface: wgpu::Surface<'static>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn menu_assets_are_loaded_recursively_for_c_menu_drivers() {
+        let root =
+            std::env::temp_dir().join(format!("retrofront-menu-assets-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("xmb/png")).unwrap();
+        std::fs::create_dir_all(root.join("fonts")).unwrap();
+        std::fs::write(root.join("xmb/png/main-menu.png"), b"png").unwrap();
+        std::fs::write(root.join("fonts/menu.ttf"), b"font").unwrap();
+
+        let mut renderer = VideoRenderer::new();
+        assert_eq!(renderer.load_menu_assets_from(&root), 2);
+        assert_eq!(renderer.menu_assets().len(), 2);
+        assert!(renderer
+            .commands()
+            .iter()
+            .all(|command| !matches!(command, RenderCommand::MenuTitle(_))));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

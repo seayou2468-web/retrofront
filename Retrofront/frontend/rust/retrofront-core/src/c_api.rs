@@ -364,27 +364,32 @@ pub extern "C" fn retrofront_resources_unpack(zip_path: *const c_char) -> usize 
 
 #[no_mangle]
 pub extern "C" fn retrofront_assets_load_defaults() -> bool {
+    runtime()
+        .map(|runtime| runtime.load_menu_assets() > 0)
+        .unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_menu_asset_count() -> usize {
+    runtime()
+        .map(|runtime| runtime.renderer.read().menu_assets().len())
+        .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_menu_asset_path(
+    index: usize,
+    dst: *mut c_char,
+    dst_len: usize,
+) -> bool {
     let Some(runtime) = runtime() else {
         return false;
     };
-    let fonts = runtime.filesystem.fonts_dir();
-    if let Ok(read_dir) = std::fs::read_dir(fonts) {
-        for entry in read_dir.flatten() {
-            let path = entry.path();
-            if matches!(
-                path.extension().and_then(|e| e.to_str()),
-                Some("ttf" | "otf")
-            ) {
-                let name = path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("font")
-                    .to_owned();
-                runtime.renderer.write().load_font(name, path);
-            }
-        }
-    }
-    true
+    let renderer = runtime.renderer.read();
+    let Some(asset) = renderer.menu_assets().get(index) else {
+        return false;
+    };
+    copy_cstr(&asset.path.display().to_string(), dst, dst_len)
 }
 
 #[no_mangle]

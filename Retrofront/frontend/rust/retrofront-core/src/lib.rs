@@ -89,7 +89,22 @@ impl RetrofrontRuntime {
                 self.menu.write().set_driver(driver);
             }
         }
+        self.load_menu_assets();
         Ok(())
+    }
+
+    pub fn load_menu_assets(&self) -> usize {
+        let mut renderer = self.renderer.write();
+        let mut loaded = 0;
+        for root in [
+            self.filesystem.assets_dir(),
+            self.filesystem.assets_dir().join("overlays"),
+            self.filesystem.overlays_dir(),
+            self.filesystem.fonts_dir(),
+        ] {
+            loaded += renderer.load_menu_assets_from(root);
+        }
+        loaded
     }
 
     /// Advance non-render menu services once per frame.

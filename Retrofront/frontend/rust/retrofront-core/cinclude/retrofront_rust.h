@@ -39,6 +39,8 @@ bool retrofront_renderer_resize(uint32_t width, uint32_t height);
 bool retrofront_shader_set_preset(const char *path);
 size_t retrofront_resources_unpack(const char *zip_path);
 bool retrofront_assets_load_defaults(void);
+size_t retrofront_menu_asset_count(void);
+bool retrofront_menu_asset_path(size_t index, char *dst, size_t dst_len);
 bool retrofront_import_rom(const char *path, const char *playlist);
 bool retrofront_settings_set_string(const char *key, const char *value);
 bool retrofront_core_open(const char *core_path);
