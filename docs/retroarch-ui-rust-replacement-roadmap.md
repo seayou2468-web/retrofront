@@ -22,7 +22,6 @@
 - window resize、DPI scale、safe area、orientation change に UI が追従する。
 - `wgpu` renderer 上で menu の描画 command が安定して表示される。
 - `librashader` は raw handle 経由で接続可能な設計にしておき、UI 上の shader 画面や preview が破綻しない。
-- 実 core を起動しなくても UI の全導線を自動操作テストで巡回できる。
 
 ## 2. 実装しないもの
 
@@ -39,9 +38,9 @@ UI 完全動作前には次を実装しない。
 - 実 shader preset の恒久保存。
 - 実 save/state/screenshot/rewind。
 - 実 audio mixer。
-- 実 cloud/smb/network filesystem。
+- 実 cloud/smb/network。
 
-ただし、これらの画面を UI として表示するための dummy data、placeholder、disabled action、success/failure mock は実装する。
+ただし、これらの画面を UI として表示するための dummy data、placeholder、disabled action、success/failure mock、アセットデータ読み込みは実装する。
 
 ## 3. 全体構成
 
@@ -67,7 +66,7 @@ Retrofront/
 | 領域 | 役割 |
 | --- | --- |
 | `Retrofront/frontend/menu/` | UI の C ソース本体。既存追従済みとして扱い、この計画では更新しない。 |
-| `retrofront_menu_bridge.*` | UI が必要とする RetroArch 風 API を受け、Rust UI runtime の mock/状態へ転送する。 |
+| `retrofront_menu_bridge.*` | UI が必要とする RetroArch  API を受け、Rust UI runtime の mock/状態へ転送する。 |
 | `ui_runtime` | UI 表示に必要な設定、一覧、ダミーデータ、画面遷移結果、message を保持する。 |
 | `renderer` | `wgpu` で font、icon、quad、texture、clip、animation frame を描画する。 |
 | `shader` | `wgpu` raw handle を取り出して `librashader` 通常 runtime に接続する境界を持つ。 |
@@ -89,7 +88,6 @@ Retrofront/
 11. `retrofront_ui_runtime_end_frame` を作る。
 12. panic が C ABI を越えないようにする。
 13. C へ返す文字列の lifetime policy を固定する。
-14. runtime 作成/破棄を 100 回繰り返すテストを追加する。
 
 ## 5. 作業 2: C bridge を UI 専用 API に寄せる
 
@@ -168,10 +166,10 @@ Retrofront/
 
 ## 10. 作業 7: input を UI 操作として完成させる
 
-1. keyboard event を Rust input module に集約する。
-2. gamepad event を Rust input module に集約する。
-3. mouse event を Rust input module に集約する。
-4. touch event を Rust input module に集約する。
+1. keyboard event を Rust input module に接続する。
+2. gamepad event を Rust input module に接続する。
+3. mouse event を Rust input module に接続する。
+4. touch event を Rust input module に接続する。
 5. 上下左右、決定、戻る、メニュー、検索、タブ切替を menu action に変換する。
 6. key repeat を実装する。
 7. analog stick threshold を実装する。
@@ -179,7 +177,7 @@ Retrofront/
 9. mouse hover と click を menu selection に反映する。
 10. touch scroll、tap、long press、fling を実装する。
 11. materialui 用の safe area/touch hit target を調整する。
-12. input replay file を読み、同じ UI 操作を再現できるようにする。
+12. input replay file を読み、同じ UI 操作をできるようにする。
 
 ## 11. 作業 8: UI 表示用 mock settings を作る
 
