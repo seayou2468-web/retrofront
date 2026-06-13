@@ -115,7 +115,7 @@ impl HostFilesystem {
     }
 
     pub fn unpack_resources_zip(&self, zip_path: impl AsRef<Path>) -> io::Result<usize> {
-        self.unpack_zip_to(zip_path, self.assets_dir())
+        self.unpack_zip_to(zip_path, self.root())
     }
 
     pub fn unpack_zip_to(

@@ -63,6 +63,16 @@ pub enum MenuAssetKind {
     Config,
 }
 
+impl MenuAssetKind {
+    pub fn as_u32(&self) -> u32 {
+        match self {
+            Self::Font => 1,
+            Self::Image => 2,
+            Self::Config => 3,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MenuAsset {
     pub kind: MenuAssetKind,

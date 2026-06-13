@@ -24,6 +24,26 @@ static RUNTIME: OnceLock<RetrofrontRuntime> = OnceLock::new();
 static CORE_SESSION: Mutex<Option<CoreSession>> = Mutex::new(None);
 static PIXEL_FORMAT: Mutex<PixelFormat> = Mutex::new(PixelFormat::Xrgb8888);
 
+#[repr(C)]
+pub struct RetrofrontMenuEntry {
+    pub entry_idx: usize,
+    pub entry_type: u32,
+    pub flags: u32,
+    pub checked: bool,
+    pub path: [c_char; crate::menu::MENU_LABEL_MAX_LENGTH],
+    pub label: [c_char; crate::menu::MENU_LABEL_MAX_LENGTH],
+    pub rich_label: [c_char; crate::menu::MENU_LABEL_MAX_LENGTH],
+    pub sublabel: [c_char; crate::menu::MENU_LABEL_MAX_LENGTH],
+    pub value: [c_char; crate::menu::MENU_LABEL_MAX_LENGTH],
+}
+
+const MENU_ENTRY_FLAG_PATH_ENABLED: u32 = 1 << 0;
+const MENU_ENTRY_FLAG_LABEL_ENABLED: u32 = 1 << 1;
+const MENU_ENTRY_FLAG_RICH_LABEL_ENABLED: u32 = 1 << 2;
+const MENU_ENTRY_FLAG_VALUE_ENABLED: u32 = 1 << 3;
+const MENU_ENTRY_FLAG_SUBLABEL_ENABLED: u32 = 1 << 4;
+const MENU_ENTRY_FLAG_CHECKED: u32 = 1 << 5;
+
 struct CoreSession {
     core: Core,
     _game: Option<GameInfoHandle>,
@@ -118,6 +138,52 @@ pub extern "C" fn retrofront_menu_entry_count() -> usize {
     runtime()
         .map(|r| r.menu.read().current_entries().len())
         .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_menu_entry(index: usize, out: *mut RetrofrontMenuEntry) -> bool {
+    let Some(runtime) = runtime() else {
+        return false;
+    };
+    if out.is_null() {
+        return false;
+    }
+    let menu = runtime.menu.read();
+    let Some(entry) = menu.current_entries().get(index) else {
+        return false;
+    };
+    let mut flags = 0;
+    if !entry.path.is_empty() {
+        flags |= MENU_ENTRY_FLAG_PATH_ENABLED;
+    }
+    if !entry.label.is_empty() {
+        flags |= MENU_ENTRY_FLAG_LABEL_ENABLED;
+    }
+    if !entry.rich_label.is_empty() {
+        flags |= MENU_ENTRY_FLAG_RICH_LABEL_ENABLED;
+    }
+    if !entry.value.is_empty() {
+        flags |= MENU_ENTRY_FLAG_VALUE_ENABLED;
+    }
+    if !entry.sublabel.is_empty() {
+        flags |= MENU_ENTRY_FLAG_SUBLABEL_ENABLED;
+    }
+    if entry.checked {
+        flags |= MENU_ENTRY_FLAG_CHECKED;
+    }
+    unsafe {
+        let out = &mut *out;
+        out.entry_idx = index;
+        out.entry_type = entry.entry_type.as_u32();
+        out.flags = flags;
+        out.checked = entry.checked;
+        write_array_cstr(&entry.path, &mut out.path);
+        write_array_cstr(&entry.label, &mut out.label);
+        write_array_cstr(&entry.rich_label, &mut out.rich_label);
+        write_array_cstr(&entry.sublabel, &mut out.sublabel);
+        write_array_cstr(&entry.value, &mut out.value);
+    }
+    true
 }
 
 #[no_mangle]
@@ -377,6 +443,20 @@ pub extern "C" fn retrofront_menu_asset_count() -> usize {
 }
 
 #[no_mangle]
+pub extern "C" fn retrofront_menu_asset_kind(index: usize) -> u32 {
+    runtime()
+        .and_then(|runtime| {
+            runtime
+                .renderer
+                .read()
+                .menu_assets()
+                .get(index)
+                .map(|asset| asset.kind.as_u32())
+        })
+        .unwrap_or(0)
+}
+
+#[no_mangle]
 pub extern "C" fn retrofront_menu_asset_path(
     index: usize,
     dst: *mut c_char,
@@ -468,6 +548,26 @@ pub extern "C" fn retrofront_core_load_game(game_path: *const c_char) -> bool {
         }
         Err(_) => false,
     }
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_core_launch_pending() -> bool {
+    let Some(runtime) = runtime() else {
+        return false;
+    };
+    let Some(SettingValue::String(core_path)) = runtime.settings.get("pending_core_path") else {
+        return false;
+    };
+    let Some(SettingValue::String(game_path)) = runtime.settings.get("pending_game_path") else {
+        return false;
+    };
+    let Ok(core_c) = std::ffi::CString::new(core_path) else {
+        return false;
+    };
+    let Ok(game_c) = std::ffi::CString::new(game_path) else {
+        return false;
+    };
+    retrofront_core_open(core_c.as_ptr()) && retrofront_core_load_game(game_c.as_ptr())
 }
 
 #[no_mangle]
@@ -578,6 +678,18 @@ fn cstr(ptr: *const c_char) -> Option<String> {
                 .to_string_lossy()
                 .into_owned(),
         )
+    }
+}
+
+fn write_array_cstr<const N: usize>(src: &str, dst: &mut [c_char; N]) {
+    dst.fill(0);
+    if N == 0 {
+        return;
+    }
+    let bytes = src.as_bytes();
+    let count = bytes.len().min(N - 1);
+    unsafe {
+        ptr::copy_nonoverlapping(bytes.as_ptr(), dst.as_mut_ptr().cast::<u8>(), count);
     }
 }
 

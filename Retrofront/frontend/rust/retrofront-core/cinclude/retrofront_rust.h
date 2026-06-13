@@ -4,6 +4,18 @@
 #include <stddef.h>
 #include <stdint.h>
 
+typedef struct retrofront_menu_entry {
+    size_t entry_idx;
+    uint32_t entry_type;
+    uint32_t flags;
+    bool checked;
+    char path[1024];
+    char label[1024];
+    char rich_label[1024];
+    char sublabel[1024];
+    char value[1024];
+} retrofront_menu_entry_t;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -18,6 +30,7 @@ bool retrofront_menu_bootstrap(void);
 size_t retrofront_menu_entry_count(void);
 size_t retrofront_menu_selected_index(void);
 bool retrofront_menu_set_selected_index(size_t index);
+bool retrofront_menu_entry(size_t index, retrofront_menu_entry_t *out);
 bool retrofront_menu_entry_label(size_t index, char *dst, size_t dst_len);
 bool retrofront_menu_entry_sublabel(size_t index, char *dst, size_t dst_len);
 bool retrofront_menu_title(char *dst, size_t dst_len);
@@ -40,11 +53,13 @@ bool retrofront_shader_set_preset(const char *path);
 size_t retrofront_resources_unpack(const char *zip_path);
 bool retrofront_assets_load_defaults(void);
 size_t retrofront_menu_asset_count(void);
+uint32_t retrofront_menu_asset_kind(size_t index);
 bool retrofront_menu_asset_path(size_t index, char *dst, size_t dst_len);
 bool retrofront_import_rom(const char *path, const char *playlist);
 bool retrofront_settings_set_string(const char *key, const char *value);
 bool retrofront_core_open(const char *core_path);
 bool retrofront_core_load_game(const char *game_path);
+bool retrofront_core_launch_pending(void);
 bool retrofront_core_run_frame(void);
 void retrofront_tick(void);
 

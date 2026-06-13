@@ -103,6 +103,24 @@ pub enum MenuEntryType {
     Enum,
 }
 
+impl MenuEntryType {
+    pub fn as_u32(self) -> u32 {
+        match self {
+            Self::Action => 0,
+            Self::Bool => 1,
+            Self::Int => 2,
+            Self::UInt => 3,
+            Self::Float => 4,
+            Self::Path => 5,
+            Self::Dir => 6,
+            Self::String => 7,
+            Self::Hex => 8,
+            Self::Bind => 9,
+            Self::Enum => 10,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MenuIntent {
     OpenPath(String),
