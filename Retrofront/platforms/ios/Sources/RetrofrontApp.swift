@@ -93,8 +93,8 @@ struct RetrofrontView: View {
 
     private func boot() {
         let fm = FileManager.default
-        let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dataRoot = support.appendingPathComponent("RetroArch", isDirectory: true)
+        let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let dataRoot = documents.appendingPathComponent("RetroArch", isDirectory: true)
         _ = try? fm.createDirectory(at: dataRoot, withIntermediateDirectories: true)
 
         let ok = dataRoot.path.withCString { retrofront_runtime_init($0) }
@@ -105,9 +105,9 @@ struct RetrofrontView: View {
 
         if let zip = Bundle.main.url(forResource: "assets", withExtension: "zip") {
             let count = zip.path.withCString { retrofront_resources_unpack($0) }
-            status = "Ready (assets: \(count), real iOS device, C menu driver: \(driver))"
+            status = "Ready (assets: \(count), Documents/RetroArch, C menu driver: \(driver))"
         } else {
-            status = "Ready (assets.zip not found, C menu driver: \(driver))"
+            status = "Ready (assets.zip not found, Documents/RetroArch, C menu driver: \(driver))"
         }
         _ = retrofront_assets_load_defaults()
         _ = retrofront_menu_bootstrap()

@@ -39,6 +39,12 @@ targets:
         OTHER_LDFLAGS:
           - "-lretrofront_core"
 
+    preBuildScripts:
+      - name: Verify bundled assets.zip
+        script: |
+          set -euo pipefail
+          test -f "$SRCROOT/Resources/assets.zip"
+
     postCompileScripts:
       - name: Bundle and Sign libretro cores
         script: |
