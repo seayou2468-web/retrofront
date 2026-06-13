@@ -33,6 +33,47 @@ impl MenuDriver {
             Self::Rgui => "rgui",
         }
     }
+
+    pub fn source_file(self) -> &'static str {
+        match self {
+            Self::Ozone => "drivers/ozone.c",
+            Self::Xmb => "drivers/xmb.c",
+            Self::MaterialUi => "drivers/materialui.c",
+            Self::Rgui => "drivers/rgui.c",
+        }
+    }
+}
+
+pub const FIXED_MENU_DRIVERS: &[MenuDriver] = &[
+    MenuDriver::Ozone,
+    MenuDriver::Xmb,
+    MenuDriver::MaterialUi,
+    MenuDriver::Rgui,
+];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FixedMenuSource {
+    pub path: &'static str,
+    pub is_driver: bool,
+}
+
+pub fn fixed_menu_sources() -> impl Iterator<Item = FixedMenuSource> {
+    RETROFRONT_MENU_SOURCE_FILES
+        .iter()
+        .copied()
+        .map(|path| FixedMenuSource {
+            path,
+            is_driver: FIXED_MENU_DRIVERS
+                .iter()
+                .any(|driver| driver.source_file() == path),
+        })
+}
+
+pub fn fixed_menu_contract_complete() -> bool {
+    RETROFRONT_MENU_SOURCE_FILES.len() == 32
+        && FIXED_MENU_DRIVERS
+            .iter()
+            .all(|driver| RETROFRONT_MENU_SOURCE_FILES.contains(&driver.source_file()))
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -197,10 +238,10 @@ mod tests {
         menu.action(MenuAction::Down);
         assert_eq!(menu.current_selection(), 0);
     }
-
     #[test]
     fn fixed_c_menu_contract_contains_all_32_files() {
-        assert_eq!(RETROFRONT_MENU_SOURCE_FILES.len(), 32);
+        assert!(fixed_menu_contract_complete());
+        assert_eq!(fixed_menu_sources().count(), 32);
         assert!(RETROFRONT_MENU_SOURCE_FILES.contains(&"drivers/ozone.c"));
         assert!(RETROFRONT_MENU_SOURCE_FILES.contains(&"drivers/materialui.c"));
         assert!(RETROFRONT_MENU_SOURCE_FILES.contains(&"drivers/xmb.c"));

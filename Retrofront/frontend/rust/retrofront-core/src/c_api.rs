@@ -14,7 +14,7 @@ use crate::{
     input::{InputEvent, InputSource, MenuAction},
     libretro::{GameInfo, GameInfoHandle},
     menu::MenuEntry,
-    menu::RETROFRONT_MENU_SOURCE_FILES,
+    menu::{fixed_menu_contract_complete, fixed_menu_sources, RETROFRONT_MENU_SOURCE_FILES},
     renderer::{PixelFormat, VideoFrame},
     settings::SettingValue,
     RetrofrontRuntime,
@@ -175,6 +175,27 @@ pub extern "C" fn retrofront_menu_source_file(
         return false;
     };
     copy_cstr(path, dst, dst_len)
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_menu_contract_complete() -> bool {
+    fixed_menu_contract_complete()
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_menu_source_is_driver(index: usize) -> bool {
+    fixed_menu_sources()
+        .nth(index)
+        .map(|source| source.is_driver)
+        .unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_menu_active_driver_source(dst: *mut c_char, dst_len: usize) -> bool {
+    let Some(runtime) = runtime() else {
+        return false;
+    };
+    copy_cstr(runtime.menu.read().driver().source_file(), dst, dst_len)
 }
 
 #[no_mangle]
