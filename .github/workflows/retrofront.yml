@@ -152,7 +152,7 @@ jobs:
           echo "IPA contents:"
           unzip -l Retrofront.ipa
 
-          test -f Payload/Retrofront.app/Frameworks/mgba_libretro_ios.dylib
+          test -f Payload/RetrofrontiOS.app/Frameworks/mgba_libretro_ios.dylib
 
           ls -lah Retrofront.ipa
 
