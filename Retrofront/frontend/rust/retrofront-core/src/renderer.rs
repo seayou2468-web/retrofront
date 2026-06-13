@@ -1,6 +1,8 @@
+use std::path::PathBuf;
+
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
-use crate::shader::ShaderManager;
+use crate::{menu::MenuModel, shader::ShaderManager};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RendererError {
@@ -23,11 +25,50 @@ pub enum RendererBackend {
     Wgpu,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PixelFormat {
+    Xrgb8888,
+    Rgb565,
+    Unknown(u32),
+}
+
+#[derive(Clone, Debug)]
+pub struct VideoFrame {
+    pub width: u32,
+    pub height: u32,
+    pub pitch: usize,
+    pub format: PixelFormat,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FontAsset {
+    pub name: String,
+    pub path: PathBuf,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OverlayAsset {
+    pub name: String,
+    pub path: PathBuf,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RenderCommand {
+    MenuTitle(String),
+    MenuEntry { label: String, selected: bool },
+    Frame { width: u32, height: u32 },
+}
+
 /// WGPU renderer facade used by menu video drawing and libretro video frames.
 pub struct VideoRenderer {
     backend: RendererBackend,
     frame_size: FrameSize,
     gpu: Option<WgpuState>,
+    last_frame: Option<VideoFrame>,
+    commands: Vec<RenderCommand>,
+    fonts: Vec<FontAsset>,
+    overlays: Vec<OverlayAsset>,
 }
 
 impl VideoRenderer {
@@ -36,6 +77,10 @@ impl VideoRenderer {
             backend: RendererBackend::Wgpu,
             frame_size: FrameSize::default(),
             gpu: None,
+            last_frame: None,
+            commands: Vec::new(),
+            fonts: Vec::new(),
+            overlays: Vec::new(),
         }
     }
 
@@ -44,6 +89,12 @@ impl VideoRenderer {
     }
     pub fn frame_size(&self) -> FrameSize {
         self.frame_size
+    }
+    pub fn commands(&self) -> &[RenderCommand] {
+        &self.commands
+    }
+    pub fn last_frame(&self) -> Option<&VideoFrame> {
+        self.last_frame.as_ref()
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -91,13 +142,44 @@ impl VideoRenderer {
         Ok(())
     }
 
-    /// Draw the current menu tree.  The concrete pass construction is kept in
-    /// Rust; C menu drivers should submit entries to this facade instead of
-    /// depending on RetroArch renderer globals.
-    pub fn draw_menu(&mut self, _shaders: &mut ShaderManager) {
-        // Pipeline creation and text/thumbnail batching will live here.  This
-        // method is intentionally the single Rust-owned video entry point for
-        // `menu/` so future C shims remain thin.
+    pub fn load_font(&mut self, name: impl Into<String>, path: impl Into<PathBuf>) {
+        self.fonts.push(FontAsset {
+            name: name.into(),
+            path: path.into(),
+        });
+    }
+
+    pub fn load_overlay(&mut self, name: impl Into<String>, path: impl Into<PathBuf>) {
+        self.overlays.push(OverlayAsset {
+            name: name.into(),
+            path: path.into(),
+        });
+    }
+
+    pub fn submit_libretro_frame(&mut self, frame: VideoFrame) {
+        self.commands.push(RenderCommand::Frame {
+            width: frame.width,
+            height: frame.height,
+        });
+        self.last_frame = Some(frame);
+    }
+
+    /// Draw the current menu tree.  The concrete GPU pass is Rust-owned; C menu
+    /// drivers submit menu state to this facade instead of RetroArch globals.
+    pub fn draw_menu(&mut self, menu: &MenuModel, shaders: &mut ShaderManager) {
+        if let Some(gpu) = &self.gpu {
+            let _ = shaders.rebuild_pipeline_from_wgpu(gpu);
+        }
+        self.commands.clear();
+        self.commands
+            .push(RenderCommand::MenuTitle(menu.title().to_owned()));
+        let selected = menu.current_selection();
+        for (index, entry) in menu.current_entries().iter().enumerate() {
+            self.commands.push(RenderCommand::MenuEntry {
+                label: entry.label.clone(),
+                selected: index == selected,
+            });
+        }
     }
 
     pub fn wgpu_state(&self) -> Option<&WgpuState> {

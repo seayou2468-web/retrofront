@@ -1,6 +1,9 @@
 //! Common iOS/Linux libretro core loader.
 
-use std::{ffi::c_void, path::Path};
+use std::{
+    ffi::c_void,
+    path::{Path, PathBuf},
+};
 
 use libloading::{Library, Symbol};
 
@@ -14,6 +17,8 @@ pub enum CoreError {
     LoadGameRejected,
     #[error("invalid game info: {0}")]
     InvalidGameInfo(#[from] std::ffi::NulError),
+    #[error("core path has no file name: {0}")]
+    MissingCoreName(PathBuf),
 }
 
 type RetroInit = unsafe extern "C" fn();
@@ -111,6 +116,25 @@ impl Core {
 
     pub fn run_frame(&self) {
         unsafe { (self.run)() }
+    }
+
+    pub fn open_init_with_callbacks(
+        path: impl AsRef<Path>,
+        callbacks: CoreCallbacks,
+    ) -> Result<Self, CoreError> {
+        let core_path = path.as_ref();
+        let core = unsafe { Self::open(core_path)? };
+        core.install_callbacks(callbacks);
+        core.init();
+        Ok(core)
+    }
+
+    pub fn core_display_name(path: impl AsRef<Path>) -> Result<String, CoreError> {
+        path.as_ref()
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(ToOwned::to_owned)
+            .ok_or_else(|| CoreError::MissingCoreName(path.as_ref().to_path_buf()))
     }
 }
 

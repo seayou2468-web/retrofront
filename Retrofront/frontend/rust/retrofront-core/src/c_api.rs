@@ -1,19 +1,38 @@
-//! Thin C ABI consumed by `Retrofront/frontend/menu`.
+//! Thin C ABI consumed by `Retrofront/frontend/menu` and platform shells.
 
 use std::{
-    ffi::{c_char, CStr},
-    path::PathBuf,
-    ptr,
+    ffi::{c_char, c_void, CStr},
+    path::{Path, PathBuf},
+    ptr, slice,
     sync::OnceLock,
 };
 
+use parking_lot::Mutex;
+
 use crate::{
+    core::{environment_default, Core, CoreCallbacks},
     input::{InputEvent, InputSource, MenuAction},
+    libretro::{GameInfo, GameInfoHandle},
     menu::MenuEntry,
+    renderer::{PixelFormat, VideoFrame},
+    settings::SettingValue,
     RetrofrontRuntime,
 };
 
 static RUNTIME: OnceLock<RetrofrontRuntime> = OnceLock::new();
+static CORE_SESSION: Mutex<Option<CoreSession>> = Mutex::new(None);
+static PIXEL_FORMAT: Mutex<PixelFormat> = Mutex::new(PixelFormat::Xrgb8888);
+
+struct CoreSession {
+    core: Core,
+    _game: Option<GameInfoHandle>,
+}
+
+// The C ABI owns the core session behind a global mutex and all libretro calls
+// are serialized through that mutex. GameInfoHandle contains raw pointers into
+// its owned buffers, so Rust cannot derive Send even though it is never moved
+// without the mutex guarding it.
+unsafe impl Send for CoreSession {}
 
 fn runtime() -> Option<&'static RetrofrontRuntime> {
     RUNTIME.get()
@@ -29,7 +48,7 @@ pub extern "C" fn retrofront_runtime_init(data_dir: *const c_char) -> bool {
         .to_string_lossy()
         .into_owned();
     let runtime = RetrofrontRuntime::new(PathBuf::from(data_dir));
-    if runtime.filesystem.ensure_layout().is_err() {
+    if runtime.filesystem.ensure_layout().is_err() || runtime.settings.load().is_err() {
         return false;
     }
     RUNTIME.set(runtime).is_ok()
@@ -37,7 +56,7 @@ pub extern "C" fn retrofront_runtime_init(data_dir: *const c_char) -> bool {
 
 #[no_mangle]
 pub extern "C" fn retrofront_menu_api_version() -> u32 {
-    1
+    2
 }
 
 #[no_mangle]
@@ -45,12 +64,9 @@ pub extern "C" fn retrofront_menu_set_title(title: *const c_char) -> bool {
     let Some(runtime) = runtime() else {
         return false;
     };
-    if title.is_null() {
+    let Some(title) = cstr(title) else {
         return false;
-    }
-    let title = unsafe { CStr::from_ptr(title) }
-        .to_string_lossy()
-        .into_owned();
+    };
     let entries = runtime.menu.read().current_entries().to_vec();
     runtime.menu.write().set_root(title, entries);
     true
@@ -71,20 +87,10 @@ pub extern "C" fn retrofront_menu_append_entry(label: *const c_char, path: *cons
     let Some(runtime) = runtime() else {
         return false;
     };
-    if label.is_null() {
+    let Some(label) = cstr(label) else {
         return false;
-    }
-    let label = unsafe { CStr::from_ptr(label) }
-        .to_string_lossy()
-        .into_owned();
-    let path = if path.is_null() {
-        String::new()
-    } else {
-        unsafe { CStr::from_ptr(path) }
-            .to_string_lossy()
-            .into_owned()
     };
-
+    let path = cstr(path).unwrap_or_default();
     let mut menu = runtime.menu.write();
     let title = menu.title().to_owned();
     let mut entries = menu.current_entries().to_vec();
@@ -112,6 +118,19 @@ pub extern "C" fn retrofront_menu_selected_index() -> usize {
 }
 
 #[no_mangle]
+pub extern "C" fn retrofront_menu_draw() -> bool {
+    let Some(runtime) = runtime() else {
+        return false;
+    };
+    let menu = runtime.menu.read().clone();
+    runtime
+        .renderer
+        .write()
+        .draw_menu(&menu, &mut runtime.shaders.write());
+    true
+}
+
+#[no_mangle]
 pub extern "C" fn retrofront_input_bind_key(key: u32, action: u32) -> bool {
     let Some(runtime) = runtime() else {
         return false;
@@ -132,6 +151,32 @@ pub extern "C" fn retrofront_input_push_key(key: u32, pressed: bool) -> bool {
         source: InputSource::Key(key),
         pressed,
     });
+    true
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_input_push_gamepad_button(port: u8, id: u16, pressed: bool) -> bool {
+    let Some(runtime) = runtime() else {
+        return false;
+    };
+    runtime.input.write().push_event(InputEvent {
+        source: InputSource::GamepadButton { port, id },
+        pressed,
+    });
+    true
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_input_set_analog(
+    port: u8,
+    device: u32,
+    index: u32,
+    value: i16,
+) -> bool {
+    let Some(runtime) = runtime() else {
+        return false;
+    };
+    runtime.input.write().set_analog(port, device, index, value);
     true
 }
 
@@ -160,13 +205,112 @@ pub extern "C" fn retrofront_shader_set_preset(path: *const c_char) -> bool {
     let Some(runtime) = runtime() else {
         return false;
     };
-    if path.is_null() {
+    let Some(path) = cstr(path) else {
         return false;
-    }
-    let path = unsafe { CStr::from_ptr(path) }
-        .to_string_lossy()
-        .into_owned();
+    };
     runtime.shaders.write().set_preset(path).is_ok()
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_resources_unpack(zip_path: *const c_char) -> usize {
+    let Some(runtime) = runtime() else {
+        return 0;
+    };
+    let Some(zip_path) = cstr(zip_path) else {
+        return 0;
+    };
+    runtime
+        .filesystem
+        .unpack_resources_zip(zip_path)
+        .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_import_rom(path: *const c_char, playlist: *const c_char) -> bool {
+    let Some(runtime) = runtime() else {
+        return false;
+    };
+    let Some(path) = cstr(path) else {
+        return false;
+    };
+    let playlist = cstr(playlist).unwrap_or_else(|| "Imported".to_owned());
+    let imported = runtime
+        .filesystem
+        .copy_into_imports(&path)
+        .unwrap_or_else(|_| PathBuf::from(path));
+    runtime
+        .playlists
+        .import_rom_entry(&playlist, imported, None, None)
+        .is_ok()
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_settings_set_string(key: *const c_char, value: *const c_char) -> bool {
+    let Some(runtime) = runtime() else {
+        return false;
+    };
+    let Some(key) = cstr(key) else {
+        return false;
+    };
+    let Some(value) = cstr(value) else {
+        return false;
+    };
+    runtime.settings.set(key, SettingValue::String(value));
+    runtime.settings.save().is_ok()
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_core_open(core_path: *const c_char) -> bool {
+    let Some(core_path) = cstr(core_path) else {
+        return false;
+    };
+    let callbacks = CoreCallbacks {
+        environment: Some(retrofront_environment),
+        video_refresh: Some(retrofront_video_refresh),
+        audio_sample: Some(retrofront_audio_sample),
+        audio_sample_batch: Some(retrofront_audio_sample_batch),
+        input_poll: Some(retrofront_input_poll),
+        input_state: Some(retrofront_input_state),
+    };
+    match Core::open_init_with_callbacks(Path::new(&core_path), callbacks) {
+        Ok(core) => {
+            *CORE_SESSION.lock() = Some(CoreSession { core, _game: None });
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_core_load_game(game_path: *const c_char) -> bool {
+    let Some(game_path) = cstr(game_path) else {
+        return false;
+    };
+    let mut guard = CORE_SESSION.lock();
+    let Some(session) = guard.as_mut() else {
+        return false;
+    };
+    match session.core.load_game(GameInfo {
+        path: Some(game_path.into()),
+        data: None,
+        meta: None,
+    }) {
+        Ok(handle) => {
+            session._game = Some(handle);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_core_run_frame() -> bool {
+    let guard = CORE_SESSION.lock();
+    let Some(session) = guard.as_ref() else {
+        return false;
+    };
+    session.core.run_frame();
+    true
 }
 
 #[no_mangle]
@@ -178,10 +322,68 @@ pub extern "C" fn retrofront_tick() {
 
 #[no_mangle]
 pub extern "C" fn retrofront_runtime_shutdown() {
-    // The runtime is process-global because existing C menu callbacks do not
-    // carry user data.  Resources are released by process teardown; platform
-    // hosts can add explicit instance APIs later if multiple frontends are ever
-    // needed in one process.
+    *CORE_SESSION.lock() = None;
+}
+
+unsafe extern "C" fn retrofront_environment(
+    cmd: ::std::os::raw::c_uint,
+    data: *mut c_void,
+) -> bool {
+    if cmd == 10 && !data.is_null() {
+        let format = *(data as *const u32);
+        *PIXEL_FORMAT.lock() = match format {
+            1 => PixelFormat::Xrgb8888,
+            2 => PixelFormat::Rgb565,
+            other => PixelFormat::Unknown(other),
+        };
+        return true;
+    }
+    environment_default(cmd, data)
+}
+
+unsafe extern "C" fn retrofront_video_refresh(
+    data: *const c_void,
+    width: u32,
+    height: u32,
+    pitch: usize,
+) {
+    let Some(runtime) = runtime() else {
+        return;
+    };
+    if data.is_null() || width == 0 || height == 0 || pitch == 0 {
+        return;
+    }
+    let byte_len = pitch.saturating_mul(height as usize);
+    let bytes = slice::from_raw_parts(data.cast::<u8>(), byte_len).to_vec();
+    runtime.renderer.write().submit_libretro_frame(VideoFrame {
+        width,
+        height,
+        pitch,
+        format: *PIXEL_FORMAT.lock(),
+        bytes,
+    });
+}
+
+unsafe extern "C" fn retrofront_audio_sample(_left: i16, _right: i16) {}
+unsafe extern "C" fn retrofront_audio_sample_batch(_data: *const i16, frames: usize) -> usize {
+    frames
+}
+unsafe extern "C" fn retrofront_input_poll() {}
+unsafe extern "C" fn retrofront_input_state(port: u32, device: u32, index: u32, id: u32) -> i16 {
+    let Some(runtime) = runtime() else {
+        return 0;
+    };
+    if device == 1 {
+        runtime
+            .input
+            .read()
+            .libretro_button_state(port as u8, id as u16)
+    } else {
+        runtime
+            .input
+            .read()
+            .libretro_analog_state(port as u8, device, index)
+    }
 }
 
 fn action_from_u32(action: u32) -> Option<MenuAction> {
@@ -198,6 +400,18 @@ fn action_from_u32(action: u32) -> Option<MenuAction> {
         9 => MenuAction::Scan,
         _ => return None,
     })
+}
+
+fn cstr(ptr: *const c_char) -> Option<String> {
+    if ptr.is_null() {
+        None
+    } else {
+        Some(
+            unsafe { CStr::from_ptr(ptr) }
+                .to_string_lossy()
+                .into_owned(),
+        )
+    }
 }
 
 #[allow(dead_code)]

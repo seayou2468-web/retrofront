@@ -29,3 +29,19 @@ implementation details.
 
 The common core loader uses the same dynamic-library path for Linux and real iOS
 devices.  Simulator-specific code paths are intentionally absent.
+
+## Platform builds
+
+The repository includes a root `Retrofront/Makefile` for the current build
+contract:
+
+- `make test` runs the Rust backend tests.
+- `make linux-ui` builds the Rust cdylib/staticlib and a Swift Linux smoke UI.
+- `make ios-rust` builds `aarch64-apple-ios` only (no simulator target) and
+  stages `lib/ios/libretrofront_core.a` for Xcode.
+- `make xcodegen` generates `Retrofront.xcodeproj` from `project.yml`.
+
+The iOS target bundles `Resources/assets.zip` and copies all `cores/*.dylib` and
+`cores/*.framework` artifacts into the app Frameworks directory.  The GitHub
+Actions workflow then moves the built `.app` into `Payload/`, zips `Payload/`,
+and publishes the zip renamed as an `.ipa`.

@@ -23,6 +23,7 @@ raw-window-handle = "0.6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+zip = { version = "6", default-features = false, features = ["deflate"] }
 wgpu = { version = "29.0.3", default-features = false, features = ["std", "vulkan", "metal", "wgsl"] }
 ash = { version = "0.38", optional = true }
 librashader = { version = "0.11.1", default-features = false, features = ["runtime-vk", "runtime-metal", "presets", "preprocess", "reflect-cross", "reflect-naga"], optional = true }

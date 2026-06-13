@@ -52,7 +52,7 @@ impl RetrofrontRuntime {
         let playlists = PlaylistStore::new(filesystem.playlists_dir());
         let shaders = Arc::new(RwLock::new(ShaderManager::new(filesystem.shader_dir())));
 
-        Self {
+        let runtime = Self {
             menu: Arc::new(RwLock::new(MenuModel::default())),
             renderer: Arc::new(RwLock::new(VideoRenderer::new())),
             input: Arc::new(RwLock::new(InputSystem::new())),
@@ -61,7 +61,28 @@ impl RetrofrontRuntime {
             tasks,
             playlists,
             shaders,
-        }
+        };
+        runtime.install_default_bindings();
+        runtime
+    }
+
+    /// Install menu defaults used by C menu drivers and platform shells.
+    pub fn install_default_bindings(&self) {
+        let mut input = self.input.write();
+        // Common desktop keys. iOS touch/gamepad code can add platform-specific
+        // bindings without changing menu code.
+        input.bind(input::InputSource::Key(38), input::MenuAction::Up);
+        input.bind(input::InputSource::Key(40), input::MenuAction::Down);
+        input.bind(input::InputSource::Key(37), input::MenuAction::Left);
+        input.bind(input::InputSource::Key(39), input::MenuAction::Right);
+        input.bind(input::InputSource::Key(13), input::MenuAction::Ok);
+        input.bind(input::InputSource::Key(27), input::MenuAction::Cancel);
+    }
+
+    pub fn prepare_storage(&self) -> std::io::Result<()> {
+        self.filesystem.ensure_layout()?;
+        self.settings.load()?;
+        Ok(())
     }
 
     /// Advance non-render menu services once per frame.
