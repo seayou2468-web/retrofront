@@ -1,5 +1,6 @@
 use std::{
     fs,
+    io::{self, Write},
     path::{Path, PathBuf},
 };
 
@@ -326,6 +327,199 @@ impl VideoRenderer {
 
     pub fn wgpu_state(&self) -> Option<&WgpuState> {
         self.gpu.as_ref()
+    }
+
+    /// Write a deterministic UI milestone snapshot without requiring a window.
+    ///
+    /// This is intentionally simple: it proves that the current menu page,
+    /// selected row, driver theme colours and placeholder thumbnail area can be
+    /// rendered as an image even before the real platform GPU presentation path
+    /// is wired into every host shell.
+    pub fn write_menu_snapshot_ppm(
+        &self,
+        menu: &MenuModel,
+        path: impl AsRef<Path>,
+    ) -> io::Result<()> {
+        let width = self.frame_size.width.max(640);
+        let height = self.frame_size.height.max(360);
+        let driver = menu.driver().descriptor();
+        let mut pixels = vec![0_u8; width as usize * height as usize * 3];
+        let bg = rgba_to_rgb(driver.background_rgba);
+        fill_rect(&mut pixels, width, height, 0, 0, width, height, bg);
+
+        let accent = rgba_to_rgb(driver.accent_rgba);
+        let sidebar = driver.sidebar_width.min(width / 2);
+        if sidebar > 0 {
+            fill_rect(
+                &mut pixels,
+                width,
+                height,
+                0,
+                0,
+                sidebar,
+                height,
+                darken(accent),
+            );
+        }
+        fill_rect(&mut pixels, width, height, 0, 0, width, 48, darken(bg));
+        draw_text_blocks(&mut pixels, width, height, 24, 16, menu.title(), accent);
+
+        let row_height = driver.row_height.max(16);
+        let start_x = sidebar.saturating_add(24).min(width.saturating_sub(120));
+        let mut y = 72;
+        for (index, entry) in menu.current_entries().iter().enumerate().take(12) {
+            let selected = index == menu.current_selection();
+            let row_color = if selected {
+                accent
+            } else if index % 2 == 0 {
+                lighten(bg)
+            } else {
+                bg
+            };
+            fill_rect(
+                &mut pixels,
+                width,
+                height,
+                start_x.saturating_sub(8),
+                y,
+                width.saturating_sub(start_x + 24),
+                row_height.saturating_sub(4),
+                row_color,
+            );
+            draw_text_blocks(
+                &mut pixels,
+                width,
+                height,
+                start_x,
+                y + 6,
+                &entry.label,
+                if selected {
+                    (255, 255, 255)
+                } else {
+                    (220, 225, 230)
+                },
+            );
+            if !entry.value.is_empty() {
+                draw_text_blocks(
+                    &mut pixels,
+                    width,
+                    height,
+                    width.saturating_sub(220),
+                    y + 6,
+                    &entry.value,
+                    (180, 190, 200),
+                );
+            }
+            if !entry.sublabel.is_empty() && row_height >= 32 {
+                draw_text_blocks(
+                    &mut pixels,
+                    width,
+                    height,
+                    start_x,
+                    y + 24,
+                    &entry.sublabel,
+                    (145, 155, 165),
+                );
+            }
+            y = y.saturating_add(row_height);
+        }
+
+        if driver.thumbnail_size > 0 {
+            let size = driver.thumbnail_size.min(width / 3).min(height / 2);
+            let x = width.saturating_sub(size + 32);
+            let y = height.saturating_sub(size + 32);
+            fill_rect(&mut pixels, width, height, x, y, size, size, darken(accent));
+            fill_rect(
+                &mut pixels,
+                width,
+                height,
+                x + 8,
+                y + 8,
+                size.saturating_sub(16),
+                size.saturating_sub(16),
+                (40, 44, 52),
+            );
+            draw_text_blocks(
+                &mut pixels,
+                width,
+                height,
+                x + 18,
+                y + 18,
+                "thumbnail placeholder",
+                (210, 215, 220),
+            );
+        }
+
+        let mut file = fs::File::create(path)?;
+        write!(file, "P6\n{} {}\n255\n", width, height)?;
+        file.write_all(&pixels)?;
+        Ok(())
+    }
+}
+
+fn rgba_to_rgb(rgba: u32) -> (u8, u8, u8) {
+    (
+        ((rgba >> 24) & 0xff) as u8,
+        ((rgba >> 16) & 0xff) as u8,
+        ((rgba >> 8) & 0xff) as u8,
+    )
+}
+
+fn darken((r, g, b): (u8, u8, u8)) -> (u8, u8, u8) {
+    (r / 2, g / 2, b / 2)
+}
+
+fn lighten((r, g, b): (u8, u8, u8)) -> (u8, u8, u8) {
+    (
+        r.saturating_add(18),
+        g.saturating_add(18),
+        b.saturating_add(18),
+    )
+}
+
+fn fill_rect(
+    pixels: &mut [u8],
+    width: u32,
+    height: u32,
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+    color: (u8, u8, u8),
+) {
+    let max_y = y.saturating_add(h).min(height);
+    let max_x = x.saturating_add(w).min(width);
+    for py in y..max_y {
+        for px in x..max_x {
+            let offset = ((py * width + px) * 3) as usize;
+            pixels[offset] = color.0;
+            pixels[offset + 1] = color.1;
+            pixels[offset + 2] = color.2;
+        }
+    }
+}
+
+fn draw_text_blocks(
+    pixels: &mut [u8],
+    width: u32,
+    height: u32,
+    x: u32,
+    y: u32,
+    text: &str,
+    color: (u8, u8, u8),
+) {
+    let mut cursor = x;
+    for byte in text.bytes().take(38) {
+        if byte == b' ' {
+            cursor = cursor.saturating_add(6);
+            continue;
+        }
+        let block_h = 8 + u32::from(byte % 5);
+        fill_rect(pixels, width, height, cursor, y, 4, block_h, color);
+        cursor = cursor.saturating_add(7);
+        if cursor >= width.saturating_sub(8) {
+            break;
+        }
     }
 }
 

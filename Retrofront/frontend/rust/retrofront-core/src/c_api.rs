@@ -404,6 +404,22 @@ pub extern "C" fn retrofront_renderer_resize(width: u32, height: u32) -> bool {
 }
 
 #[no_mangle]
+pub extern "C" fn retrofront_renderer_write_snapshot_ppm(path: *const c_char) -> bool {
+    let Some(runtime) = runtime() else {
+        return false;
+    };
+    let Some(path) = cstr(path) else {
+        return false;
+    };
+    let menu = runtime.menu.read().clone();
+    runtime
+        .renderer
+        .read()
+        .write_menu_snapshot_ppm(&menu, Path::new(&path))
+        .is_ok()
+}
+
+#[no_mangle]
 pub extern "C" fn retrofront_shader_set_preset(path: *const c_char) -> bool {
     let Some(runtime) = runtime() else {
         return false;

@@ -127,36 +127,57 @@ impl RetrofrontRuntime {
         let entries = vec![
             MenuEntry {
                 label: "Load Content".into(),
-                sublabel: "Browse imported ROMs".into(),
+                sublabel: "Open the UI-only content browser mock".into(),
                 path: "retrofront://content".into(),
                 entry_type: MenuEntryType::Dir,
                 ..Default::default()
             },
             MenuEntry {
                 label: "Playlists".into(),
-                sublabel: "Open saved playlists".into(),
+                sublabel: "Browse mock playlists and entries".into(),
                 path: "retrofront://playlists".into(),
                 entry_type: MenuEntryType::Dir,
                 ..Default::default()
             },
             MenuEntry {
                 label: "Cores".into(),
-                sublabel: "Select a libretro core".into(),
+                sublabel: "Select a mock libretro core".into(),
                 path: "retrofront://cores".into(),
                 entry_type: MenuEntryType::Dir,
                 ..Default::default()
             },
             MenuEntry {
                 label: "Shaders".into(),
-                sublabel: "Load librashader presets".into(),
+                sublabel: "Preview librashader preset UI without applying it".into(),
                 path: "retrofront://shaders".into(),
                 entry_type: MenuEntryType::Dir,
                 ..Default::default()
             },
             MenuEntry {
                 label: "Settings".into(),
-                sublabel: "Frontend settings".into(),
+                sublabel: "Open UI-only settings pages".into(),
                 path: "retrofront://settings".into(),
+                entry_type: MenuEntryType::Dir,
+                ..Default::default()
+            },
+            MenuEntry {
+                label: "Online Updater".into(),
+                sublabel: "Show mock progress and disabled updater actions".into(),
+                path: "retrofront://online-updater".into(),
+                entry_type: MenuEntryType::Dir,
+                ..Default::default()
+            },
+            MenuEntry {
+                label: "Information".into(),
+                sublabel: "Runtime, renderer and driver status".into(),
+                path: "retrofront://information".into(),
+                entry_type: MenuEntryType::Dir,
+                ..Default::default()
+            },
+            MenuEntry {
+                label: "Quit Retrofront".into(),
+                sublabel: "Open the exit confirmation UI only".into(),
+                path: "retrofront://quit".into(),
                 entry_type: MenuEntryType::Dir,
                 ..Default::default()
             },
@@ -190,20 +211,181 @@ impl RetrofrontRuntime {
         let (title, entries): (String, Vec<MenuEntry>) = match path.as_str() {
             "retrofront://content" => (
                 "Load Content".into(),
-                self.entries_for_rom_dir(self.filesystem.imports_dir()),
+                vec![
+                    dir_entry(
+                        "Start Directory",
+                        "retrofront://directory-browser",
+                        "Mock file browser with folders and supported content",
+                    ),
+                    action_entry(
+                        "Metroid Fusion.gba",
+                        "mock://content/metroid-fusion",
+                        "Nintendo Game Boy Advance / no core launched",
+                    ),
+                    action_entry(
+                        "Chrono Trigger.sfc",
+                        "mock://content/chrono-trigger",
+                        "Super Nintendo / no core launched",
+                    ),
+                    action_entry(
+                        "Sonic The Hedgehog.md",
+                        "mock://content/sonic",
+                        "Mega Drive / unsupported extension mock",
+                    ),
+                ],
             ),
-            "retrofront://playlists" => ("Playlists".into(), self.entries_for_playlists()),
+            "retrofront://directory-browser" => (
+                "Start Directory".into(),
+                vec![
+                    dir_entry(
+                        "Nintendo - Game Boy Advance",
+                        "retrofront://mock-folder/gba",
+                        "3 mock files",
+                    ),
+                    dir_entry(
+                        "Nintendo - Super Nintendo",
+                        "retrofront://mock-folder/snes",
+                        "2 mock files",
+                    ),
+                    action_entry(
+                        "README.txt",
+                        "mock://disabled/text-file",
+                        "Disabled: not launchable content",
+                    ),
+                ],
+            ),
+            "retrofront://mock-folder/gba" => (
+                "Nintendo - Game Boy Advance".into(),
+                vec![
+                    action_entry(
+                        "Advance Wars.gba",
+                        "mock://content/advance-wars",
+                        "Would open core selection",
+                    ),
+                    action_entry(
+                        "Castlevania - Aria of Sorrow.gba",
+                        "mock://content/aria",
+                        "Would open core selection",
+                    ),
+                    action_entry(
+                        "The Legend of Zelda - Minish Cap.gba",
+                        "mock://content/minish-cap",
+                        "Long label clipping test",
+                    ),
+                ],
+            ),
+            "retrofront://mock-folder/snes" => (
+                "Nintendo - Super Nintendo".into(),
+                vec![
+                    action_entry(
+                        "Super Metroid.sfc",
+                        "mock://content/super-metroid",
+                        "Would open core selection",
+                    ),
+                    action_entry(
+                        "ファイナルファンタジー VI.sfc",
+                        "mock://content/ff6-jp",
+                        "Japanese label rendering test",
+                    ),
+                ],
+            ),
+            "retrofront://playlists" => (
+                "Playlists".into(),
+                vec![
+                    dir_entry(
+                        "Favorites",
+                        "playlist://Favorites",
+                        "Pinned mock content with thumbnails",
+                    ),
+                    dir_entry(
+                        "History",
+                        "playlist://History",
+                        "Recently opened mock content",
+                    ),
+                    dir_entry(
+                        "Nintendo - Game Boy Advance",
+                        "playlist://Nintendo - Game Boy Advance",
+                        "Large list and long label checks",
+                    ),
+                    dir_entry(
+                        "Empty Playlist",
+                        "playlist://Empty Playlist",
+                        "Empty-state UI check",
+                    ),
+                ],
+            ),
             "retrofront://cores" => (
                 "Cores".into(),
-                self.entries_for_files(self.filesystem.cores_dir(), &["so", "dylib"], "core://"),
+                vec![
+                    enum_entry(
+                        "mGBA",
+                        "core://mgba",
+                        "Nintendo Game Boy Advance / mock selected core",
+                        false,
+                    ),
+                    enum_entry(
+                        "Snes9x",
+                        "core://snes9x",
+                        "Super Nintendo / mock selected core",
+                        false,
+                    ),
+                    enum_entry(
+                        "SameBoy",
+                        "core://sameboy",
+                        "Game Boy / disabled placeholder",
+                        false,
+                    ),
+                    action_entry(
+                        "Download More Cores...",
+                        "mock://online/core-download",
+                        "Opens mock online updater progress",
+                    ),
+                ],
             ),
             "retrofront://shaders" => (
                 "Shaders".into(),
-                self.entries_for_files(
-                    self.filesystem.shader_dir(),
-                    &["slangp", "glslp", "cgp"],
-                    "shader://",
-                ),
+                vec![
+                    enum_entry(
+                        "crt-royale.slangp",
+                        "shader://crt-royale.slangp",
+                        "librashader raw-handle path / not applied yet",
+                        false,
+                    ),
+                    enum_entry(
+                        "sharp-bilinear.slangp",
+                        "shader://sharp-bilinear.slangp",
+                        "Preview placeholder only",
+                        false,
+                    ),
+                    enum_entry(
+                        "lcd-grid-v2.slangp",
+                        "shader://lcd-grid-v2.slangp",
+                        "Parameter UI mock",
+                        false,
+                    ),
+                    dir_entry(
+                        "Shader Parameters",
+                        "retrofront://shader-parameters",
+                        "Mock sliders and toggles",
+                    ),
+                ],
+            ),
+            "retrofront://shader-parameters" => (
+                "Shader Parameters".into(),
+                vec![
+                    value_entry(
+                        "Mask Strength",
+                        "0.70",
+                        "Mock float value; left/right changes will be added later",
+                    ),
+                    value_entry("Scanline Weight", "0.35", "Mock float value"),
+                    enum_entry(
+                        "Integer Scale",
+                        "mock://toggle/integer-scale",
+                        "Enabled UI-only toggle",
+                        true,
+                    ),
+                ],
             ),
             "retrofront://settings" => (
                 "Settings".into(),
@@ -217,16 +399,83 @@ impl RetrofrontRuntime {
                         ..Default::default()
                     },
                     MenuEntry {
-                        label: "Video driver".into(),
-                        value: "wgpu".into(),
-                        sublabel: "Linux Vulkan / iOS Metal".into(),
+                        label: "Video".into(),
+                        sublabel: "wgpu renderer, scaling and fullscreen mock".into(),
+                        path: "retrofront://settings/video".into(),
+                        entry_type: MenuEntryType::Dir,
                         ..Default::default()
                     },
                     MenuEntry {
-                        label: "Shader runtime".into(),
-                        value: "ordinary librashader from wgpu raw handles".into(),
+                        label: "Input".into(),
+                        sublabel: "Keyboard, gamepad, mouse and touch mappings".into(),
+                        path: "retrofront://settings/input".into(),
+                        entry_type: MenuEntryType::Dir,
                         ..Default::default()
                     },
+                    MenuEntry {
+                        label: "User Interface".into(),
+                        sublabel: "Language, thumbnails, animations and menu visibility".into(),
+                        path: "retrofront://settings/ui".into(),
+                        entry_type: MenuEntryType::Dir,
+                        ..Default::default()
+                    },
+                ],
+            ),
+            "retrofront://settings/video" => (
+                "Video".into(),
+                vec![
+                    value_entry(
+                        "Video driver",
+                        "wgpu",
+                        "Renderer backend fixed for the UI milestone",
+                    ),
+                    value_entry(
+                        "Shader runtime",
+                        "librashader raw handles",
+                        "Not the librashader wgpu runtime",
+                    ),
+                    enum_entry("VSync", "mock://toggle/vsync", "Mock enabled toggle", true),
+                    value_entry("Scale", "Windowed", "Resize and DPI UI path"),
+                ],
+            ),
+            "retrofront://settings/input" => (
+                "Input".into(),
+                vec![
+                    value_entry("Device 1", "Keyboard", "Arrow keys / Enter / Escape"),
+                    value_entry("Device 2", "Gamepad", "Mock connected controller"),
+                    enum_entry(
+                        "Touch Gestures",
+                        "mock://toggle/touch",
+                        "Tap, scroll and fling path for materialui",
+                        true,
+                    ),
+                ],
+            ),
+            "retrofront://settings/ui" => (
+                "User Interface".into(),
+                vec![
+                    value_entry(
+                        "Language",
+                        "日本語 / English",
+                        "Long and CJK label coverage",
+                    ),
+                    enum_entry(
+                        "Thumbnails",
+                        "mock://toggle/thumbnails",
+                        "Placeholder image area",
+                        true,
+                    ),
+                    enum_entry(
+                        "Menu Animations",
+                        "mock://toggle/animations",
+                        "Alpha and scroll transitions",
+                        true,
+                    ),
+                    value_entry(
+                        "Theme",
+                        self.menu.read().driver().as_name(),
+                        "Current menu driver theme",
+                    ),
                 ],
             ),
             "retrofront://menu-drivers" => (
@@ -268,18 +517,26 @@ impl RetrofrontRuntime {
             }
             _ if path.starts_with("playlist://") => {
                 let name = path.trim_start_matches("playlist://");
-                (name.into(), self.entries_for_playlist(name))
+                (name.into(), self.entries_for_mock_playlist(name))
             }
             _ if path.starts_with("shader://") => {
                 let preset = path.trim_start_matches("shader://");
-                let _ = self.shaders.write().set_preset(preset);
                 (
                     "Shaders".into(),
-                    self.entries_for_files(
-                        self.filesystem.shader_dir(),
-                        &["slangp", "glslp", "cgp"],
-                        "shader://",
-                    ),
+                    vec![
+                        enum_entry(
+                            preset,
+                            "",
+                            "Selected in UI only; shader is not applied in this milestone",
+                            true,
+                        ),
+                        value_entry("Preview", "placeholder", "Rendered by wgpu UI path"),
+                        value_entry(
+                            "Raw-handle runtime",
+                            "available by design",
+                            "librashader wgpu runtime remains unused",
+                        ),
+                    ],
                 )
             }
             _ if path.starts_with("core://") => {
@@ -289,11 +546,14 @@ impl RetrofrontRuntime {
                 let _ = self.settings.save();
                 (
                     "Cores".into(),
-                    self.entries_for_files(
-                        self.filesystem.cores_dir(),
-                        &["so", "dylib"],
-                        "core://",
-                    ),
+                    vec![
+                        enum_entry(&core, "", "Selected core is stored in UI mock state", true),
+                        action_entry(
+                            "Load Content With This Core",
+                            "retrofront://content",
+                            "Return to content browser",
+                        ),
+                    ],
                 )
             }
             _ if path.starts_with("content://") => {
@@ -312,9 +572,104 @@ impl RetrofrontRuntime {
                     self.entries_for_rom_dir(self.filesystem.imports_dir()),
                 )
             }
+            "retrofront://online-updater" => (
+                "Online Updater".into(),
+                vec![
+                    action_entry(
+                        "Update Core Info Files",
+                        "mock://progress/core-info",
+                        "Shows mock 100% complete notification",
+                    ),
+                    action_entry(
+                        "Update Assets",
+                        "mock://progress/assets",
+                        "Disabled until real network exists",
+                    ),
+                    action_entry(
+                        "Update Thumbnails",
+                        "mock://progress/thumbnails",
+                        "Placeholder thumbnails stay visible",
+                    ),
+                ],
+            ),
+            "retrofront://information" => (
+                "Information".into(),
+                vec![
+                    value_entry(
+                        "UI milestone",
+                        "50%",
+                        "Display and page navigation complete path",
+                    ),
+                    value_entry("Renderer", "wgpu", "Command-list UI renderer"),
+                    value_entry(
+                        "Shader bridge",
+                        "librashader raw handles",
+                        "No librashader wgpu runtime",
+                    ),
+                    value_entry(
+                        "Menu source",
+                        "Retrofront/frontend/menu",
+                        "Already tracking reference UI",
+                    ),
+                ],
+            ),
+            "retrofront://quit" => (
+                "Quit Retrofront".into(),
+                vec![
+                    action_entry("Cancel", "mock://back", "Return with Back/Escape"),
+                    action_entry(
+                        "Quit UI Demo",
+                        "mock://disabled/quit",
+                        "Confirmation UI only; process is not closed",
+                    ),
+                ],
+            ),
+            _ if path.starts_with("mock://") => (
+                "Not Implemented".into(),
+                vec![
+                    value_entry(
+                        "Action",
+                        path.as_str(),
+                        "This UI route is intentionally mocked",
+                    ),
+                    action_entry(
+                        "Back",
+                        "mock://back",
+                        "Use Cancel/Escape to return to the previous page",
+                    ),
+                ],
+            ),
             _ => return,
         };
         self.menu.write().push_with_title(title, entries);
+    }
+
+    fn entries_for_mock_playlist(&self, name: &str) -> Vec<MenuEntry> {
+        if name == "Empty Playlist" {
+            return vec![value_entry(
+                "No entries",
+                "empty",
+                "Empty-state UI is displayed without querying a real database",
+            )];
+        }
+        (1..=12)
+            .map(|i| {
+                let label = match i {
+                    1 => "Metroid Fusion".to_owned(),
+                    2 => "Chrono Trigger".to_owned(),
+                    3 => "ファイナルファンタジー VI".to_owned(),
+                    4 => "The Legend of Zelda - The Minish Cap".to_owned(),
+                    _ => format!("{name} Mock Entry {i:02}"),
+                };
+                MenuEntry {
+                    label,
+                    path: format!("mock://playlist/{name}/{i}"),
+                    sublabel: "Thumbnail placeholder / launch disabled until UI is complete".into(),
+                    entry_type: MenuEntryType::Action,
+                    ..Default::default()
+                }
+            })
+            .collect()
     }
 
     fn entries_for_playlists(&self) -> Vec<MenuEntry> {
@@ -387,5 +742,129 @@ impl RetrofrontRuntime {
         }
         out.sort_by(|a, b| a.label.cmp(&b.label));
         out
+    }
+}
+
+fn dir_entry(
+    label: impl Into<String>,
+    path: impl Into<String>,
+    sublabel: impl Into<String>,
+) -> MenuEntry {
+    MenuEntry {
+        label: label.into(),
+        path: path.into(),
+        sublabel: sublabel.into(),
+        entry_type: MenuEntryType::Dir,
+        ..Default::default()
+    }
+}
+
+fn action_entry(
+    label: impl Into<String>,
+    path: impl Into<String>,
+    sublabel: impl Into<String>,
+) -> MenuEntry {
+    MenuEntry {
+        label: label.into(),
+        path: path.into(),
+        sublabel: sublabel.into(),
+        entry_type: MenuEntryType::Action,
+        ..Default::default()
+    }
+}
+
+fn value_entry(
+    label: impl Into<String>,
+    value: impl Into<String>,
+    sublabel: impl Into<String>,
+) -> MenuEntry {
+    MenuEntry {
+        label: label.into(),
+        value: value.into(),
+        sublabel: sublabel.into(),
+        entry_type: MenuEntryType::String,
+        ..Default::default()
+    }
+}
+
+fn enum_entry(
+    label: impl Into<String>,
+    path: impl Into<String>,
+    sublabel: impl Into<String>,
+    checked: bool,
+) -> MenuEntry {
+    MenuEntry {
+        label: label.into(),
+        path: path.into(),
+        sublabel: sublabel.into(),
+        checked,
+        entry_type: MenuEntryType::Enum,
+        ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::input::MenuAction;
+
+    #[test]
+    fn ui_mock_pages_can_be_opened_without_real_backend_features() {
+        let root =
+            std::env::temp_dir().join(format!("retrofront-ui-runtime-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let runtime = RetrofrontRuntime::new(&root);
+        runtime.rebuild_home_menu();
+
+        assert_eq!(runtime.menu.read().current_entries().len(), 8);
+        runtime.dispatch_menu_intent(MenuIntent::OpenPath("retrofront://playlists".into()));
+        assert_eq!(runtime.menu.read().title(), "Playlists");
+        assert!(runtime
+            .menu
+            .read()
+            .current_entries()
+            .iter()
+            .any(|entry| entry.label == "Favorites"));
+
+        runtime.dispatch_menu_intent(MenuIntent::OpenPath("playlist://Favorites".into()));
+        assert_eq!(runtime.menu.read().title(), "Favorites");
+        assert!(runtime.menu.read().current_entries().len() >= 12);
+
+        runtime.dispatch_menu_intent(MenuIntent::OpenPath("retrofront://settings/video".into()));
+        assert_eq!(runtime.menu.read().title(), "Video");
+        assert!(runtime
+            .menu
+            .read()
+            .current_entries()
+            .iter()
+            .any(|entry| entry.value == "wgpu"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn ui_navigation_and_snapshot_cover_page_transitions() {
+        let root =
+            std::env::temp_dir().join(format!("retrofront-ui-snapshot-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let runtime = RetrofrontRuntime::new(&root);
+        runtime.rebuild_home_menu();
+        runtime.renderer.write().resize(800, 480);
+
+        runtime.menu.write().action(MenuAction::Down);
+        if let Some(intent) = runtime.menu.write().action(MenuAction::Ok) {
+            runtime.dispatch_menu_intent(intent);
+        }
+        assert_eq!(runtime.menu.read().title(), "Playlists");
+
+        let snapshot = root.join("playlists.ppm");
+        runtime
+            .renderer
+            .read()
+            .write_menu_snapshot_ppm(&runtime.menu.read(), &snapshot)
+            .unwrap();
+        let bytes = std::fs::read(&snapshot).unwrap();
+        assert!(bytes.starts_with(b"P6\n800 480\n255\n"));
+        assert!(bytes.len() > 800 * 480);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

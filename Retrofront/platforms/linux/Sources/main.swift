@@ -20,6 +20,11 @@ func printMenu() {
     }
 }
 
+func writeSnapshot(_ output: URL) {
+    _ = output.path.withCString { retrofront_renderer_write_snapshot_ppm($0) }
+    print("snapshot: \(output.path)")
+}
+
 let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
 let root = home.appendingPathComponent(".local/share/retrofront/RetroArch", isDirectory: true)
 try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -31,9 +36,28 @@ guard ok else {
 }
 
 _ = retrofront_menu_bootstrap()
+_ = retrofront_renderer_resize(1280, 720)
+let snapshots = root.appendingPathComponent("ui-snapshots", isDirectory: true)
+try? FileManager.default.createDirectory(at: snapshots, withIntermediateDirectories: true)
+
 for driver in ["ozone", "xmb", "materialui", "rgui"] {
     driver.withCString { _ = retrofront_menu_set_driver($0) }
+    _ = retrofront_menu_bootstrap()
+    _ = retrofront_menu_draw()
     printMenu()
+
+    writeSnapshot(snapshots.appendingPathComponent("\(driver)-root.ppm"))
+
+    _ = retrofront_menu_action(1) // Down: Playlists
+    _ = retrofront_menu_action(4) // Ok
+    _ = retrofront_menu_draw()
+    printMenu()
+    writeSnapshot(snapshots.appendingPathComponent("\(driver)-playlists.ppm"))
+
+    _ = retrofront_menu_action(4) // Ok: Favorites
+    _ = retrofront_menu_draw()
+    printMenu()
+    writeSnapshot(snapshots.appendingPathComponent("\(driver)-playlist-favorites.ppm"))
 }
 
 retrofront_runtime_shutdown()

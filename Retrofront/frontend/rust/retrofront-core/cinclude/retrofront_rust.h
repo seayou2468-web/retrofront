@@ -49,6 +49,7 @@ bool retrofront_input_set_analog(uint8_t port, uint32_t device, uint32_t index, 
 bool retrofront_menu_pump_input(void);
 bool retrofront_menu_action(uint32_t action);
 bool retrofront_renderer_resize(uint32_t width, uint32_t height);
+bool retrofront_renderer_write_snapshot_ppm(const char *path);
 bool retrofront_shader_set_preset(const char *path);
 size_t retrofront_resources_unpack(const char *zip_path);
 bool retrofront_assets_load_defaults(void);
