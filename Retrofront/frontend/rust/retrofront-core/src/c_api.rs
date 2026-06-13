@@ -104,10 +104,59 @@ pub extern "C" fn retrofront_menu_append_entry(label: *const c_char, path: *cons
 }
 
 #[no_mangle]
+pub extern "C" fn retrofront_menu_bootstrap() -> bool {
+    let Some(runtime) = runtime() else {
+        return false;
+    };
+    runtime.rebuild_home_menu();
+    true
+}
+
+#[no_mangle]
 pub extern "C" fn retrofront_menu_entry_count() -> usize {
     runtime()
         .map(|r| r.menu.read().current_entries().len())
         .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_menu_entry_label(
+    index: usize,
+    dst: *mut c_char,
+    dst_len: usize,
+) -> bool {
+    let Some(runtime) = runtime() else {
+        return false;
+    };
+    let menu = runtime.menu.read();
+    let Some(entry) = menu.current_entries().get(index) else {
+        return false;
+    };
+    copy_cstr(&entry.label, dst, dst_len)
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_menu_entry_sublabel(
+    index: usize,
+    dst: *mut c_char,
+    dst_len: usize,
+) -> bool {
+    let Some(runtime) = runtime() else {
+        return false;
+    };
+    let menu = runtime.menu.read();
+    let Some(entry) = menu.current_entries().get(index) else {
+        return false;
+    };
+    copy_cstr(&entry.sublabel, dst, dst_len)
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_menu_title(dst: *mut c_char, dst_len: usize) -> bool {
+    let Some(runtime) = runtime() else {
+        return false;
+    };
+    copy_cstr(runtime.menu.read().title(), dst, dst_len)
 }
 
 #[no_mangle]
@@ -186,7 +235,10 @@ pub extern "C" fn retrofront_menu_pump_input() -> bool {
         return false;
     };
     while let Some(action) = runtime.input.write().next_action() {
-        runtime.menu.write().action(action);
+        let intent = runtime.menu.write().action(action);
+        if let Some(intent) = intent {
+            runtime.dispatch_menu_intent(intent);
+        }
     }
     true
 }
@@ -223,6 +275,31 @@ pub extern "C" fn retrofront_resources_unpack(zip_path: *const c_char) -> usize 
         .filesystem
         .unpack_resources_zip(zip_path)
         .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn retrofront_assets_load_defaults() -> bool {
+    let Some(runtime) = runtime() else {
+        return false;
+    };
+    let fonts = runtime.filesystem.fonts_dir();
+    if let Ok(read_dir) = std::fs::read_dir(fonts) {
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            if matches!(
+                path.extension().and_then(|e| e.to_str()),
+                Some("ttf" | "otf")
+            ) {
+                let name = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("font")
+                    .to_owned();
+                runtime.renderer.write().load_font(name, path);
+            }
+        }
+    }
+    true
 }
 
 #[no_mangle]
