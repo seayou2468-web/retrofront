@@ -7,9 +7,9 @@ include!(concat!(env!("OUT_DIR"), "/menu_sources.rs"));
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MenuDriver {
-    #[default]
     Ozone,
     Xmb,
+    #[default]
     MaterialUi,
     Rgui,
 }

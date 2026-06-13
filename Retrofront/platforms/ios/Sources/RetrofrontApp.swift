@@ -44,21 +44,16 @@ final class RetrofrontHostViewController: UIViewController {
         try? fm.createDirectory(at: dataRoot, withIntermediateDirectories: true)
 
         guard dataRoot.path.withCString({ retrofront_runtime_init($0) }) else {
-            menuView.status = "Rust runtime init failed"
-            menuView.setNeedsDisplay()
+            menuView.showBootError("Rust runtime init failed")
             return
         }
 
-        let unpacked: Int
         if let zip = Bundle.main.url(forResource: "assets", withExtension: "zip") {
-            unpacked = Int(zip.path.withCString { retrofront_resources_unpack($0) })
-        } else {
-            unpacked = 0
+            _ = zip.path.withCString { retrofront_resources_unpack($0) }
         }
         _ = retrofront_assets_load_defaults()
         _ = retrofront_menu_bootstrap()
         _ = retrofront_menu_contract_complete()
-        menuView.status = "assets: \(retrofront_menu_asset_count()) / unpacked: \(unpacked)"
         refreshMenuSurface()
     }
 
@@ -83,13 +78,10 @@ private struct SurfaceEntry {
 }
 
 final class RetrofrontMenuSurfaceView: UIView {
-    var status = "starting"
-
     private var title = "Retrofront"
-    private var driver = "ozone"
+    private var driver = "materialui"
     private var selectedIndex = 0
     private var entries: [SurfaceEntry] = []
-    private var assetCount = 0
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -113,7 +105,6 @@ final class RetrofrontMenuSurfaceView: UIView {
         title = readString { retrofront_menu_title($0, $1) }
         driver = readString { retrofront_menu_driver($0, $1) }
         selectedIndex = Int(retrofront_menu_selected_index())
-        assetCount = Int(retrofront_menu_asset_count())
         let count = Int(retrofront_menu_entry_count())
         entries = (0..<count).map { index in
             var raw = retrofront_menu_entry_t()
@@ -142,7 +133,7 @@ final class RetrofrontMenuSurfaceView: UIView {
         context.fill(rect)
 
         drawText(title, in: CGRect(x: 24, y: safeAreaInsets.top + 20, width: rect.width - 48, height: 42), font: .boldSystemFont(ofSize: 32), color: palette.title)
-        drawText("\(driver.uppercased())  •  menu assets \(assetCount)  •  \(status)", in: CGRect(x: 24, y: safeAreaInsets.top + 64, width: rect.width - 48, height: 24), font: .systemFont(ofSize: 13), color: palette.subtext)
+        drawText(driver.uppercased(), in: CGRect(x: 24, y: safeAreaInsets.top + 64, width: rect.width - 48, height: 24), font: .systemFont(ofSize: 13), color: palette.subtext)
 
         let startY = safeAreaInsets.top + 104
         let rowHeight: CGFloat = driver == "rgui" ? 34 : 58
@@ -163,6 +154,25 @@ final class RetrofrontMenuSurfaceView: UIView {
                 drawText(entry.value, in: CGRect(x: row.maxX - 150, y: row.minY + 9, width: 132, height: 22), font: .systemFont(ofSize: 13), color: palette.subtext, alignment: .right)
             }
         }
+        drawControls(in: rect, palette: palette)
+    }
+
+    func showBootError(_ message: String) {
+        title = message
+        entries = []
+        setNeedsDisplay()
+    }
+
+    private func drawControls(in rect: CGRect, palette: MenuPalette) {
+        let labels = [("Back", UInt32(5)), ("Up", UInt32(0)), ("Down", UInt32(1)), ("OK", UInt32(4))]
+        let bottom = rect.maxY - safeAreaInsets.bottom - 58
+        let width = (rect.width - 40) / CGFloat(labels.count)
+        for (offset, item) in labels.enumerated() {
+            let button = CGRect(x: 8 + CGFloat(offset) * width, y: bottom, width: width - 8, height: 44)
+            UIGraphicsGetCurrentContext()?.setFillColor(palette.selection.withAlphaComponent(0.72).cgColor)
+            UIGraphicsGetCurrentContext()?.fill(button)
+            drawText(item.0, in: button.insetBy(dx: 8, dy: 11), font: .boldSystemFont(ofSize: 15), color: palette.text, alignment: .center)
+        }
     }
 
     @objc private func swipeUp(_ recognizer: UISwipeGestureRecognizer) { host?.performMenuAction(1) }
@@ -175,12 +185,24 @@ final class RetrofrontMenuSurfaceView: UIView {
     }
     @objc private func tap(_ recognizer: UITapGestureRecognizer) {
         let location = recognizer.location(in: self)
+        if handleControlTap(location) { return }
         let rowHeight: CGFloat = driver == "rgui" ? 34 : 58
         let row = Int((location.y - (safeAreaInsets.top + 104)) / rowHeight)
         if row >= 0 && row < entries.count {
             _ = retrofront_menu_set_selected_index(entries[row].index)
         }
         host?.performMenuAction(4)
+    }
+
+    private func handleControlTap(_ location: CGPoint) -> Bool {
+        let labels: [UInt32] = [5, 0, 1, 4]
+        let bottom = bounds.maxY - safeAreaInsets.bottom - 58
+        guard location.y >= bottom && location.y <= bottom + 44 else { return false }
+        let width = (bounds.width - 40) / CGFloat(labels.count)
+        let index = Int((location.x - 8) / width)
+        guard index >= 0 && index < labels.count else { return false }
+        host?.performMenuAction(labels[index])
+        return true
     }
 
     private var host: RetrofrontHostViewController? {
