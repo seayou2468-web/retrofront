@@ -1,24 +1,31 @@
 name: Retrofront
+
 options:
   deploymentTarget:
     iOS: "16.0"
+
 settings:
   base:
     PRODUCT_BUNDLE_IDENTIFIER: dev.retrofront.app
     DEVELOPMENT_TEAM: ""
     IPHONEOS_DEPLOYMENT_TARGET: "16.0"
     SWIFT_VERSION: "5.9"
+
 targets:
   RetrofrontiOS:
     type: application
     platform: iOS
+
     sources:
       - path: platforms/ios/Sources
+
     resources:
       - path: Resources/assets.zip
+
     dependencies:
       - sdk: Metal.framework
       - sdk: QuartzCore.framework
+
     settings:
       base:
         INFOPLIST_FILE: platforms/ios/Info.plist
@@ -31,14 +38,59 @@ targets:
           - "$(SRCROOT)/lib/ios"
         OTHER_LDFLAGS:
           - "-lretrofront_core"
+
     postCompileScripts:
-      - name: Bundle libretro cores
+      - name: Bundle and Sign libretro cores
         script: |
           set -euo pipefail
-          mkdir -p "$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH"
+
+          FRAMEWORKS_DIR="$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH"
+          mkdir -p "$FRAMEWORKS_DIR"
+
           if [ -d "$SRCROOT/cores" ]; then
             for core in "$SRCROOT"/cores/*.dylib "$SRCROOT"/cores/*.framework; do
               [ -e "$core" ] || continue
-              cp -R "$core" "$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/"
+
+              DESTINATION="$FRAMEWORKS_DIR/$(basename "$core")"
+              rm -rf "$DESTINATION"
+              cp -R "$core" "$DESTINATION"
+
+              if [ -d "$DESTINATION" ]; then
+                EXECUTABLE_NAME="$(basename "$DESTINATION" .framework)"
+
+                if [ -f "$DESTINATION/$EXECUTABLE_NAME" ]; then
+                  codesign \
+                    --force \
+                    --deep \
+                    --sign - \
+                    --timestamp=none \
+                    "$DESTINATION/$EXECUTABLE_NAME" || true
+                fi
+
+                find "$DESTINATION" -type f | while read -r FILE
+                do
+                  if file "$FILE" | grep -q "Mach-O"; then
+                    codesign \
+                      --force \
+                      --sign - \
+                      --timestamp=none \
+                      "$FILE" || true
+                  fi
+                done
+
+                codesign \
+                  --force \
+                  --deep \
+                  --sign - \
+                  --timestamp=none \
+                  "$DESTINATION" || true
+
+              else
+                codesign \
+                  --force \
+                  --sign - \
+                  --timestamp=none \
+                  "$DESTINATION" || true
+              fi
             done
           fi
